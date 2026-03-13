@@ -1,0 +1,32 @@
+# ── Frontend (Next.js) ──────────────────────
+frontend/.next/
+frontend/node_modules/
+frontend/.env.local
+frontend/.env*.local
+frontend/out/
+frontend/build/
+
+# ── Backend (Django — coming soon) ──────────
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/venv/
+backend/.env
+backend/staticfiles/
+backend/media/
+backend/db.sqlite3
+
+# ── General ─────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+*.log
+.env
+.env.local
+
+# ── Editor ──────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
