@@ -1,26 +1,27 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { DEVELOPER } from "@/lib/mock-data";
+import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard,
+  BarChart2,
+  Bell,
+  Calculator,
+  ChevronLeft,
+  CreditCard,
+  FileText,
   FolderOpen,
   Home,
-  TrendingUp,
-  BarChart2,
-  Users,
-  UserCheck,
-  CreditCard,
-  Calculator,
-  FileText,
-  Bell,
+  LayoutDashboard,
   Settings,
-  ChevronLeft,
+  TrendingUp,
+  UserCheck,
+  Users,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { DEVELOPER } from "@/lib/mock-data";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 // ── Nav structure ─────────────────────────────────────────────
+// Rule: href (code/URL) = English, label (UI text) = Bahasa Indonesia
 const NAV = [
   {
     group: "Ikhtisar",
@@ -31,32 +32,32 @@ const NAV = [
   {
     group: "Proyek & Konstruksi",
     items: [
-      { href: "/dashboard/proyek",     icon: FolderOpen, label: "Semua Proyek" },
-      { href: "/dashboard/unit",       icon: Home,       label: "Unit" },
-      { href: "/dashboard/konstruksi", icon: TrendingUp, label: "Progres Konstruksi" },
+      { href: "/dashboard/projects",     icon: FolderOpen, label: "Semua Proyek" },
+      { href: "/dashboard/units",        icon: Home,       label: "Unit" },
+      { href: "/dashboard/construction", icon: TrendingUp, label: "Progres Konstruksi" },
     ],
   },
   {
     group: "Penjualan",
     items: [
-      { href: "/dashboard/penjualan", icon: BarChart2,  label: "Dasbor Penjualan" },
-      { href: "/dashboard/agen",      icon: UserCheck,  label: "Agen" },
-      { href: "/dashboard/pembeli",   icon: Users,      label: "Data Pembeli" },
+      { href: "/dashboard/sales",  icon: BarChart2, label: "Dasbor Penjualan" },
+      { href: "/dashboard/agents", icon: UserCheck, label: "Agen" },
+      { href: "/dashboard/buyers", icon: Users,     label: "Data Pembeli" },
     ],
   },
   {
     group: "Keuangan",
     items: [
-      { href: "/dashboard/pembayaran", icon: CreditCard, label: "Pelacak Pembayaran" },
-      { href: "/dashboard/biaya",      icon: Calculator, label: "Akuntansi Biaya" },
-      { href: "/dashboard/laporan",    icon: FileText,   label: "Laporan" },
+      { href: "/dashboard/payments", icon: CreditCard, label: "Pelacak Pembayaran" },
+      { href: "/dashboard/costs",    icon: Calculator, label: "Akuntansi Biaya" },
+      { href: "/dashboard/reports",  icon: FileText,   label: "Laporan" },
     ],
   },
   {
     group: "Sistem",
     items: [
-      { href: "/dashboard/notifikasi", icon: Bell,     label: "Notifikasi", badge: 4 },
-      { href: "/dashboard/pengaturan", icon: Settings, label: "Pengaturan" },
+      { href: "/dashboard/notifications", icon: Bell,     label: "Notifikasi", badge: 4 },
+      { href: "/dashboard/settings",      icon: Settings, label: "Pengaturan" },
     ],
   },
 ];
@@ -216,8 +217,7 @@ export default function Sidebar() {
           onMouseEnter={(e) => {
             (e.currentTarget as HTMLElement).style.backgroundColor =
               "var(--color-paper-2)";
-            (e.currentTarget as HTMLElement).style.color =
-              "var(--color-ink)";
+            (e.currentTarget as HTMLElement).style.color = "var(--color-ink)";
           }}
           onMouseLeave={(e) => {
             (e.currentTarget as HTMLElement).style.backgroundColor =

@@ -1,22 +1,23 @@
 "use client";
 
-import { usePathname } from "next/navigation";
 import { Bell, ChevronDown, Search } from "lucide-react";
+import { usePathname } from "next/navigation";
 
-// ── Page title map ────────────────────────────────────────────
+// ── Page title map ─────────────────────────────────────────────
+// Rule: keys (URLs) = English, values (titles) = Bahasa Indonesia
 const TITLES: Record<string, string> = {
-  "/dashboard":            "Dasbor",
-  "/dashboard/proyek":     "Semua Proyek",
-  "/dashboard/unit":       "Unit",
-  "/dashboard/konstruksi": "Progres Konstruksi",
-  "/dashboard/penjualan":  "Dasbor Penjualan",
-  "/dashboard/agen":       "Agen Penjualan",
-  "/dashboard/pembeli":    "Data Pembeli",
-  "/dashboard/pembayaran": "Pelacak Pembayaran",
-  "/dashboard/biaya":      "Akuntansi Biaya",
-  "/dashboard/laporan":    "Laporan",
-  "/dashboard/notifikasi": "Notifikasi",
-  "/dashboard/pengaturan": "Pengaturan",
+  "/dashboard":                "Dasbor",
+  "/dashboard/projects":       "Semua Proyek",
+  "/dashboard/units":          "Unit",
+  "/dashboard/construction":   "Progres Konstruksi",
+  "/dashboard/sales":          "Dasbor Penjualan",
+  "/dashboard/agents":         "Agen Penjualan",
+  "/dashboard/buyers":         "Data Pembeli",
+  "/dashboard/payments":       "Pelacak Pembayaran",
+  "/dashboard/costs":          "Akuntansi Biaya",
+  "/dashboard/reports":        "Laporan",
+  "/dashboard/notifications":  "Notifikasi",
+  "/dashboard/settings":       "Pengaturan",
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -42,12 +43,7 @@ export default function Topbar() {
     >
       {/* ── Left — breadcrumb + title ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span
-          style={{
-            fontSize: 13,
-            color: "var(--color-ink-3)",
-          }}
-        >
+        <span style={{ fontSize: 13, color: "var(--color-ink-3)" }}>
           PT Asri Sentosa /
         </span>
         <span
@@ -63,6 +59,7 @@ export default function Topbar() {
 
       {/* ── Right — actions + avatar ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+
         {/* Search */}
         <button
           style={{
@@ -79,8 +76,7 @@ export default function Topbar() {
           onMouseEnter={(e) => {
             (e.currentTarget as HTMLElement).style.backgroundColor =
               "var(--color-paper-2)";
-            (e.currentTarget as HTMLElement).style.color =
-              "var(--color-ink)";
+            (e.currentTarget as HTMLElement).style.color = "var(--color-ink)";
           }}
           onMouseLeave={(e) => {
             (e.currentTarget as HTMLElement).style.backgroundColor =
