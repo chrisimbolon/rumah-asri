@@ -6,17 +6,20 @@ frontend/.env*.local
 frontend/out/
 frontend/build/
 
-# ── Backend (Django — coming soon) ──────────
-backend/__pycache__/
-backend/*.pyc
-backend/*.pyo
+# ── Backend (Django) ─────────────────────────
 backend/venv/
 backend/.env
 backend/staticfiles/
 backend/media/
 backend/db.sqlite3
 
-# ── General ─────────────────────────────────
+# ── Python (anywhere in project) ─────────────
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# ── General ──────────────────────────────────
 .DS_Store
 .DS_Store?
 ._*
@@ -25,7 +28,7 @@ Thumbs.db
 .env
 .env.local
 
-# ── Editor ──────────────────────────────────
+# ── Editor ───────────────────────────────────
 .vscode/
 .idea/
 *.swp
