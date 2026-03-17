@@ -11,13 +11,24 @@ urlpatterns = [
     # ── Django admin ──────────────────────────────────────────
     path("admin/", admin.site.urls),
 
-    # ── API v1 ────────────────────────────────────────────────
-    path("api/auth/", include("apps.authentication.urls")),
+    # ── Auth ──────────────────────────────────────────────────
+    path("api/auth/",         include("apps.authentication.urls")),
+
+    # ── Core resources ────────────────────────────────────────
+    path("api/projects/",     include("apps.projects.urls")),
+    path("api/units/",        include("apps.units.urls")),
+    path("api/construction/", include("apps.construction.urls")),
+    path("api/payments/",     include("apps.payments.urls")),
+    path("api/documents/",    include("apps.documents.urls")),
+
+    # ── Buyer portal ──────────────────────────────────────────
+    # All buyer-facing endpoints live cleanly in apps.buyer
+    path("api/buyer/",        include("apps.buyer.urls")),
 ]
 
 # ── Serve media files in development ─────────────────────────
 if settings.DEBUG:
     urlpatterns += static(
         settings.MEDIA_URL,
-        document_root=settings.MEDIA_ROOT
+        document_root=settings.MEDIA_ROOT,
     )
