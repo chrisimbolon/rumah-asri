@@ -35,3 +35,14 @@ class DocumentCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Document
         fields = ["unit", "doc_type", "name", "file", "status", "issued_date"]
+
+    def validate_unit(self, unit):
+        user = self.context["request"].user
+        if user.role == "super_admin":
+            return unit
+        org_ids = user.memberships.filter(is_active=True).values_list(
+            "organization_id", flat=True
+        )
+        if unit.organization_id not in org_ids:
+            raise serializers.ValidationError("Anda tidak memiliki akses ke unit ini.")
+        return unit
