@@ -1,6 +1,14 @@
+# =============================================================================
+# === apps/authentication/models.py ===
+# =============================================================================
 """
 RumahAsri — Custom User Model
 Email-based authentication with role field
+
+The `developer` self-FK that used to live here has been removed —
+OrganizationMembership now fully replaces it. Confirmed zero rows ever
+used it, and no code referenced its reverse accessor (`team_members`)
+before deletion.
 """
 
 import uuid
@@ -59,16 +67,6 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
         verbose_name="Peran",
     )
 
-    # ── Developer relation (null for buyers/agents) ───────────
-    developer  = models.ForeignKey(
-        "self",
-        null=True, blank=True,
-        on_delete=models.SET_NULL,
-        related_name="team_members",
-        verbose_name="Developer",
-        help_text="Hanya untuk agen & admin yang terhubung ke developer",
-    )
-
     # ── Status ────────────────────────────────────────────────
     is_active  = models.BooleanField(default=True,  verbose_name="Aktif")
     is_staff   = models.BooleanField(default=False, verbose_name="Staff")
@@ -108,3 +106,4 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     @property
     def is_super_admin(self):
         return self.role == self.Role.SUPER_ADMIN
+
