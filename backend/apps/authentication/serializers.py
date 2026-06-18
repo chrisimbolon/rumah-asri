@@ -1,3 +1,6 @@
+# =============================================================================
+# === apps/authentication/serializers.py ===
+# =============================================================================
 """
 RumahAsri — Authentication Serializers
 """
@@ -48,7 +51,6 @@ class RegisterSerializer(serializers.ModelSerializer):
     def validate(self, data):
         if data["password"] != data["password2"]:
             raise serializers.ValidationError({"password2": "Kata sandi tidak cocok"})
-        # Only allow developer and buyer roles on registration
         allowed_roles = [CustomUser.Role.DEVELOPER, CustomUser.Role.BUYER]
         if data.get("role") not in allowed_roles:
             raise serializers.ValidationError({"role": "Peran tidak valid untuk pendaftaran"})
@@ -60,6 +62,27 @@ class RegisterSerializer(serializers.ModelSerializer):
         user     = CustomUser(**validated_data)
         user.set_password(password)
         user.save()
+
+        # ── THE SPRINT 0 FIX ─────────────────────────────────
+        # A developer who self-registers must land in an Organization
+        # immediately — otherwise ProjectCreateSerializer.create() raises
+        # "Anda belum tergabung dalam organisasi developer manapun" the
+        # first time they try to create a project, with no way to fix it
+        # without a manual admin intervention.
+        #
+        # Buyers don't get an Organization — they belong to a developer's
+        # org once a developer assigns them a unit. No change for buyers.
+        if user.role == CustomUser.Role.DEVELOPER:
+            from apps.organizations.models import Organization, OrganizationMembership
+            org = Organization.objects.create(
+                name=f"{user.full_name} Properti",
+            )
+            OrganizationMembership.objects.create(
+                organization=org,
+                user=user,
+                role="owner",
+            )
+
         return user
 
 
@@ -106,7 +129,6 @@ class TokenResponseSerializer(serializers.Serializer):
     @staticmethod
     def get_tokens(user):
         refresh = RefreshToken.for_user(user)
-        # Add custom claims to the token payload
         refresh["email"]     = user.email
         refresh["full_name"] = user.full_name
         refresh["role"]      = user.role
