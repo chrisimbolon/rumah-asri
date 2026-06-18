@@ -27,7 +27,8 @@ class RegisterView(APIView):
     """
     POST /api/auth/register/
     Create a new Developer or Buyer account.
-    Returns JWT tokens immediately after registration.
+    Developer accounts automatically receive an Organization + owner
+    membership — no manual admin step required after self-registration.
     """
     permission_classes = [AllowAny]
 
@@ -114,7 +115,7 @@ class RefreshView(APIView):
                 },
                 status=status.HTTP_200_OK,
             )
-        except TokenError as e:
+        except TokenError:
             return Response(
                 {"success": False, "message": "Token tidak valid atau sudah expired"},
                 status=status.HTTP_401_UNAUTHORIZED,
