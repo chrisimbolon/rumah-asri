@@ -27,3 +27,14 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Payment
         fields = ["unit", "payment_type", "due_date", "amount", "status", "bank"]
+
+    def validate_unit(self, unit):
+        user = self.context["request"].user
+        if user.role == "super_admin":
+            return unit
+        org_ids = user.memberships.filter(is_active=True).values_list(
+            "organization_id", flat=True
+        )
+        if unit.organization_id not in org_ids:
+            raise serializers.ValidationError("Anda tidak memiliki akses ke unit ini.")
+        return unit
