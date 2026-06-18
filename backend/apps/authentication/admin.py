@@ -1,3 +1,6 @@
+# =============================================================================
+# === apps/authentication/admin.py ===
+# =============================================================================
 """
 RumahAsri — Authentication Admin
 """
@@ -23,7 +26,7 @@ class CustomUserAdmin(BaseUserAdmin):
             "fields": ("email", "password")
         }),
         (_("Informasi Pribadi"), {
-            "fields": ("full_name", "phone", "role", "developer")
+            "fields": ("full_name", "phone", "role")
         }),
         (_("Hak Akses"), {
             "fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")
