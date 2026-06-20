@@ -200,3 +200,70 @@ class CrossTenantIsolationTests(APITestCase):
 
         resp = self.client.get(f"/api/construction/{self.unit_a.id}/phases/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+class DeveloperRegistrationTests(APITestCase):
+    """
+    Sprint 0 regression guard: a developer who self-registers must be
+    able to create a project immediately, with no manual admin step.
+    Previously RegisterSerializer.create() never created an Organization
+    or OrganizationMembership, causing ProjectCreateSerializer to reject
+    the first project with "belum tergabung dalam organisasi".
+    """
+
+    def test_developer_registration_creates_organization_and_can_create_project(self):
+        resp = self.client.post("/api/auth/register/", {
+            "email":     "brand.new@test.id",
+            "full_name": "Developer Baru",
+            "phone":     "+62 812 0000 0001",
+            "password":  "RumahAsri2026!",
+            "password2": "RumahAsri2026!",
+            "role":      "developer",
+        }, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+        from apps.authentication.models import CustomUser
+        from apps.organizations.models import OrganizationMembership
+        user = CustomUser.objects.get(email="brand.new@test.id")
+        self.assertTrue(
+            OrganizationMembership.objects.filter(user=user, role="owner").exists(),
+            "Registration must create an owner membership automatically"
+        )
+
+        token = resp.data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        project_resp = self.client.post("/api/projects/", {
+            "name":        "Proyek Perdana",
+            "location":    "Jambi",
+            "status":      "aktif",
+            "total_units": 5,
+            "start_date":  "2026-01-01",
+            "end_date":    "2026-12-31",
+        }, format="json")
+        self.assertEqual(
+            project_resp.status_code, status.HTTP_201_CREATED,
+            "A freshly registered developer must be able to create a project immediately"
+        )
+        self.assertEqual(
+            project_resp.data["project"]["organization_name"],
+            "Developer Baru Properti",
+        )
+
+    def test_buyer_registration_does_not_create_organization(self):
+        """Buyers should NOT get an auto-org — they belong to a developer's org via unit assignment."""
+        resp = self.client.post("/api/auth/register/", {
+            "email":     "newbuyer@test.id",
+            "full_name": "Pembeli Baru",
+            "phone":     "+62 812 0000 0002",
+            "password":  "RumahAsri2026!",
+            "password2": "RumahAsri2026!",
+            "role":      "buyer",
+        }, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+        from apps.authentication.models import CustomUser
+        from apps.organizations.models import OrganizationMembership
+        user = CustomUser.objects.get(email="newbuyer@test.id")
+        self.assertFalse(
+            OrganizationMembership.objects.filter(user=user).exists(),
+            "Buyer registration must NOT create an Organization"
+        )
