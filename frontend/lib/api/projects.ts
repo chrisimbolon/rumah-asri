@@ -2,7 +2,7 @@
 // === frontend/lib/api/projects.ts ===
 // =============================================================================
 /**
- * RumahAsri — Projects API
+ * DevelopIndo — Projects API
  * Typed wrappers around the real Django backend.
  * Field names match what the backend actually returns (English),
  * NOT the old Bahasa mock-data field names.
