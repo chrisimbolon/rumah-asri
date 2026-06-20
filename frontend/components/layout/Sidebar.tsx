@@ -1,18 +1,29 @@
 "use client";
+// =============================================================================
+// === frontend/components/layout/Sidebar.tsx ===
+// =============================================================================
+/**
+ * Sprint 2 changes:
+ *   - "Developer aktif" pill now shows real org name from /api/organizations/mine/
+ *   - DEVELOPER mock import removed
+ *   - Super admin nav section added (only visible to super_admin role)
+ *   - /dashboard/admin route added for platform management
+ */
 
 import { useAuth } from "@/context/AuthContext";
-import { DEVELOPER } from "@/lib/mock-data";
+import { organizationsApi } from "@/lib/api/organizations";
 import { cn } from "@/lib/utils";
 import {
-  BarChart2, Bell, Calculator, ChevronLeft, CreditCard,
-  FileText, FolderOpen, Home, LayoutDashboard, LogOut,
-  Settings, TrendingUp, UserCheck, Users,
+  BarChart2, Bell, Building2, Calculator, ChevronLeft,
+  CreditCard, FileText, FolderOpen, Home, LayoutDashboard,
+  LogOut, Settings, Shield, TrendingUp, UserCheck, Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 // ── Nav structure ─────────────────────────────────────────────
-const NAV = [
+const NAV_DEVELOPER = [
   {
     group: "Ikhtisar",
     items: [
@@ -30,9 +41,9 @@ const NAV = [
   {
     group: "Penjualan",
     items: [
-      { href: "/dashboard/sales",  icon: BarChart2, label: "Dasbor Penjualan" },
-      { href: "/dashboard/agents", icon: UserCheck, label: "Agen" },
-      { href: "/dashboard/buyers", icon: Users,     label: "Data Pembeli" },
+      { href: "/dashboard/sales",   icon: BarChart2, label: "Dasbor Penjualan" },
+      { href: "/dashboard/agents",  icon: UserCheck, label: "Agen" },
+      { href: "/dashboard/buyers",  icon: Users,     label: "Data Pembeli" },
     ],
   },
   {
@@ -52,12 +63,39 @@ const NAV = [
   },
 ];
 
+// Super admin sees everything developers see, plus a platform management section
+const NAV_SUPER_ADMIN = [
+  ...NAV_DEVELOPER,
+  {
+    group: "Platform",
+    items: [
+      { href: "/dashboard/admin", icon: Shield,    label: "Manajemen Platform" },
+      { href: "/dashboard/orgs",  icon: Building2, label: "Semua Organisasi" },
+    ],
+  },
+];
+
 // ─────────────────────────────────────────────────────────────
 export default function Sidebar() {
   const pathname         = usePathname();
   const { logout, user } = useAuth();
 
-  // Build avatar initials from full name
+  const [orgName, setOrgName] = useState<string | null>(null);
+
+  // ── Fetch real org name on mount ──────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    if (user.role === "super_admin") {
+      setOrgName("RumahAsri Platform");
+      return;
+    }
+    organizationsApi.mine()
+      .then((res) => setOrgName(res.organization.name))
+      .catch(() => setOrgName(null));
+  }, [user]);
+
+  const NAV = user?.role === "super_admin" ? NAV_SUPER_ADMIN : NAV_DEVELOPER;
+
   const initials = user?.full_name
     .split(" ")
     .map((n) => n[0])
@@ -86,11 +124,13 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* ── Developer pill ── */}
+      {/* ── Org pill — real data, no more mock ── */}
       <div style={{ margin: "12px 10px", backgroundColor: "var(--color-accent-light)", borderRadius: 4, padding: "8px 12px", flexShrink: 0 }}>
-        <div style={{ fontSize: 10, color: "var(--color-ink-3)" }}>Developer aktif</div>
+        <div style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
+          {user?.role === "super_admin" ? "Platform" : "Developer aktif"}
+        </div>
         <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-accent)", lineHeight: 1.3, marginTop: 2 }}>
-          {DEVELOPER.nama}
+          {orgName ?? "Memuat…"}
         </div>
       </div>
 
@@ -123,21 +163,11 @@ export default function Sidebar() {
 
       {/* ── Footer ── */}
       <div style={{ padding: 12, borderTop: "1px solid rgba(14,13,11,0.08)", flexShrink: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-
-        {/* ── Logged in user ── */}
         {user && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", marginBottom: 4 }}>
-            {/* Avatar */}
-            <div style={{
-              width: 30, height: 30, borderRadius: "50%",
-              backgroundColor: "var(--color-accent-light)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 10, fontWeight: 700, color: "var(--color-accent)",
-              flexShrink: 0,
-            }}>
+            <div style={{ width: 30, height: 30, borderRadius: "50%", backgroundColor: "var(--color-accent-light)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "var(--color-accent)", flexShrink: 0 }}>
               {initials}
             </div>
-            {/* Name + role */}
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {user.full_name}
@@ -149,35 +179,23 @@ export default function Sidebar() {
           </div>
         )}
 
-        {/* ── Back to home ── */}
         <Link
           href="/"
           style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--color-ink-3)", textDecoration: "none", padding: "6px 8px", borderRadius: 4, transition: "all 0.15s" }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "var(--color-paper-2)"; (e.currentTarget as HTMLElement).style.color = "var(--color-ink)"; }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; (e.currentTarget as HTMLElement).style.color = "var(--color-ink-3)"; }}
         >
-          <ChevronLeft size={13} />
-          Kembali ke beranda
+          <ChevronLeft size={13} /> Kembali ke beranda
         </Link>
 
-        {/* ── Logout ── */}
         <button
           onClick={logout}
-          style={{
-            display: "flex", alignItems: "center", gap: 6,
-            fontSize: 12, color: "var(--color-danger)",
-            backgroundColor: "transparent", border: "none",
-            padding: "6px 8px", borderRadius: 4,
-            cursor: "pointer", width: "100%", textAlign: "left",
-            transition: "all 0.15s", fontFamily: "var(--font-sans)",
-          }}
+          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--color-danger)", backgroundColor: "transparent", border: "none", padding: "6px 8px", borderRadius: 4, cursor: "pointer", width: "100%", textAlign: "left", transition: "all 0.15s", fontFamily: "var(--font-sans)" }}
           onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "var(--color-danger-light)")}
           onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "transparent")}
         >
-          <LogOut size={13} />
-          Keluar
+          <LogOut size={13} /> Keluar
         </button>
-
       </div>
     </aside>
   );
