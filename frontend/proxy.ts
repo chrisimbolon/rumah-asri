@@ -1,5 +1,5 @@
 /**
- * RumahAsri — Next.js 16 Proxy (Route Protection)
+ * DevelopIndo — Next.js 16 Proxy (Route Protection)
  * Renamed from middleware.ts → proxy.ts in Next.js 16
  *
  * Protected routes:
