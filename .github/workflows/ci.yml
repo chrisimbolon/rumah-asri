@@ -14,9 +14,9 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_DB:       rumahasri_test
-          POSTGRES_USER:     rumahasri
-          POSTGRES_PASSWORD: rumahasri_test_pass
+          POSTGRES_DB:       developindo_test
+          POSTGRES_USER:     developindo
+          POSTGRES_PASSWORD: developindo_test_pass
         ports:
           - 5432:5432
         options: >-
@@ -29,7 +29,7 @@ jobs:
       DJANGO_SETTINGS_MODULE: config.settings.local
       SECRET_KEY:              ci-secret-key-not-for-production
       DEBUG:                   "True"
-      DATABASE_URL:            postgres://rumahasri:rumahasri_test_pass@localhost:5432/rumahasri_test
+      DATABASE_URL:            postgres://developindo:developindo_test_pass@localhost:5432/developindo_test
 
     steps:
       - name: Checkout
