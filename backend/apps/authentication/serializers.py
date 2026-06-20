@@ -2,7 +2,7 @@
 # === apps/authentication/serializers.py ===
 # =============================================================================
 """
-RumahAsri — Authentication Serializers
+DevelopIndo — Authentication Serializers
 """
 
 from django.contrib.auth import authenticate
@@ -23,7 +23,7 @@ class UserSerializer(serializers.ModelSerializer):
             "role", "role_display", "is_active",
             "created_at",
         ]
-        read_only_fields = ["id", "created_at"]
+        read_only_fields = ["id", "email", "role", "is_active", "created_at"]
 
 
 # ── Register serializer ───────────────────────────────────────
