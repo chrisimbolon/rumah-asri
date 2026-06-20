@@ -2,7 +2,7 @@
 // === frontend/lib/api/payments.ts ===
 // =============================================================================
 /**
- * RumahAsri — Payments API
+ * DevelopIndo — Payments API
  */
 
 import api from "@/lib/api";
