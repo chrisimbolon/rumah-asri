@@ -2,7 +2,7 @@
 // === frontend/lib/api/organizations.ts ===
 // =============================================================================
 /**
- * RumahAsri — Organizations API
+ * DevelopIndo — Organizations API
  */
 import api from "@/lib/api";
 
