@@ -2,7 +2,7 @@
 # === apps/authentication/admin.py ===
 # =============================================================================
 """
-RumahAsri — Authentication Admin
+DevelopIndo — Authentication Admin
 """
 
 from django.contrib import admin
