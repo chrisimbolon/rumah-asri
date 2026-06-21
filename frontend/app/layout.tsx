@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "RumahAsri — Platform Properti Cerdas",
+  title: "DevelopIndo — Platform Properti Cerdas",
   description:
     "Solusi manajemen properti terpercaya untuk pengembang perumahan Jambi & Indonesia.",
 };
