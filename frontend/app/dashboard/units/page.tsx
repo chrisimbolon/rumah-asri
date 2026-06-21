@@ -12,7 +12,7 @@ import { Project, projectsApi } from "@/lib/api/projects";
 import { Unit, unitsApi } from "@/lib/api/units";
 import { badgeStatus, labelStatus, rupiah, warnaProgres } from "@/lib/mock-data";
 import {
-    Home, Loader2, Plus, Search, TrendingUp, Users
+  Home, Loader2, Plus, Search, TrendingUp, Users
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -61,7 +61,7 @@ export default function UnitsPage() {
 
   const stats = {
     total:      units.length,
-    tersedia:   units.filter((u) => u.status === "tersedia").count,
+    tersedia:   units.filter((u) => u.status === "tersedia").length,
     terjual:    units.filter((u) => u.status === "terjual").length,
     proses:     units.filter((u) => u.status === "proses").length,
   };
