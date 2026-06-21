@@ -1,5 +1,5 @@
 /**
- * RumahAsri — Buyer API
+ * DevelopIndo — Buyer API
  * All frontend API calls for the Buyer Portal
  * Connects to Django /api/buyer/* endpoints
  */
