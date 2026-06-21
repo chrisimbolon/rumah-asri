@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * RumahAsri — Auth Context
+ * DevelopIndo — Auth Context
  * Global authentication state — wraps the entire app
  * Provides: user, isLoading, login, logout, isAuthenticated
  */
