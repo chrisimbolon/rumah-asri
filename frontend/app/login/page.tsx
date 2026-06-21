@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import { Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { AlertCircle, Eye, EyeOff, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { useState } from "react";
 
 export default function LoginPage() {
   const { login, isLoading, error, clearError } = useAuth();
@@ -34,7 +34,7 @@ export default function LoginPage() {
       >
         <div className="relative z-10">
           <div style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 600, color: "white" }}>
-            Rumah<span style={{ color: "var(--color-gold)" }}>Asri</span>
+            Develop<span style={{ color: "var(--color-gold)" }}>Indo</span>
           </div>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.08em" }}>
             Platform Properti
@@ -77,14 +77,14 @@ export default function LoginPage() {
 
           {/* Mobile logo */}
           <div className="md:hidden mb-8" style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 600, color: "var(--color-ink)" }}>
-            Rumah<span style={{ color: "var(--color-accent)" }}>Asri</span>
+            Develop<span style={{ color: "var(--color-accent)" }}>Indo</span>
           </div>
 
           <h1 style={{ fontSize: 24, fontWeight: 600, color: "var(--color-ink)", marginBottom: 8 }}>
             Selamat datang kembali
           </h1>
           <p style={{ fontSize: 13, color: "var(--color-ink-3)", marginBottom: 28 }}>
-            Masuk ke akun platform RumahAsri Anda
+            Masuk ke akun platform DevelopIndo Anda
           </p>
 
           {/* Error alert */}
@@ -186,7 +186,7 @@ export default function LoginPage() {
             backgroundColor: "var(--color-accent-light)",
             borderRadius: 6, fontSize: 12, color: "var(--color-accent)",
           }}>
-            <strong>Demo:</strong> admin@asrisentosa.co.id · RumahAsri2026!
+            <strong>Demo:</strong> admin@asrisentosa.co.id · DevelopIndo2026!
           </div>
         </div>
       </div>
