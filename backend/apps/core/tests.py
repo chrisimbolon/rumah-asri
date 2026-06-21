@@ -215,8 +215,8 @@ class DeveloperRegistrationTests(APITestCase):
             "email":     "brand.new@test.id",
             "full_name": "Developer Baru",
             "phone":     "+62 812 0000 0001",
-            "password":  "RumahAsri2026!",
-            "password2": "RumahAsri2026!",
+            "password":  "DevelopIndo2026!",
+            "password2": "DevelopIndo2026!",
             "role":      "developer",
         }, format="json")
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
@@ -254,8 +254,8 @@ class DeveloperRegistrationTests(APITestCase):
             "email":     "newbuyer@test.id",
             "full_name": "Pembeli Baru",
             "phone":     "+62 812 0000 0002",
-            "password":  "RumahAsri2026!",
-            "password2": "RumahAsri2026!",
+            "password":  "DevelopIndo2026!",
+            "password2": "DevelopIndo2026!",
             "role":      "buyer",
         }, format="json")
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
