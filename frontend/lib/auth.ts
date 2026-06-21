@@ -51,16 +51,19 @@ export const tokenStorage = {
     localStorage.setItem("access_token",  access);
     localStorage.setItem("refresh_token", refresh);
     localStorage.setItem("user",          JSON.stringify(user));
-    // Also set cookie so proxy.ts can read it!!
+    // Also set cookie so proxy.ts can read it
     document.cookie = `access_token=${access}; path=/; max-age=3600; SameSite=Lax`;
+    // Also store role in cookie so proxy.ts can enforce role-based guards
+    document.cookie = `user_role=${user.role}; path=/; max-age=3600; SameSite=Lax`;
   },
 
   clear() {
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("user");
-    // Also clear the cookie!!
+    // Clear both cookies
     document.cookie = "access_token=; path=/; max-age=0";
+    document.cookie = "user_role=; path=/; max-age=0";
   },
 
   getAccess():  string | null { return localStorage.getItem("access_token");  },
@@ -77,6 +80,7 @@ export const tokenStorage = {
     return !!localStorage.getItem("access_token");
   },
 };
+
 // ── API calls ─────────────────────────────────────────────────
 export const authApi = {
   async login(payload: LoginPayload): Promise<AuthResponse> {
@@ -116,7 +120,7 @@ export const authApi = {
 // ── Role-based redirect helper ────────────────────────────────
 export function getRedirectPath(role: UserRole): string {
   switch (role) {
-    case "super_admin": return "/dashboard";
+    case "super_admin": return "/dashboard/super-admin";
     case "developer":   return "/dashboard";
     case "agent":       return "/dashboard/sales";
     case "buyer":       return "/buyer";
