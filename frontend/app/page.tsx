@@ -112,7 +112,7 @@ export default function HomePage() {
             color: "var(--color-ink)",
           }}
         >
-          Rumah<span style={{ color: "var(--color-accent)" }}>Asri</span>
+          Develop<span style={{ color: "var(--color-accent)" }}>Indo</span>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 32 }}>
@@ -969,7 +969,7 @@ export default function HomePage() {
             }}
           >
             Bergabung bersama 14 developer properti yang sudah menggunakan
-            RumahAsri untuk mengelola 1.800+ unit di Jambi & Indonesia.
+            DevelopIndo untuk mengelola 1.800+ unit di Jambi & Indonesia.
           </p>
           <div style={{ display: "flex", gap: 12 }}>
             <Link href="/dashboard" className="btn-primary">
@@ -1080,7 +1080,7 @@ export default function HomePage() {
                 marginBottom: 12,
               }}
             >
-              Rumah<span style={{ color: "var(--color-gold)" }}>Asri</span>
+              Develop<span style={{ color: "var(--color-gold)" }}>Indo</span>
             </div>
             <div
               style={{
@@ -1168,7 +1168,7 @@ export default function HomePage() {
           }}
         >
           <div style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>
-            © 2026 RumahAsri · Hak cipta dilindungi
+            © 2026 DevelopIndo · Hak cipta dilindungi
           </div>
           <div style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>
             Dibangun dengan ❤️ oleh{" "}
