@@ -1,5 +1,5 @@
 """
-RumahAsri — Production Settings
+DevelopIndo — Production Settings
 """
 
 from decouple import config
