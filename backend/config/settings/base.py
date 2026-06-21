@@ -1,5 +1,5 @@
 """
-RumahAsri — Base Settings
+DevelopIndo — Base Settings
 Shared across all environments
 """
 
