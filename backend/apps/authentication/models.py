@@ -2,7 +2,7 @@
 # === apps/authentication/models.py ===
 # =============================================================================
 """
-RumahAsri — Custom User Model
+DevelopIndo — Custom User Model
 Email-based authentication with role field
 
 The `developer` self-FK that used to live here has been removed —
@@ -45,7 +45,7 @@ class CustomUserManager(BaseUserManager):
 
 class CustomUser(AbstractBaseUser, PermissionsMixin):
     """
-    Custom user model for RumahAsri.
+    Custom user model for DevelopIndo.
     Uses email as the unique identifier instead of username.
     """
 
