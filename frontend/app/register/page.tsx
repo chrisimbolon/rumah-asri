@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import { Eye, EyeOff, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { useState } from "react";
 
 export default function RegisterPage() {
   const { register, isLoading, error, clearError } = useAuth();
@@ -62,7 +62,7 @@ export default function RegisterPage() {
       >
         <div className="relative z-10">
           <div style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 600, color: "white" }}>
-            Rumah<span style={{ color: "var(--color-gold)" }}>Asri</span>
+            Develop<span style={{ color: "var(--color-gold)" }}>Indo</span>
           </div>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.08em" }}>
             Platform Properti
@@ -93,7 +93,7 @@ export default function RegisterPage() {
         </div>
 
         <div className="relative z-10" style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>
-          © 2026 RumahAsri · JasaPro · Jambi, Indonesia
+          © 2026 DevelopIndo · JasaPro · Jambi, Indonesia
         </div>
       </div>
 
@@ -103,14 +103,14 @@ export default function RegisterPage() {
 
           {/* Mobile logo */}
           <div className="md:hidden mb-8" style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 600, color: "var(--color-ink)" }}>
-            Rumah<span style={{ color: "var(--color-accent)" }}>Asri</span>
+            Develop<span style={{ color: "var(--color-accent)" }}>Indo</span>
           </div>
 
           <h1 style={{ fontSize: 24, fontWeight: 600, color: "var(--color-ink)", marginBottom: 8 }}>
             Buat akun baru
           </h1>
           <p style={{ fontSize: 13, color: "var(--color-ink-3)", marginBottom: 28 }}>
-            Mulai kelola properti Anda bersama RumahAsri
+            Mulai kelola properti Anda bersama DevelopIndo
           </p>
 
           {/* Error alert */}
