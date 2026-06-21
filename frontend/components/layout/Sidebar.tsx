@@ -2,19 +2,12 @@
 // =============================================================================
 // === frontend/components/layout/Sidebar.tsx ===
 // =============================================================================
-/**
- * Sprint 2 changes:
- *   - "Developer aktif" pill now shows real org name from /api/organizations/mine/
- *   - DEVELOPER mock import removed
- *   - Super admin nav section added (only visible to super_admin role)
- *   - /dashboard/admin route added for platform management
- */
 
 import { useAuth } from "@/context/AuthContext";
 import { organizationsApi } from "@/lib/api/organizations";
 import { cn } from "@/lib/utils";
 import {
-  BarChart2, Bell, Building2, Calculator, ChevronLeft,
+  BarChart2, Bell, Building2, ChevronLeft,
   CreditCard, FileText, FolderOpen, Home, LayoutDashboard,
   LogOut, Settings, Shield, TrendingUp, UserCheck, Users,
 } from "lucide-react";
@@ -50,7 +43,6 @@ const NAV_DEVELOPER = [
     group: "Keuangan",
     items: [
       { href: "/dashboard/payments", icon: CreditCard, label: "Pelacak Pembayaran" },
-      { href: "/dashboard/costs",    icon: Calculator, label: "Akuntansi Biaya" },
       { href: "/dashboard/reports",  icon: FileText,   label: "Laporan" },
     ],
   },
@@ -63,14 +55,14 @@ const NAV_DEVELOPER = [
   },
 ];
 
-// Super admin sees everything developers see, plus a platform management section
+// Super admin sees developer nav + platform management section
 const NAV_SUPER_ADMIN = [
   ...NAV_DEVELOPER,
   {
     group: "Platform",
     items: [
-      { href: "/dashboard/admin", icon: Shield,    label: "Manajemen Platform" },
-      { href: "/dashboard/orgs",  icon: Building2, label: "Semua Organisasi" },
+      { href: "/dashboard/super-admin", icon: Shield,    label: "Manajemen Platform" },
+      { href: "/dashboard/orgs",        icon: Building2, label: "Semua Organisasi" },
     ],
   },
 ];
@@ -86,7 +78,7 @@ export default function Sidebar() {
   useEffect(() => {
     if (!user) return;
     if (user.role === "super_admin") {
-      setOrgName("RumahAsri Platform");
+      setOrgName("DevelopIndo Platform");
       return;
     }
     organizationsApi.mine()
@@ -114,17 +106,17 @@ export default function Sidebar() {
       }}
       className="scrollbar-hide"
     >
-      {/* ── Logo ── */}
+      {/* ── Logo — DevelopIndo branding ── */}
       <div style={{ padding: "20px 16px", borderBottom: "1px solid rgba(14,13,11,0.08)", flexShrink: 0 }}>
         <div style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 600, color: "var(--color-ink)" }}>
-          Rumah<span style={{ color: "var(--color-accent)" }}>Asri</span>
+          Develop<span style={{ color: "var(--color-accent)" }}>Indo</span>
         </div>
         <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 2, textTransform: "uppercase", letterSpacing: "0.08em" }}>
           Platform Properti
         </div>
       </div>
 
-      {/* ── Org pill — real data, no more mock ── */}
+      {/* ── Org pill — real data ── */}
       <div style={{ margin: "12px 10px", backgroundColor: "var(--color-accent-light)", borderRadius: 4, padding: "8px 12px", flexShrink: 0 }}>
         <div style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
           {user?.role === "super_admin" ? "Platform" : "Developer aktif"}
@@ -150,7 +142,11 @@ export default function Sidebar() {
                   <item.icon size={15} style={{ flexShrink: 0 }} />
                   <span style={{ flex: 1 }}>{item.label}</span>
                   {"badge" in item && item.badge ? (
-                    <span style={{ backgroundColor: "var(--color-danger)", color: "white", fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 999, lineHeight: 1 }}>
+                    <span style={{
+                      backgroundColor: "var(--color-danger)", color: "white",
+                      fontSize: 10, fontWeight: 600, padding: "2px 6px",
+                      borderRadius: 999, lineHeight: 1,
+                    }}>
                       {item.badge}
                     </span>
                   ) : null}
@@ -165,7 +161,12 @@ export default function Sidebar() {
       <div style={{ padding: 12, borderTop: "1px solid rgba(14,13,11,0.08)", flexShrink: 0, display: "flex", flexDirection: "column", gap: 4 }}>
         {user && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", marginBottom: 4 }}>
-            <div style={{ width: 30, height: 30, borderRadius: "50%", backgroundColor: "var(--color-accent-light)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "var(--color-accent)", flexShrink: 0 }}>
+            <div style={{
+              width: 30, height: 30, borderRadius: "50%",
+              backgroundColor: "var(--color-accent-light)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 10, fontWeight: 700, color: "var(--color-accent)", flexShrink: 0,
+            }}>
               {initials}
             </div>
             <div style={{ minWidth: 0 }}>
