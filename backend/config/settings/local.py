@@ -1,11 +1,14 @@
 """
-RumahAsri — Local Development Settings
+DevelopIndo — Local Development Settings
 
-DATABASE_URL env var is read when present (CI / staging).
-Falls back to SQLite when not set (normal local dev — zero config).
+DATABASE_URL env var switches between Postgres (CI / local Postgres)
+and SQLite (zero-config fallback if DATABASE_URL is not set).
+
+Current local setup: Postgres 15 via DATABASE_URL in .env
+CI setup: Postgres 16 via DATABASE_URL in ci.yml
 """
 
-import os
+import re
 
 from decouple import config
 
@@ -15,14 +18,13 @@ from .base import *  # noqa
 DEBUG = config("DEBUG", default=True, cast=bool)
 
 # ── Database ──────────────────────────────────────────────────
-# CI sets DATABASE_URL (Postgres). Local dev uses SQLite by default.
-_database_url = os.environ.get("DATABASE_URL")
+# config() reads from .env file AND shell environment (shell wins)
+# os.environ.get() only reads shell — misses .env file entirely
+_database_url = config("DATABASE_URL", default="")
 
-if _database_url:
-    # Parse postgres://user:pass@host:port/dbname
-    import re
+if _database_url.startswith("postgres://") or _database_url.startswith("postgresql://"):
     _match = re.match(
-        r"postgres://(?P<user>[^:]+):(?P<password>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)/(?P<name>.+)",
+        r"postgres(?:ql)?://(?P<user>[^:]+):(?P<password>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)/(?P<name>.+)",
         _database_url,
     )
     if not _match:
@@ -35,9 +37,13 @@ if _database_url:
             "PASSWORD": _match.group("password"),
             "HOST":     _match.group("host"),
             "PORT":     _match.group("port"),
+            "OPTIONS": {
+                "connect_timeout": 10,
+            },
         }
     }
 else:
+    # Zero-config fallback — SQLite for quick local dev without Postgres
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
