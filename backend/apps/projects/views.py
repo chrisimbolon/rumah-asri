@@ -2,7 +2,7 @@
 # === apps/projects/views.py ===
 # =============================================================================
 """
-RumahAsri — Projects Views
+DevelopIndo — Projects Views
 All access control now flows through TenantScopedAPIView / Project.objects.for_user()
 """
 from rest_framework import status
