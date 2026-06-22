@@ -2,7 +2,7 @@
 # === apps/units/models.py ===
 # =============================================================================
 """
-RumahAsri — Units Model
+DevelopIndo — Units Model
 `organization` is denormalized directly onto Unit (not just reachable via
 project) so every tenant-scoped query is a single filter, not a join
 chain that's easy to forget — which is exactly what happened before:
