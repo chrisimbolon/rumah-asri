@@ -1,0 +1,101 @@
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║         DevelopIndo — PropTech SaaS Platform                 ║
+# ║         docker-compose.dev.yml  (local Docker dev)           ║
+# ║                                                               ║
+# ║  Services:                                                    ║
+# ║  • developindo_db       — PostgreSQL 16                      ║
+# ║  • developindo_backend  — Django runserver (live reload)     ║
+# ║  • developindo_frontend — Next.js dev server (hot reload)    ║
+# ║                                                               ║
+# ║  Backend uses same Dockerfile as prod —                      ║
+# ║  volume mount overrides COPY, command overrides CMD          ║
+# ║                                                               ║
+# ║  Usage:                                                       ║
+# ║    docker compose -f docker-compose.dev.yml up --build       ║
+# ║    docker compose -f docker-compose.dev.yml down             ║
+# ║                                                               ║
+# ║  URLs:                                                        ║
+# ║    Frontend : http://localhost:3000                           ║
+# ║    Backend  : http://localhost:8000                           ║
+# ║    Admin    : http://localhost:8000/admin                     ║
+# ╚═══════════════════════════════════════════════════════════════╝
+
+services:
+
+  # ── PostgreSQL 16 ─────────────────────────────────────────────
+  developindo_db:
+    image: postgres:16-alpine
+    container_name: developindo_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       developindo_db
+      POSTGRES_USER:     developindo_user
+      POSTGRES_PASSWORD: developindo_dev_2026
+    volumes:
+      - developindo_pgdata_dev:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"     # 5434 on host — avoids clash with local Postgres 15
+    networks:
+      - developindo-dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U developindo_user -d developindo_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── Django Backend ────────────────────────────────────────────
+  # Same Dockerfile as prod — volume mount overrides COPY . .
+  # command overrides CMD gunicorn → uses runserver instead
+  developindo_backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile          # ← same as prod, no Dockerfile.dev needed
+    container_name: developindo_backend
+    restart: unless-stopped
+    env_file: ./backend/.env.docker
+    volumes:
+      - ./backend:/app                # ← overrides COPY . . → live reload
+      - developindo_media_dev:/app/media
+    ports:
+      - "8000:8000"
+    networks:
+      - developindo-dev
+    depends_on:
+      developindo_db:
+        condition: service_healthy
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py runserver 0.0.0.0:8000"
+                                      # ← overrides CMD gunicorn → dev server
+
+  # ── Next.js Frontend ──────────────────────────────────────────
+  # Dockerfile.dev still needed — prod has NO frontend Dockerfile at all
+  # (CI builds standalone, rsyncs to droplet, runs with node:20-alpine)
+  developindo_frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev      # ← dev only, prod has no equivalent
+    container_name: developindo_frontend
+    restart: unless-stopped
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules             # preserve container node_modules
+    ports:
+      - "3000:3000"
+    networks:
+      - developindo-dev
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - developindo_backend
+
+volumes:
+  developindo_pgdata_dev:
+    name: developindo_pgdata_dev
+  developindo_media_dev:
+    name: developindo_media_dev
+
+networks:
+  developindo-dev:
+    name: developindo-dev
