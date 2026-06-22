@@ -2,7 +2,7 @@
 # === apps/projects/serializers.py ===
 # =============================================================================
 """
-RumahAsri — Projects Serializers
+DevelopIndo — Projects Serializers
 """
 from rest_framework import serializers
 
