@@ -1,26 +1,34 @@
 "use client";
 
 /**
- * RumahAsri — Buyer Portal Page
+ * DevelopIndo — Buyer Portal Page
  * Wired to real Django API — no more mock data!!
  */
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import {
-  CheckCircle2, Circle, Camera, FileText,
-  ChevronLeft, MapPin, Calendar, Home,
-  Download, MessageCircle, Star, Loader2,
-  AlertCircle,
-} from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { buyerApi } from "@/lib/api/buyer";
 import type {
-  BuyerMeResponse,
-  BuyerTimelineResponse,
-  BuyerPaymentsResponse,
   BuyerDocumentsResponse,
+  BuyerMeResponse,
+  BuyerPaymentsResponse,
+  BuyerTimelineResponse,
 } from "@/lib/api/buyer";
+import { buyerApi } from "@/lib/api/buyer";
+import {
+  AlertCircle,
+  Calendar,
+  Camera,
+  CheckCircle2,
+  ChevronLeft,
+  Circle,
+  Download,
+  FileText,
+  Home,
+  Loader2,
+  MapPin,
+  MessageCircle, Star,
+} from "lucide-react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 
 // ── Helper — format Rupiah ────────────────────────────────────
 function rupiah(n: number): string {
@@ -137,7 +145,7 @@ export default function BuyerPortalPage() {
         backdropFilter: "blur(12px)",
       }}>
         <div style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 600, color: "white" }}>
-          Rumah<span style={{ color: "#B8935A" }}>Asri</span>
+          Develop<span style={{ color: "#B8935A" }}>Indo</span>
         </div>
         <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: "0.12em" }}>
           Portal Pembeli
