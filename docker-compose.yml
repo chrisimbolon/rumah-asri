@@ -1,0 +1,116 @@
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║         DevelopIndo — PropTech SaaS Platform                 ║
+# ║         docker-compose.yml  (production)                     ║
+# ║                                                               ║
+# ║  Services:                                                    ║
+# ║  • developindo_db       — PostgreSQL 16                      ║
+# ║  • developindo_backend  — Django + Gunicorn                  ║
+# ║  • developindo_frontend — Next.js standalone (node server.js)║
+# ║                                                               ║
+# ║  Frontend: built on CI runner → rsynced to droplet           ║
+# ║  NO Docker build on droplet for frontend — fast deploys!     ║
+# ║  Network: caddy-net (same as rtmudah)                        ║
+# ╚═══════════════════════════════════════════════════════════════╝
+
+services:
+
+  # ── PostgreSQL 16 ─────────────────────────────────────────────
+  developindo_db:
+    image: postgres:16-alpine
+    container_name: developindo_db
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB:       ${DB_NAME}
+      POSTGRES_USER:     ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - developindo_pgdata:/var/lib/postgresql/data
+    networks:
+      - developindo-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Django + Gunicorn ─────────────────────────────────────────
+  developindo_backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: developindo_backend
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - developindo_media:/app/media
+      - developindo_static:/app/staticfiles
+    networks:
+      - caddy-net              # ← Caddy's network (same as rtmudah)
+      - developindo-internal   # ← talks to developindo_db
+    depends_on:
+      developindo_db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-H", "Host: developindo.com",
+             "http://localhost:8000/api/organizations/mine/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ── Next.js Frontend ──────────────────────────────────────────
+  # Uses node:20-alpine + mounts pre-built standalone from disk
+  # GitHub Actions builds on runner → rsyncs to ./frontend/.next/standalone/
+  # Every deploy = new files rsynced + container force-recreated
+  # NO Dockerfile build on the droplet — fast deploys!
+  developindo_frontend:
+    image: node:20-alpine
+    container_name: developindo_frontend
+    restart: unless-stopped
+    working_dir: /app
+    command: ["node", "server.js"]
+    env_file: .env
+    environment:
+      NODE_ENV:            production
+      PORT:                "3000"
+      HOSTNAME:            "0.0.0.0"
+      NEXT_PUBLIC_API_URL: https://developindo.com
+    volumes:
+      - ./frontend/.next/standalone:/app
+      - ./frontend/.next/static:/app/.next/static
+      - ./frontend/public:/app/public
+    depends_on:
+      - developindo_backend
+    networks:
+      - caddy-net
+      - developindo-internal
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >
+          node -e "
+            require('http').get('http://localhost:3000', (r) => {
+              process.exit(r.statusCode < 500 ? 0 : 1);
+            }).on('error', () => process.exit(1));
+          "
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  developindo_pgdata:
+    name: developindo_pgdata
+  developindo_media:
+    name: developindo_media
+  developindo_static:
+    name: developindo_static
+
+networks:
+  caddy-net:
+    external: true
+    name: caddy-net
+  developindo-internal:
+    name: developindo-internal
