@@ -2,7 +2,7 @@
 # === apps/projects/models.py 
 # =============================================================================
 """
-RumahAsri — Projects Model
+DevelopIndo — Projects Model
 """
 from django.db import models
 
