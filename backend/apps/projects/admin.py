@@ -1,5 +1,5 @@
 """
-RumahAsri — Projects Admin
+DevelopIndo — Projects Admin
 """
 
 from django.contrib import admin
