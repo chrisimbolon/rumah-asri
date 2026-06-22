@@ -124,7 +124,7 @@ export default function DashboardPage() {
       <div className="page-header">
         <h1 className="page-title">Selamat pagi, Admin 👋</h1>
         <p className="page-subtitle">
-          Ringkasan performa platform — {projects[0]?.organization_name ?? "RumahAsri"}
+          Ringkasan performa platform — {projects[0]?.organization_name ?? "DevelopIndo"}
         </p>
       </div>
 
