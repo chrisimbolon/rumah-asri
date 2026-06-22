@@ -1,15 +1,15 @@
 "use client";
 
+import { DataGrafik } from "@/lib/mock-data";
 import {
-  BarChart,
   Bar,
+  BarChart,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
 } from "recharts";
-import { DataGrafik } from "@/lib/mock-data";
 
 interface Props {
   data: DataGrafik[];
@@ -45,7 +45,7 @@ export default function SalesChart({ data }: Props) {
             padding: "6px 12px",
             boxShadow: "0 4px 20px rgba(14,13,11,0.09)",
           }}
-          formatter={(v: number) => [`${v} unit`, "Penjualan"]}
+          formatter={(v) => [`${v ?? 0} unit`, "Penjualan"]}
           cursor={{ fill: "rgba(14,13,11,0.04)" }}
         />
         <Bar dataKey="penjualan" radius={[3, 3, 0, 0]}>
