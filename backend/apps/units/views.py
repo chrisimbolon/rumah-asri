@@ -2,7 +2,7 @@
 # === apps/units/views.py ===
 # =============================================================================
 """
-RumahAsri — Units Views (developer/agent dashboard side)
+DevelopIndo — Units Views (developer/agent dashboard side)
 
 NOTE — behaviour change: the old buyer-branch in UnitListView has been
 removed. Buyers should exclusively use /api/buyer/* (apps/buyer/views.py),
