@@ -1,5 +1,5 @@
 """
-RumahAsri — Units Admin
+DevelopIndo — Units Admin
 """
 
 from django.contrib import admin
