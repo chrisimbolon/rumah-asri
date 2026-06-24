@@ -1,5 +1,5 @@
 """
-RumahAsri — Payments Admin
+DevelopIndo — Payments Admin
 """
 
 from django.contrib import admin
