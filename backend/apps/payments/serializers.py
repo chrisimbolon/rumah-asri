@@ -1,5 +1,5 @@
 """
-RumahAsri — Payments Serializers
+DevelopIndo — Payments Serializers
 """
 
 from rest_framework import serializers
