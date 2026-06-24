@@ -3,80 +3,142 @@
 // =============================================================================
 /**
  * DevelopIndo — Projects API
- * Typed wrappers around the real Django backend.
- * Field names match what the backend actually returns (English),
- * NOT the old Bahasa mock-data field names.
+ * Updated to support full lifecycle stages.
  */
-
 import api from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────
+
+export type ProjectStage =
+  | "draft"
+  | "perencanaan"
+  | "perizinan"
+  | "konstruksi"
+  | "penjualan"
+  | "serah_terima"
+  | "selesai"
+  | "ditunda";
+
+export type PermitStatus = "belum" | "proses" | "approved" | "rejected";
+
+export interface StageChecklistItem {
+  item:      string;
+  done:      boolean;
+  blocking?: boolean;
+}
+
 export interface Project {
-  id:                string;
-  name:              string;
-  location:          string;
-  description:       string;
-  status:            string;
-  status_display:    string;
-  total_units:       number;
-  units_sold:        number;
-  overall_progress:  number;
-  start_date:        string;  // "YYYY-MM-DD"
-  end_date:          string;
+  id:               string;
+  name:             string;
+  location:         string;
+  description:      string;
+  // Lifecycle
+  stage:            ProjectStage;
+  stage_display:    string;
+  can_advance:      boolean;
+  next_stage:       ProjectStage | null;
+  stage_checklist:  StageChecklistItem[];
+  // Planning
+  total_units:      number;
+  units_sold:       number;
+  overall_progress: number;
+  target_budget:    string | null;
+  start_date:       string | null;
+  end_date:         string | null;
+  master_plan_url:  string;
+  site_plan_url:    string;
+  // Permits
+  ipr_status:       PermitStatus;
+  ipr_date:         string | null;
+  amdal_status:     PermitStatus;
+  amdal_date:       string | null;
+  pbg_status:       PermitStatus;
+  pbg_date:         string | null;
+  // Meta
   organization_name: string;
   created_at:        string;
-}
-
-export interface ProjectListResponse {
-  success: boolean;
-  count:   number;
-  results: Project[];
-}
-
-export interface ProjectDetailResponse {
-  success: boolean;
-  project: Project;
+  updated_at:        string;
 }
 
 export interface CreateProjectPayload {
   name:        string;
   location:    string;
   description?: string;
-  status:      string;
-  total_units: number;
-  start_date:  string;
-  end_date:    string;
+}
+
+export interface UpdateProjectPayload {
+  name?:            string;
+  location?:        string;
+  description?:     string;
+  total_units?:     number;
+  target_budget?:   string;
+  start_date?:      string;
+  end_date?:        string;
+  master_plan_url?: string;
+  site_plan_url?:   string;
+  ipr_status?:      PermitStatus;
+  ipr_date?:        string;
+  amdal_status?:    PermitStatus;
+  amdal_date?:      string;
+  pbg_status?:      PermitStatus;
+  pbg_date?:        string;
+}
+
+// ── Stage metadata ────────────────────────────────────────────
+
+export const STAGE_META: Record<ProjectStage, {
+  label:       string;
+  color:       string;
+  bg:          string;
+  description: string;
+  order:       number;
+}> = {
+  draft:        { label: "Draft",        color: "var(--color-ink-3)",    bg: "var(--color-paper-2)",      description: "Ide proyek dibuat",                   order: 0 },
+  perencanaan:  { label: "Perencanaan",  color: "var(--color-info)",     bg: "var(--color-info-light)",   description: "Master plan & inventori unit",         order: 1 },
+  perizinan:    { label: "Perizinan",    color: "var(--color-warning)",  bg: "var(--color-warning-light)",description: "IPR, AMDAL, PBG",                     order: 2 },
+  konstruksi:   { label: "Konstruksi",   color: "var(--color-accent)",   bg: "var(--color-accent-light)", description: "Pembangunan berlangsung",              order: 3 },
+  penjualan:    { label: "Penjualan",    color: "var(--color-success)",  bg: "var(--color-success-light)",description: "Unit dipasarkan & dijual",             order: 4 },
+  serah_terima: { label: "Serah Terima", color: "var(--color-gold)",     bg: "var(--color-gold-light)",   description: "Unit diserahkan ke pembeli",           order: 5 },
+  selesai:      { label: "Selesai",      color: "var(--color-success)",  bg: "var(--color-success-light)",description: "Proyek selesai",                      order: 6 },
+  ditunda:      { label: "Ditunda",      color: "var(--color-danger)",   bg: "var(--color-danger-light)", description: "Proyek ditunda",                      order: -1 },
+};
+
+// ── Derived stats ─────────────────────────────────────────────
+
+export function deriveStats(projects: Project[]) {
+  return {
+    total_units:     projects.reduce((s, p) => s + p.total_units, 0),
+    units_sold:      projects.reduce((s, p) => s + p.units_sold, 0),
+    units_available: projects.reduce((s, p) => s + (p.total_units - p.units_sold), 0),
+  };
 }
 
 // ── API calls ─────────────────────────────────────────────────
+
 export const projectsApi = {
-  async list(params?: { status?: string }): Promise<Project[]> {
-    const { data } = await api.get<ProjectListResponse>("/api/projects/", {
-      params,
-    });
+  async list(stage?: ProjectStage): Promise<Project[]> {
+    const params = stage ? `?stage=${stage}` : "";
+    const { data } = await api.get(`/api/projects/${params}`);
     return data.results;
   },
 
   async get(id: string): Promise<Project> {
-    const { data } = await api.get<ProjectDetailResponse>(
-      `/api/projects/${id}/`
-    );
+    const { data } = await api.get(`/api/projects/${id}/`);
     return data.project;
   },
 
   async create(payload: CreateProjectPayload): Promise<Project> {
-    const { data } = await api.post<ProjectDetailResponse>(
-      "/api/projects/",
-      payload
-    );
+    const { data } = await api.post("/api/projects/", payload);
     return data.project;
   },
 
-  async update(id: string, payload: Partial<CreateProjectPayload>): Promise<Project> {
-    const { data } = await api.put<ProjectDetailResponse>(
-      `/api/projects/${id}/`,
-      payload
-    );
+  async update(id: string, payload: UpdateProjectPayload): Promise<Project> {
+    const { data } = await api.put(`/api/projects/${id}/`, payload);
+    return data.project;
+  },
+
+  async advance(id: string): Promise<Project> {
+    const { data } = await api.post(`/api/projects/${id}/advance/`, { confirm: true });
     return data.project;
   },
 
@@ -84,12 +146,3 @@ export const projectsApi = {
     await api.delete(`/api/projects/${id}/`);
   },
 };
-
-// ── Derived stats (computed from project list — no separate stats endpoint yet) ──
-export function deriveStats(projects: Project[]) {
-  const total_units   = projects.reduce((s, p) => s + p.total_units,   0);
-  const units_sold    = projects.reduce((s, p) => s + p.units_sold,    0);
-  const units_active  = projects.filter((p) => p.status === "aktif").length;
-  const units_available = total_units - units_sold;
-  return { total_units, units_sold, units_active, units_available };
-}
