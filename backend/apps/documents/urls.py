@@ -1,5 +1,5 @@
 """
-RumahAsri — Documents URLs
+DevelopIndo — Documents URLs
 """
 
 from django.urls import path
