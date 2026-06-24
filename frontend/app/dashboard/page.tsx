@@ -3,293 +3,293 @@
 // === frontend/app/dashboard/page.tsx ===
 // =============================================================================
 /**
- * Dashboard home — wired to real projects API.
- *
- * STILL MOCK (no backend yet — Sprint 3):
- *   - NOTIFIKASI  (notifications)
- *   - LOG         (activity log)
- *   - GRAFIK_PENJUALAN (sales chart)
- *   - STATISTIK.pendapatan_bulan / pertumbuhan (revenue — needs payments aggregate)
+ * DevelopIndo — Dashboard Home
+ * Now features the Portfolio Intelligence Overview table
+ * designed by the co-founder — the killer feature that
+ * makes a developer pay for the platform.
  */
 
-import SalesChart from "@/components/charts/SalesChart";
-import { Project, deriveStats, projectsApi } from "@/lib/api/projects";
+import { useAuth } from "@/context/AuthContext";
 import {
-  GRAFIK_PENJUALAN,
+  PortfolioRow, RISK_META, STAGE_META,
+  TREND_META, projectsApi,
+} from "@/lib/api/projects";
+import {
   LOG,
-  NOTIFIKASI,
-  badgeStatus,
-  warnaProgres
+  NOTIFIKASI
 } from "@/lib/mock-data";
 import {
-  Activity,
-  AlertCircle,
-  ArrowRight,
-  BarChart2,
-  CheckCircle2,
-  FolderOpen,
-  Home,
-  Info,
-  Loader2,
-  TrendingDown,
-  TrendingUp
+  Activity, AlertTriangle, ArrowRight,
+  BarChart2, Building2, CheckCircle2,
+  FolderOpen, Home, Info, Loader2, TrendingUp,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-// ── Metric Card ───────────────────────────────────────────────
-function MetricCard({
-  label,
-  value,
-  sub,
-  trend,
-  trendUp,
-  icon: Icon,
-  iconBg,
-  iconColor,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  trend?: string;
-  trendUp?: boolean;
-  icon: React.ElementType;
-  iconBg: string;
-  iconColor: string;
-}) {
+// ── Readiness bar ─────────────────────────────────────────────
+function ReadinessBar({ score }: { score: number }) {
+  const color =
+    score >= 80 ? "var(--color-success)" :
+    score >= 50 ? "var(--color-warning)" :
+                  "var(--color-danger)";
   return (
-    <div className="metric-card">
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12 }}>
-        <div className="metric-label">{label}</div>
-        <div style={{ width: 32, height: 32, borderRadius: 6, backgroundColor: iconBg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <Icon size={15} style={{ color: iconColor }} />
-        </div>
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ flex: 1, height: 6, backgroundColor: "rgba(14,13,11,0.08)", borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ width: `${score}%`, height: "100%", backgroundColor: color, borderRadius: 3, transition: "width 0.3s" }} />
       </div>
-      <div className="metric-value">{value}</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
-        {trend && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 11, fontWeight: 500, color: trendUp ? "var(--color-success)" : "var(--color-danger)" }}>
-            {trendUp ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
-            {trend}
-          </span>
-        )}
-        <span className="metric-sub">{sub}</span>
-      </div>
+      <span style={{ fontSize: 11, fontWeight: 700, color, minWidth: 32, textAlign: "right" }}>
+        {score}%
+      </span>
     </div>
   );
 }
 
-// ── Notification helpers ──────────────────────────────────────
-const NOTIF_ICON   = { info: Info, sukses: CheckCircle2, peringatan: AlertCircle } as const;
-const NOTIF_COLOR  = { info: "var(--color-info)", sukses: "var(--color-success)", peringatan: "var(--color-warning)" } as const;
-const NOTIF_BG     = { info: "var(--color-info-light)", sukses: "var(--color-success-light)", peringatan: "var(--color-warning-light)" } as const;
-
-// ── Dashboard Page ────────────────────────────────────────────
-export default function DashboardPage() {
-  const [projects, setProjects]   = useState<Project[]>([]);
-  const [loading,  setLoading]    = useState(true);
-  const [error,    setError]      = useState<string | null>(null);
-
-  useEffect(() => {
-    projectsApi.list()
-      .then(setProjects)
-      .catch(() => setError("Gagal memuat data proyek"))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const stats  = deriveStats(projects);
-  const unread = NOTIFIKASI.filter((n) => !n.dibaca).length;
-
-  if (loading) {
+// ── Portfolio table ───────────────────────────────────────────
+function PortfolioTable({ rows }: { rows: PortfolioRow[] }) {
+  if (rows.length === 0) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 300, gap: 10, color: "var(--color-ink-3)" }}>
-        <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} />
-        <span style={{ fontSize: 13 }}>Memuat data…</span>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div style={{ padding: 24, textAlign: "center", color: "var(--color-danger)", fontSize: 13 }}>
-        {error}
+      <div style={{ textAlign: "center", padding: "40px 24px", color: "var(--color-ink-3)" }}>
+        <Building2 size={32} style={{ margin: "0 auto 12px", opacity: 0.2, display: "block" }} />
+        <div style={{ fontSize: 13 }}>Belum ada proyek. Buat proyek pertama Anda.</div>
+        <Link href="/dashboard/projects" className="btn-accent" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 16 }}>
+          <Building2 size={13} /> Tambah Proyek
+        </Link>
       </div>
     );
   }
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-
-      {/* ── Page header ── */}
-      <div className="page-header">
-        <h1 className="page-title">Selamat pagi, Admin 👋</h1>
-        <p className="page-subtitle">
-          Ringkasan performa platform — {projects[0]?.organization_name ?? "DevelopIndo"}
-        </p>
-      </div>
-
-      {/* ── Metric cards ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
-        <MetricCard
-          label="Total Proyek"
-          value={String(projects.length)}
-          sub="proyek terdaftar"
-          icon={FolderOpen}
-          iconBg="var(--color-info-light)"
-          iconColor="var(--color-info)"
-        />
-        <MetricCard
-          label="Unit Terjual"
-          value={String(stats.units_sold)}
-          sub={`dari ${stats.total_units} unit`}
-          icon={Home}
-          iconBg="var(--color-success-light)"
-          iconColor="var(--color-success)"
-        />
-        <MetricCard
-          label="Proyek Aktif"
-          value={String(stats.units_active)}
-          sub="sedang berjalan"
-          icon={BarChart2}
-          iconBg="var(--color-warning-light)"
-          iconColor="var(--color-warning)"
-        />
-        <MetricCard
-          label="Unit Tersedia"
-          value={String(stats.units_available)}
-          sub="siap dipasarkan"
-          icon={TrendingUp}
-          iconBg="var(--color-gold-light)"
-          iconColor="var(--color-gold)"
-        />
-      </div>
-
-      {/* ── Main grid — projects + notifications ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, marginBottom: 16 }}>
-
-        {/* Projects list */}
-        <div className="card">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-            <div className="section-title" style={{ marginBottom: 0 }}>Semua Proyek</div>
-            <Link href="/dashboard/projects" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--color-accent)", textDecoration: "none" }}>
-              Lihat semua <ArrowRight size={12} />
-            </Link>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            {projects.map((p) => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 6, backgroundColor: "var(--color-paper-2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "var(--color-ink-3)", flexShrink: 0 }}>
-                  {p.name.charAt(0)}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {p.name}
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginLeft: 12, flexShrink: 0 }}>
-                      {p.overall_progress}%
-                    </div>
-                  </div>
-                  <div className="progress-bar" style={{ marginBottom: 6 }}>
-                    <div className="progress-fill" style={{ width: `${p.overall_progress}%`, backgroundColor: warnaProgres(p.overall_progress) }} />
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>{p.location}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span className={`badge ${badgeStatus(p.status)}`}>{p.status_display}</span>
-                      <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>
-                        {p.units_sold}/{p.total_units} unit
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr style={{ borderBottom: "2px solid rgba(14,13,11,0.08)" }}>
+            {["Proyek", "Tahap", "Kesiapan", "Blokir", "Risiko", "Tindakan Berikutnya", "Tren"].map((h) => (
+              <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>
+                {h}
+              </th>
             ))}
-          </div>
-        </div>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => {
+            const stageMeta = STAGE_META[row.stage];
+            const riskMeta  = RISK_META[row.risk_level];
+            const trendMeta = TREND_META[row.trend];
+            return (
+              <tr
+                key={row.id}
+                style={{ borderBottom: "1px solid rgba(14,13,11,0.05)", transition: "background 0.15s" }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "var(--color-paper-2)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "transparent")}
+              >
+                {/* Project name */}
+                <td style={{ padding: "12px 12px" }}>
+                  <Link href={`/dashboard/projects/${row.id}`} style={{ textDecoration: "none" }}>
+                    <div style={{ fontWeight: 600, color: "var(--color-ink)", marginBottom: 2 }}>{row.name}</div>
+                    <div style={{ fontSize: 10, color: "var(--color-ink-3)" }}>{row.location}</div>
+                  </Link>
+                </td>
 
-        {/* Notifications — mock until Sprint 3 */}
-        <div className="card">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-            <div className="section-title" style={{ marginBottom: 0 }}>Notifikasi</div>
-            <span className="badge badge-red">{unread} baru</span>
+                {/* Stage */}
+                <td style={{ padding: "12px 12px" }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 999, color: stageMeta.color, backgroundColor: stageMeta.bg }}>
+                    {stageMeta.label}
+                  </span>
+                </td>
+
+                {/* Readiness */}
+                <td style={{ padding: "12px 12px", minWidth: 130 }}>
+                  <ReadinessBar score={row.readiness_score} />
+                </td>
+
+                {/* Blocking count */}
+                <td style={{ padding: "12px 12px", textAlign: "center" }}>
+                  {row.blocking_count > 0 ? (
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--color-danger)", display: "flex", alignItems: "center", gap: 4, justifyContent: "center" }}>
+                      <AlertTriangle size={12} /> {row.blocking_count}
+                    </span>
+                  ) : (
+                    <CheckCircle2 size={14} style={{ color: "var(--color-success)", display: "block", margin: "0 auto" }} />
+                  )}
+                </td>
+
+                {/* Risk */}
+                <td style={{ padding: "12px 12px" }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 999, color: riskMeta.color, backgroundColor: riskMeta.bg }}>
+                    {riskMeta.label}
+                  </span>
+                </td>
+
+                {/* Next action */}
+                <td style={{ padding: "12px 12px", maxWidth: 200 }}>
+                  {row.next_action ? (
+                    <span style={{ fontSize: 11, color: "var(--color-warning)", fontWeight: 500 }}>
+                      {row.next_action}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "var(--color-ink-3)", fontStyle: "italic" }}>—</span>
+                  )}
+                </td>
+
+                {/* Trend */}
+                <td style={{ padding: "12px 12px" }}>
+                  <span style={{ fontSize: 16, color: trendMeta.color, fontWeight: 700 }}>
+                    {trendMeta.icon}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Main dashboard ────────────────────────────────────────────
+export default function DashboardPage() {
+  const { user } = useAuth();
+  const [portfolio, setPortfolio] = useState<PortfolioRow[]>([]);
+  const [loading,   setLoading]   = useState(true);
+
+  useEffect(() => {
+    projectsApi.getPortfolio()
+      .then(setPortfolio)
+      .catch(() => setPortfolio([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Derive summary stats from portfolio
+  const totalProyek    = portfolio.length;
+  const unitTerjual    = portfolio.reduce((s, p) => s + p.units_sold, 0);
+  const proyekAktif    = portfolio.filter((p) =>
+    ["konstruksi", "penjualan"].includes(p.stage)
+  ).length;
+  const unitTersedia   = portfolio.reduce(
+    (s, p) => s + (p.total_units - p.units_sold), 0
+  );
+  const avgReadiness   = portfolio.length
+    ? Math.round(portfolio.reduce((s, p) => s + p.readiness_score, 0) / portfolio.length)
+    : 0;
+  const highRiskCount  = portfolio.filter((p) => p.risk_level === "high").length;
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Selamat pagi" : hour < 17 ? "Selamat siang" : "Selamat malam";
+
+  return (
+    <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+
+      {/* ── Hero ── */}
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">
+            {greeting}, {user?.full_name?.split(" ")[0] ?? "Admin"} 👋
+          </h1>
+          <p className="page-subtitle">
+            Ringkasan performa platform — {portfolio[0]?.name ? `${portfolio.length} proyek aktif` : "Mulai tambahkan proyek Anda"}
+          </p>
+        </div>
+      </div>
+
+      {/* ── Summary metrics ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12, marginBottom: 24 }}>
+        {[
+          { label: "Total Proyek",    value: totalProyek,   sub: "proyek terdaftar",   icon: FolderOpen, color: "var(--color-info)",    bg: "var(--color-info-light)"    },
+          { label: "Unit Terjual",    value: unitTerjual,   sub: `dari ${portfolio.reduce((s,p)=>s+p.total_units,0)} unit`, icon: Home, color: "var(--color-accent)", bg: "var(--color-accent-light)" },
+          { label: "Proyek Aktif",    value: proyekAktif,   sub: "sedang berjalan",    icon: BarChart2,  color: "var(--color-warning)", bg: "var(--color-warning-light)" },
+          { label: "Unit Tersedia",   value: unitTersedia,  sub: "siap dipasarkan",    icon: TrendingUp, color: "var(--color-success)", bg: "var(--color-success-light)" },
+          { label: "Rata² Kesiapan",  value: `${avgReadiness}%`, sub: "semua proyek", icon: CheckCircle2,color:"var(--color-success)", bg: "var(--color-success-light)" },
+          { label: "Risiko Tinggi",   value: highRiskCount, sub: "butuh perhatian",    icon: AlertTriangle, color: highRiskCount > 0 ? "var(--color-danger)" : "var(--color-success)", bg: highRiskCount > 0 ? "var(--color-danger-light)" : "var(--color-success-light)" },
+        ].map((s) => (
+          <div key={s.label} className="metric-card">
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
+              <div className="metric-label" style={{ fontSize: 10 }}>{s.label}</div>
+              <div style={{ width: 28, height: 28, borderRadius: 6, backgroundColor: s.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <s.icon size={13} style={{ color: s.color }} />
+              </div>
+            </div>
+            <div className="metric-value" style={{ fontSize: 22 }}>{s.value}</div>
+            <div className="metric-sub" style={{ fontSize: 10 }}>{s.sub}</div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {NOTIFIKASI.slice(0, 5).map((n) => {
-              const Icon = NOTIF_ICON[n.tipe];
-              return (
-                <div key={n.id} style={{ display: "flex", gap: 12, padding: "10px 12px", borderRadius: 6, backgroundColor: !n.dibaca ? NOTIF_BG[n.tipe] : "transparent" }}>
-                  <Icon size={15} style={{ color: NOTIF_COLOR[n.tipe], flexShrink: 0, marginTop: 1 }} />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-ink)", lineHeight: 1.3 }}>{n.judul}</div>
-                    <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2, lineHeight: 1.4 }}>{n.pesan}</div>
-                    <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 4 }}>{n.waktu}</div>
-                  </div>
-                  {!n.dibaca && <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: NOTIF_COLOR[n.tipe], flexShrink: 0, marginTop: 4 }} />}
-                </div>
-              );
-            })}
+        ))}
+      </div>
+
+      {/* ── Portfolio Intelligence Table ── */}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <Building2 size={14} style={{ color: "var(--color-accent)" }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--color-accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                Intelligence Overview
+              </span>
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "var(--color-ink)" }}>
+              Project Portfolio
+            </div>
           </div>
-          <Link href="/dashboard/notifikasi" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--color-accent)", textDecoration: "none", marginTop: 12 }}>
-            Semua notifikasi <ArrowRight size={12} />
+          <Link href="/dashboard/projects" className="btn-ghost btn-sm" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            Semua Proyek <ArrowRight size={12} />
           </Link>
         </div>
+
+        {loading ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 120, gap: 8, color: "var(--color-ink-3)" }}>
+            <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+            <span style={{ fontSize: 12 }}>Memuat portfolio…</span>
+          </div>
+        ) : (
+          <PortfolioTable rows={portfolio} />
+        )}
       </div>
 
-      {/* ── Bottom grid — chart + activity log (both still mock — Sprint 3) ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16 }}>
+      {/* ── Bottom row — notifications + activity ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+
+        {/* Notifications */}
         <div className="card">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-            <div>
-              <div className="section-title" style={{ marginBottom: 2 }}>Grafik Penjualan</div>
-              <div style={{ fontSize: 12, color: "var(--color-ink-3)" }}>6 bulan terakhir</div>
-            </div>
-            <span className="badge badge-green" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-              <TrendingUp size={10} /> +14%
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-ink)" }}>Notifikasi</div>
+            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, backgroundColor: "var(--color-danger)", color: "white" }}>
+              {NOTIFIKASI.filter((n) => !n.dibaca).length} baru
             </span>
           </div>
-          <SalesChart data={GRAFIK_PENJUALAN} />
-          <div style={{ display: "flex", gap: 20, marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(14,13,11,0.06)" }}>
-            {[
-              { label: "Total terjual", value: `${stats.units_sold} unit`, color: "var(--color-accent)" },
-              { label: "Unit tersedia", value: `${stats.units_available} unit`, color: "var(--color-success)" },
-            ].map((item) => (
-              <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: item.color, flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: 10, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{item.label}</div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-ink)" }}>{item.value}</div>
+          {NOTIFIKASI.slice(0, 4).map((n) => {
+            const iconMap = { info: Info, sukses: CheckCircle2, peringatan: AlertTriangle };
+            const colorMap = { info: "var(--color-info)", sukses: "var(--color-success)", peringatan: "var(--color-warning)" };
+            const Icon = iconMap[n.tipe];
+            return (
+              <div key={n.id} style={{ display: "flex", gap: 10, marginBottom: 12, padding: "10px 12px", backgroundColor: n.dibaca ? "transparent" : "var(--color-paper-2)", borderRadius: 6 }}>
+                <Icon size={14} style={{ color: colorMap[n.tipe], marginTop: 1, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 2 }}>{n.judul}</div>
+                  <div style={{ fontSize: 11, color: "var(--color-ink-3)", lineHeight: 1.4 }}>{n.pesan}</div>
+                  <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 4 }}>{n.waktu}</div>
                 </div>
+                {!n.dibaca && <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "var(--color-accent)", flexShrink: 0, marginTop: 4 }} />}
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
 
-        {/* Activity log — mock until Sprint 3 */}
+        {/* Activity log */}
         <div className="card">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-            <div className="section-title" style={{ marginBottom: 0 }}>Log Aktivitas</div>
-            <Activity size={14} style={{ color: "var(--color-ink-3)" }} />
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-ink)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+            <Activity size={14} /> Log Aktivitas
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-            {LOG.map((l, i) => (
-              <div key={i} style={{ display: "flex", gap: 12, paddingBottom: i < LOG.length - 1 ? 16 : 0, position: "relative" }}>
-                {i < LOG.length - 1 && (
-                  <div style={{ position: "absolute", left: 5, top: 14, width: 1, height: "100%", backgroundColor: "rgba(14,13,11,0.08)" }} />
-                )}
-                <div style={{ width: 11, height: 11, borderRadius: "50%", backgroundColor: i === 0 ? "var(--color-accent)" : "var(--color-paper-3)", border: i === 0 ? "none" : "1px solid rgba(14,13,11,0.15)", flexShrink: 0, marginTop: 3, position: "relative", zIndex: 1 }} />
-                <div style={{ minWidth: 0, paddingBottom: 2 }}>
-                  <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-ink)", lineHeight: 1.3 }}>{l.pengguna}</div>
-                  <div style={{ fontSize: 11, color: "var(--color-ink-3)", lineHeight: 1.4, marginTop: 2 }}>{l.aksi}</div>
-                  <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 3, opacity: 0.7 }}>{l.waktu}</div>
+          {LOG.map((l, i) => (
+            <div key={i} style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "var(--color-accent)", marginTop: 5, flexShrink: 0 }} />
+              <div>
+                <div style={{ fontSize: 12, color: "var(--color-ink)", lineHeight: 1.4 }}>
+                  <span style={{ fontWeight: 500 }}>{l.pengguna}</span> — {l.aksi}
                 </div>
+                <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 2 }}>{l.waktu}</div>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
       </div>
-
     </div>
   );
 }
