@@ -2,7 +2,7 @@
 # === apps/organizations/models.py ===
 # =============================================================================
 """
-RumahAsri — Organization (tenant) model.
+DevelopIndo — Organization (tenant) model.
 
 This is the actual SaaS tenant — a developer COMPANY, not an individual
 CustomUser account. Project/Unit/Payment/Document/ConstructionPhase all
