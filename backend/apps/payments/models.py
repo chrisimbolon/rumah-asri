@@ -2,7 +2,7 @@
 # === apps/payments/models.py ===
 # =============================================================================
 """
-RumahAsri — Payments Model
+DevelopIndo — Payments Model
 """
 from django.db import models
 
