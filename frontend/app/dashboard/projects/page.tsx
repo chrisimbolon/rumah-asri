@@ -2,31 +2,262 @@
 // =============================================================================
 // === frontend/app/dashboard/projects/page.tsx ===
 // =============================================================================
-/**
- * Projects listing — wired to real projects API.
- * Field names updated from Bahasa mock (nama, lokasi, terjual, progres)
- * to real API English (name, location, units_sold, overall_progress).
- */
 
-import { Project, deriveStats, projectsApi } from "@/lib/api/projects";
-import { badgeStatus, warnaProgres } from "@/lib/mock-data";
+import {
+  CreateProjectPayload,
+  Project,
+  STAGE_META,
+  deriveStats,
+  projectsApi,
+} from "@/lib/api/projects";
+import { warnaProgres } from "@/lib/mock-data";
 import {
   ArrowRight,
+  Building2,
   Calendar,
+  CheckCircle2,
+  Circle,
   FolderOpen,
   Home,
   Loader2,
   MapPin,
   Plus,
   TrendingUp,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+// ── Stage pipeline badge ──────────────────────────────────────
+function StageBadge({ stage }: { stage: Project["stage"] }) {
+  const meta = STAGE_META[stage];
+  return (
+    <span style={{
+      fontSize: 11, fontWeight: 600, padding: "3px 10px",
+      borderRadius: 999, color: meta.color, backgroundColor: meta.bg,
+      letterSpacing: "0.03em",
+    }}>
+      {meta.label}
+    </span>
+  );
+}
+
+// ── Create Project Modal ──────────────────────────────────────
+function CreateProjectModal({
+  onClose,
+  onCreated,
+}: {
+  onClose:   () => void;
+  onCreated: (p: Project) => void;
+}) {
+  const [form, setForm]       = useState<CreateProjectPayload>({ name: "", location: "", description: "" });
+  const [saving, setSaving]   = useState(false);
+  const [error,  setError]    = useState<string | null>(null);
+
+  const handleSubmit = async () => {
+    if (!form.name.trim())     { setError("Nama proyek wajib diisi"); return; }
+    if (!form.location.trim()) { setError("Lokasi wajib diisi");      return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const project = await projectsApi.create(form);
+      onCreated(project);
+    } catch {
+      setError("Gagal membuat proyek. Coba lagi.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 100,
+      backgroundColor: "rgba(14,13,11,0.4)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: 16,
+    }}>
+      <div style={{
+        backgroundColor: "white", borderRadius: 12,
+        width: "100%", maxWidth: 480,
+        boxShadow: "0 20px 60px rgba(14,13,11,0.15)",
+        overflow: "hidden",
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: "20px 24px 16px",
+          borderBottom: "1px solid rgba(14,13,11,0.06)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <Building2 size={16} style={{ color: "var(--color-accent)" }} />
+              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                Proyek Baru
+              </span>
+            </div>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: "var(--color-ink)", margin: 0 }}>
+              Tambah Proyek
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ padding: 6, borderRadius: 6, border: "none", backgroundColor: "transparent", cursor: "pointer", color: "var(--color-ink-3)" }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Info banner */}
+        <div style={{
+          margin: "16px 24px 0",
+          padding: "10px 14px",
+          backgroundColor: "var(--color-info-light)",
+          borderRadius: 6, fontSize: 12,
+          color: "var(--color-info)", lineHeight: 1.5,
+        }}>
+          Proyek akan dibuat dalam tahap <strong>Draft</strong>. Anda dapat melengkapi detail perencanaan, perizinan, dan unit setelah proyek dibuat.
+        </div>
+
+        {/* Form */}
+        <div style={{ padding: "20px 24px" }}>
+          {error && (
+            <div style={{ marginBottom: 16, padding: "10px 14px", backgroundColor: "var(--color-danger-light)", borderRadius: 6, fontSize: 12, color: "var(--color-danger)" }}>
+              {error}
+            </div>
+          )}
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 6 }}>
+              Nama Proyek <span style={{ color: "var(--color-danger)" }}>*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="contoh: Perumahan Asri Cluster D"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              style={{
+                width: "100%", padding: "10px 12px",
+                border: "1px solid rgba(14,13,11,0.15)",
+                borderRadius: 6, fontSize: 13,
+                color: "var(--color-ink)",
+                outline: "none", boxSizing: "border-box",
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 6 }}>
+              Lokasi <span style={{ color: "var(--color-danger)" }}>*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="contoh: Telanaipura, Jambi"
+              value={form.location}
+              onChange={(e) => setForm({ ...form, location: e.target.value })}
+              style={{
+                width: "100%", padding: "10px 12px",
+                border: "1px solid rgba(14,13,11,0.15)",
+                borderRadius: 6, fontSize: 13,
+                color: "var(--color-ink)",
+                outline: "none", boxSizing: "border-box",
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 6 }}>
+              Deskripsi <span style={{ fontSize: 11, color: "var(--color-ink-3)", fontWeight: 400 }}>(opsional)</span>
+            </label>
+            <textarea
+              placeholder="Konsep dan gambaran umum proyek..."
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              rows={3}
+              style={{
+                width: "100%", padding: "10px 12px",
+                border: "1px solid rgba(14,13,11,0.15)",
+                borderRadius: 6, fontSize: 13,
+                color: "var(--color-ink)", resize: "vertical",
+                outline: "none", boxSizing: "border-box",
+                fontFamily: "inherit",
+              }}
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={onClose}
+              className="btn-ghost"
+              style={{ flex: 1 }}
+              disabled={saving}
+            >
+              Batal
+            </button>
+            <button
+              onClick={handleSubmit}
+              className="btn-accent"
+              style={{ flex: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              disabled={saving}
+            >
+              {saving ? (
+                <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Membuat…</>
+              ) : (
+                <><Building2 size={14} /> Buat Proyek</>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Mini stage pipeline on each card ─────────────────────────
+function CardStagePipeline({ stage }: { stage: Project["stage"] }) {
+  const stages: Project["stage"][] = [
+    "draft", "perencanaan", "perizinan",
+    "konstruksi", "penjualan", "serah_terima", "selesai",
+  ];
+  const currentIdx = stages.indexOf(stage);
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 14 }}>
+      {stages.map((s, i) => {
+        const meta    = STAGE_META[s];
+        const done    = i < currentIdx;
+        const current = i === currentIdx;
+        return (
+          <div key={s} style={{ display: "flex", alignItems: "center", flex: 1 }}>
+            <div
+              title={meta.label}
+              style={{
+                width: 8, height: 8, borderRadius: "50%",
+                backgroundColor: done || current ? meta.color : "rgba(14,13,11,0.1)",
+                border: current ? `2px solid ${meta.color}` : "none",
+                boxShadow: current ? `0 0 0 3px ${meta.bg}` : "none",
+                flexShrink: 0,
+                transition: "all 0.2s",
+              }}
+            />
+            {i < stages.length - 1 && (
+              <div style={{
+                flex: 1, height: 2,
+                backgroundColor: done ? "var(--color-success)" : "rgba(14,13,11,0.08)",
+              }} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────
 export default function ProjectsPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState<string | null>(null);
+  const [projects,    setProjects]    = useState<Project[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState<string | null>(null);
+  const [showCreate,  setShowCreate]  = useState(false);
 
   useEffect(() => {
     projectsApi.list()
@@ -34,6 +265,11 @@ export default function ProjectsPage() {
       .catch(() => setError("Gagal memuat data proyek"))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleCreated = (project: Project) => {
+    setProjects((prev) => [project, ...prev]);
+    setShowCreate(false);
+  };
 
   if (loading) {
     return (
@@ -45,17 +281,21 @@ export default function ProjectsPage() {
   }
 
   if (error) {
-    return (
-      <div style={{ padding: 24, textAlign: "center", color: "var(--color-danger)", fontSize: 13 }}>
-        {error}
-      </div>
-    );
+    return <div style={{ padding: 24, textAlign: "center", color: "var(--color-danger)", fontSize: 13 }}>{error}</div>;
   }
 
-  const stats         = deriveStats(projects);
+  const stats = deriveStats(projects);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+
+      {/* ── Modal ── */}
+      {showCreate && (
+        <CreateProjectModal
+          onClose={() => setShowCreate(false)}
+          onCreated={handleCreated}
+        />
+      )}
 
       {/* ── Page header ── */}
       <div className="page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -66,7 +306,11 @@ export default function ProjectsPage() {
             {projects[0]?.organization_name ? ` — ${projects[0].organization_name}` : ""}
           </p>
         </div>
-        <button className="btn-accent" style={{ flexShrink: 0 }}>
+        <button
+          className="btn-accent"
+          style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}
+          onClick={() => setShowCreate(true)}
+        >
           <Plus size={15} /> Tambah Proyek
         </button>
       </div>
@@ -74,10 +318,10 @@ export default function ProjectsPage() {
       {/* ── Summary strip ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
         {[
-          { label: "Total Proyek",  value: String(projects.length),         sub: "proyek aktif",     icon: FolderOpen, color: "var(--color-info)",    bg: "var(--color-info-light)"    },
-          { label: "Total Unit",    value: String(stats.total_units),        sub: "semua cluster",    icon: Home,       color: "var(--color-accent)",  bg: "var(--color-accent-light)"  },
-          { label: "Unit Terjual",  value: String(stats.units_sold),         sub: "sudah terjual",    icon: TrendingUp, color: "var(--color-success)", bg: "var(--color-success-light)" },
-          { label: "Unit Tersedia", value: String(stats.units_available),    sub: "siap dipasarkan",  icon: Home,       color: "var(--color-warning)", bg: "var(--color-warning-light)" },
+          { label: "Total Proyek",  value: String(projects.length),      sub: "semua tahap",       icon: FolderOpen, color: "var(--color-info)",    bg: "var(--color-info-light)"    },
+          { label: "Total Unit",    value: String(stats.total_units),    sub: "semua cluster",     icon: Home,       color: "var(--color-accent)",  bg: "var(--color-accent-light)"  },
+          { label: "Unit Terjual",  value: String(stats.units_sold),     sub: "sudah terjual",     icon: TrendingUp, color: "var(--color-success)", bg: "var(--color-success-light)" },
+          { label: "Unit Tersedia", value: String(stats.units_available),sub: "siap dipasarkan",   icon: Home,       color: "var(--color-warning)", bg: "var(--color-warning-light)" },
         ].map((s) => (
           <div key={s.label} className="metric-card">
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 }}>
@@ -92,89 +336,153 @@ export default function ProjectsPage() {
         ))}
       </div>
 
+      {/* ── Empty state ── */}
+      {projects.length === 0 && (
+        <div style={{ textAlign: "center", padding: "60px 24px" }}>
+          <Building2 size={40} style={{ margin: "0 auto 16px", opacity: 0.2, display: "block" }} />
+          <div style={{ fontSize: 16, fontWeight: 500, color: "var(--color-ink)", marginBottom: 8 }}>
+            Belum ada proyek
+          </div>
+          <div style={{ fontSize: 13, color: "var(--color-ink-3)", marginBottom: 24 }}>
+            Mulai dengan membuat proyek pertama Anda
+          </div>
+          <button
+            className="btn-accent"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            onClick={() => setShowCreate(true)}
+          >
+            <Plus size={15} /> Tambah Proyek Pertama
+          </button>
+        </div>
+      )}
+
       {/* ── Project cards grid ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
         {projects.map((p) => (
           <div
             key={p.id}
             className="card"
-            style={{ transition: "box-shadow 0.2s", cursor: "pointer", position: "relative", overflow: "hidden" }}
+            style={{ position: "relative", overflow: "hidden", transition: "box-shadow 0.2s" }}
             onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.boxShadow = "var(--shadow-card-md)")}
             onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.boxShadow = "none")}
           >
-            {/* Top colour strip */}
-            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, backgroundColor: warnaProgres(p.overall_progress) }} />
+            {/* Top colour strip by stage */}
+            <div style={{
+              position: "absolute", top: 0, left: 0, right: 0, height: 3,
+              backgroundColor: STAGE_META[p.stage]?.color ?? "var(--color-ink-3)",
+            }} />
 
-            {/* ── Card header ── */}
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16, paddingTop: 4 }}>
-              <div style={{ flex: 1, minWidth: 0, paddingRight: 12 }}>
-                <div style={{ fontSize: 16, fontWeight: 600, color: "var(--color-ink)", marginBottom: 6, lineHeight: 1.3 }}>
-                  {p.name}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--color-ink-3)" }}>
-                  <MapPin size={12} /> {p.location}
-                </div>
-              </div>
-              <span className={`badge ${badgeStatus(p.status)}`} style={{ flexShrink: 0 }}>
-                {p.status_display}
-              </span>
-            </div>
-
-            {/* ── Description ── */}
-            <p style={{ fontSize: 13, color: "var(--color-ink-3)", lineHeight: 1.6, marginBottom: 16, fontWeight: 300 }}>
-              {p.description || "—"}
-            </p>
-
-            {/* ── Progress ── */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 11, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 500 }}>
-                  Progres keseluruhan
-                </span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: warnaProgres(p.overall_progress) }}>
-                  {p.overall_progress}%
-                </span>
-              </div>
-              <div className="progress-bar" style={{ height: 8 }}>
-                <div className="progress-fill" style={{ width: `${p.overall_progress}%`, backgroundColor: warnaProgres(p.overall_progress) }} />
-              </div>
-            </div>
-
-            {/* ── Stats row ── */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, padding: "14px 0", borderTop: "1px solid rgba(14,13,11,0.06)", borderBottom: "1px solid rgba(14,13,11,0.06)", marginBottom: 16 }}>
-              {[
-                { label: "Total unit", value: String(p.total_units) },
-                { label: "Terjual",    value: String(p.units_sold)  },
-                { label: "Tersedia",   value: String(p.total_units - p.units_sold) },
-              ].map((s) => (
-                <div key={s.label} style={{ textAlign: "center" }}>
-                  <div style={{ fontFamily: "var(--font-serif)", fontSize: 24, fontWeight: 600, color: "var(--color-ink)", lineHeight: 1 }}>
-                    {s.value}
+            <div style={{ paddingTop: 8 }}>
+              {/* ── Header ── */}
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12 }}>
+                <div style={{ flex: 1, minWidth: 0, paddingRight: 12 }}>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: "var(--color-ink)", marginBottom: 6, lineHeight: 1.3 }}>
+                    {p.name}
                   </div>
-                  <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                    {s.label}
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--color-ink-3)" }}>
+                    <MapPin size={12} /> {p.location}
                   </div>
                 </div>
-              ))}
-            </div>
-
-            {/* ── Footer — dates + actions ── */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--color-ink-3)" }}>
-                  <Calendar size={11} /> Mulai: {p.start_date}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--color-ink-3)" }}>
-                  <Calendar size={11} /> Target: {p.end_date}
-                </div>
+                <StageBadge stage={p.stage} />
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Link href={`/dashboard/units?project=${p.id}`} className="btn-ghost btn-sm" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <Home size={12} /> Unit
-                </Link>
-                <Link href={`/dashboard/construction`} className="btn-accent btn-sm" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  Detail <ArrowRight size={12} />
-                </Link>
+
+              {/* ── Stage pipeline ── */}
+              <CardStagePipeline stage={p.stage} />
+
+              {/* ── Description ── */}
+              {p.description && (
+                <p style={{ fontSize: 13, color: "var(--color-ink-3)", lineHeight: 1.6, marginBottom: 14, fontWeight: 300 }}>
+                  {p.description}
+                </p>
+              )}
+
+              {/* ── Progress (only show if in konstruksi or later) ── */}
+              {["konstruksi", "penjualan", "serah_terima", "selesai"].includes(p.stage) && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                    <span style={{ fontSize: 11, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      Progres konstruksi
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: warnaProgres(p.overall_progress) }}>
+                      {p.overall_progress}%
+                    </span>
+                  </div>
+                  <div className="progress-bar" style={{ height: 6 }}>
+                    <div className="progress-fill" style={{ width: `${p.overall_progress}%`, backgroundColor: warnaProgres(p.overall_progress) }} />
+                  </div>
+                </div>
+              )}
+
+              {/* ── Stats row ── */}
+              <div style={{
+                display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8,
+                padding: "12px 0", marginBottom: 14,
+                borderTop: "1px solid rgba(14,13,11,0.06)",
+                borderBottom: "1px solid rgba(14,13,11,0.06)",
+              }}>
+                {[
+                  { label: "Total unit", value: String(p.total_units || "—") },
+                  { label: "Terjual",    value: String(p.units_sold) },
+                  { label: "Tersedia",   value: String(p.total_units ? p.total_units - p.units_sold : "—") },
+                ].map((s) => (
+                  <div key={s.label} style={{ textAlign: "center" }}>
+                    <div style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 600, color: "var(--color-ink)", lineHeight: 1 }}>
+                      {s.value}
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      {s.label}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── Checklist preview (show next 2 incomplete items) ── */}
+              {p.stage_checklist.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                    Checklist tahap ini
+                  </div>
+                  {p.stage_checklist.slice(0, 3).map((item, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                      {item.done
+                        ? <CheckCircle2 size={12} style={{ color: "var(--color-success)", flexShrink: 0 }} />
+                        : <Circle       size={12} style={{ color: item.blocking ? "var(--color-danger)" : "var(--color-ink-3)", flexShrink: 0 }} />
+                      }
+                      <span style={{ fontSize: 11, color: item.done ? "var(--color-ink-3)" : "var(--color-ink)", textDecoration: item.done ? "line-through" : "none" }}>
+                        {item.item}
+                        {item.blocking && !item.done && (
+                          <span style={{ color: "var(--color-danger)", marginLeft: 4 }}>⚡ Wajib</span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ── Footer ── */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ fontSize: 11, color: "var(--color-ink-3)" }}>
+                  {p.start_date
+                    ? <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Calendar size={11} /> {p.start_date} → {p.end_date ?? "?"}</span>
+                    : <span style={{ fontStyle: "italic" }}>Tanggal belum ditetapkan</span>
+                  }
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Link
+                    href={`/dashboard/units?project=${p.id}`}
+                    className="btn-ghost btn-sm"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+                  >
+                    <Home size={12} /> Unit
+                  </Link>
+                  <Link
+                    href={`/dashboard/projects/${p.id}`}
+                    className="btn-accent btn-sm"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+                  >
+                    Detail <ArrowRight size={12} />
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
