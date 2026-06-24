@@ -2,7 +2,7 @@
 # === backend/apps/organizations/views.py ===
 # =============================================================================
 """
-RumahAsri — Organizations Views
+DevelopIndo — Organizations Views
 
 Endpoints:
   GET /api/organizations/         ← super_admin: all orgs | developer/agent: own org
