@@ -6,18 +6,25 @@ DevelopIndo — Projects Serializers
 """
 from rest_framework import serializers
 
-from .models import Project
+from .models import Project, ProjectRequirementStatus, StageRequirement
 
 
 class ProjectSerializer(serializers.ModelSerializer):
-    """Full read serializer — used for list and detail responses."""
-    units_sold       = serializers.SerializerMethodField()
-    overall_progress = serializers.SerializerMethodField()
-    stage_display    = serializers.CharField(read_only=True)
+    """Full read serializer — includes intelligence fields."""
+    units_sold        = serializers.SerializerMethodField()
+    overall_progress  = serializers.SerializerMethodField()
+    stage_display     = serializers.CharField(read_only=True)
     organization_name = serializers.CharField(source="organization.name", read_only=True)
-    can_advance      = serializers.BooleanField(read_only=True)
-    next_stage       = serializers.CharField(read_only=True)
-    stage_checklist  = serializers.ListField(read_only=True)
+    # Intelligence fields
+    readiness_score   = serializers.IntegerField(read_only=True)
+    blocking_count    = serializers.IntegerField(read_only=True)
+    next_action       = serializers.CharField(read_only=True, allow_null=True)
+    risk_level        = serializers.CharField(read_only=True)
+    risk_level_display = serializers.CharField(read_only=True)
+    trend             = serializers.CharField(read_only=True)
+    can_advance       = serializers.BooleanField(read_only=True)
+    next_stage        = serializers.CharField(read_only=True, allow_null=True)
+    stage_checklist   = serializers.ListField(read_only=True)
 
     class Meta:
         model  = Project
@@ -27,6 +34,9 @@ class ProjectSerializer(serializers.ModelSerializer):
             # Lifecycle
             "stage", "stage_display", "can_advance", "next_stage",
             "stage_checklist",
+            # Intelligence
+            "readiness_score", "blocking_count", "next_action",
+            "risk_level", "risk_level_display", "trend",
             # Planning
             "total_units", "units_sold", "overall_progress",
             "target_budget", "start_date", "end_date",
@@ -48,22 +58,15 @@ class ProjectSerializer(serializers.ModelSerializer):
 
 
 class ProjectCreateSerializer(serializers.ModelSerializer):
-    """
-    Used for POST /api/projects/ — creates a project at DRAFT stage.
-    Only name and location are required. Everything else is optional
-    so a developer can get started immediately with minimal friction.
-    """
+    """POST /api/projects/ — creates at DRAFT stage. Only name+location required."""
+
     class Meta:
         model  = Project
-        fields = [
-            "name", "location", "description",
-        ]
+        fields = ["name", "location", "description"]
 
     def validate_name(self, value):
         if len(value.strip()) < 3:
-            raise serializers.ValidationError(
-                "Nama proyek minimal 3 karakter."
-            )
+            raise serializers.ValidationError("Nama proyek minimal 3 karakter.")
         return value.strip()
 
     def create(self, validated_data):
@@ -79,10 +82,8 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
 
 
 class ProjectUpdateSerializer(serializers.ModelSerializer):
-    """
-    Used for PUT /api/projects/<id>/ — updates project data.
-    Stage is NOT writable here — use the advance endpoint instead.
-    """
+    """PUT /api/projects/<id>/ — stage not writable here, use advance endpoint."""
+
     class Meta:
         model  = Project
         fields = [
@@ -90,30 +91,24 @@ class ProjectUpdateSerializer(serializers.ModelSerializer):
             "total_units", "target_budget",
             "start_date", "end_date",
             "master_plan_url", "site_plan_url",
-            # Permit fields
             "ipr_status", "ipr_date",
             "amdal_status", "amdal_date",
             "pbg_status", "pbg_date",
         ]
 
     def validate(self, data):
-        """
-        If PBG is being set to approved, record the date automatically
-        if not provided.
-        """
         from datetime import date
+        # Auto-set PBG date when approved
         if (data.get("pbg_status") == Project.PermitStatus.APPROVED
                 and not data.get("pbg_date")
+                and self.instance
                 and not self.instance.pbg_date):
             data["pbg_date"] = date.today()
         return data
 
 
 class ProjectAdvanceSerializer(serializers.Serializer):
-    """
-    Used for POST /api/projects/<id>/advance/
-    Confirms the developer wants to move to the next stage.
-    """
+    """POST /api/projects/<id>/advance/"""
     confirm = serializers.BooleanField(required=True)
 
     def validate_confirm(self, value):
