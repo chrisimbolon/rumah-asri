@@ -2,7 +2,7 @@
 # === apps/payments/views.py ===
 # =============================================================================
 """
-RumahAsri — Payments Views
+DevelopIndo — Payments Views
 
 THE FIX for the worst bug in the codebase: the old PaymentDetailView had
 zero ownership check on get() or put() — any authenticated user could
