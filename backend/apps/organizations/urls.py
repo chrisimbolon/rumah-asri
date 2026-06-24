@@ -2,7 +2,7 @@
 # === backend/apps/organizations/urls.py ===
 # =============================================================================
 """
-RumahAsri — Organizations URLs
+DevelopIndo — Organizations URLs
 """
 from django.urls import path
 from .views import MyOrganizationView, OrganizationDetailView, OrganizationListView
