@@ -1,7 +1,10 @@
 // ─────────────────────────────────────────────────────────────
-//  RumahAsri — Mock Data (Bahasa Indonesia)
+//  DevelopIndo — Mock Data (Bahasa Indonesia)
 //  PT Asri Sentosa Properti · Jambi, Indonesia
 //  Data demo untuk presentasi investor
+//
+//  NOTE: BIAYA / BiayaItem removed — Akuntansi Biaya cut from MVP.
+//  Planned for Phase 2 once apps/costs backend is built.
 // ─────────────────────────────────────────────────────────────
 
 // ── Developer ────────────────────────────────────────────────
@@ -228,49 +231,13 @@ export type FaseTimeline = {
 };
 
 export const TIMELINE_A01: FaseTimeline[] = [
-  {
-    fase: "Pembersihan & persiapan lahan",
-    tgl: "Jan 2025",
-    status: "selesai",
-    catatan: "Lahan dibersihkan & diratakan. Uji tanah lulus.",
-  },
-  {
-    fase: "Pekerjaan pondasi",
-    tgl: "Feb 2025",
-    status: "selesai",
-    catatan: "Pondasi beton dituang. 3 foto lapangan diunggah.",
-  },
-  {
-    fase: "Rangka struktur",
-    tgl: "Apr 2025",
-    status: "selesai",
-    catatan: "Rangka baja & kolom selesai dikerjakan.",
-  },
-  {
-    fase: "Dinding struktural",
-    tgl: "Mei 2025",
-    status: "selesai",
-    catatan: "Pasangan bata & plesteran selesai.",
-  },
-  {
-    fase: "Pemasangan atap & waterproofing",
-    tgl: "Jun 2025",
-    status: "selesai",
-    catatan: "Genteng dipasang, waterproofing atap selesai.",
-  },
-  {
-    fase: "Finishing interior",
-    tgl: "Jul – Agu 2025",
-    status: "proses",
-    catatan:
-      "Pengecatan lantai bawah selesai. Pemasangan keramik sedang berjalan.",
-  },
-  {
-    fase: "Selesai / serah terima",
-    tgl: "Sep 2025",
-    status: "menunggu",
-    catatan: "",
-  },
+  { fase: "Pembersihan & persiapan lahan", tgl: "Jan 2025", status: "selesai", catatan: "Lahan dibersihkan & diratakan. Uji tanah lulus." },
+  { fase: "Pekerjaan pondasi",             tgl: "Feb 2025", status: "selesai", catatan: "Pondasi beton dituang. 3 foto lapangan diunggah." },
+  { fase: "Rangka struktur",               tgl: "Apr 2025", status: "selesai", catatan: "Rangka baja & kolom selesai dikerjakan." },
+  { fase: "Dinding struktural",            tgl: "Mei 2025", status: "selesai", catatan: "Pasangan bata & plesteran selesai." },
+  { fase: "Pemasangan atap & waterproofing", tgl: "Jun 2025", status: "selesai", catatan: "Genteng dipasang, waterproofing atap selesai." },
+  { fase: "Finishing interior",            tgl: "Jul – Agu 2025", status: "proses",   catatan: "Pengecatan lantai bawah selesai. Pemasangan keramik sedang berjalan." },
+  { fase: "Selesai / serah terima",        tgl: "Sep 2025", status: "menunggu", catatan: "" },
 ];
 
 // ── Pembeli ───────────────────────────────────────────────────
@@ -287,61 +254,11 @@ export type Pembeli = {
 };
 
 export const PEMBELI: Pembeli[] = [
-  {
-    id: "pmb-001",
-    nama: "Budi Santoso",
-    email: "budi@gmail.com",
-    telp: "+62 812 3456 7890",
-    unit: "A-01",
-    unit_id: "unt-001",
-    metode: "KPR BCA",
-    bank: "BCA",
-    status: "lancar",
-  },
-  {
-    id: "pmb-002",
-    nama: "Rina Wulandari",
-    email: "rina@gmail.com",
-    telp: "+62 813 5678 9012",
-    unit: "B-07",
-    unit_id: "unt-003",
-    metode: "KPR BNI",
-    bank: "BNI",
-    status: "lancar",
-  },
-  {
-    id: "pmb-003",
-    nama: "Ahmad Fauzi",
-    email: "ahmad@gmail.com",
-    telp: "+62 878 9012 3456",
-    unit: "C-03",
-    unit_id: "unt-004",
-    metode: "Cash bertahap",
-    bank: "-",
-    status: "menunggak",
-  },
-  {
-    id: "pmb-004",
-    nama: "Siti Marlina",
-    email: "siti@gmail.com",
-    telp: "+62 857 3456 7890",
-    unit: "A-05",
-    unit_id: "unt-002",
-    metode: "KPR Mandiri",
-    bank: "Mandiri",
-    status: "proses_bank",
-  },
-  {
-    id: "pmb-005",
-    nama: "Hendra Gunawan",
-    email: "hendra@gmail.com",
-    telp: "+62 811 2345 6789",
-    unit: "D-01",
-    unit_id: "unt-006",
-    metode: "Cash keras",
-    bank: "-",
-    status: "lunas",
-  },
+  { id: "pmb-001", nama: "Budi Santoso",   email: "budi@gmail.com",   telp: "+62 812 3456 7890", unit: "A-01", unit_id: "unt-001", metode: "KPR BCA",      bank: "BCA",     status: "lancar" },
+  { id: "pmb-002", nama: "Rina Wulandari", email: "rina@gmail.com",   telp: "+62 813 5678 9012", unit: "B-07", unit_id: "unt-003", metode: "KPR BNI",      bank: "BNI",     status: "lancar" },
+  { id: "pmb-003", nama: "Ahmad Fauzi",    email: "ahmad@gmail.com",  telp: "+62 878 9012 3456", unit: "C-03", unit_id: "unt-004", metode: "Cash bertahap", bank: "-",       status: "menunggak" },
+  { id: "pmb-004", nama: "Siti Marlina",   email: "siti@gmail.com",   telp: "+62 857 3456 7890", unit: "A-05", unit_id: "unt-002", metode: "KPR Mandiri",   bank: "Mandiri", status: "proses_bank" },
+  { id: "pmb-005", nama: "Hendra Gunawan", email: "hendra@gmail.com", telp: "+62 811 2345 6789", unit: "D-01", unit_id: "unt-006", metode: "Cash keras",    bank: "-",       status: "lunas" },
 ];
 
 // ── Agen ──────────────────────────────────────────────────────
@@ -360,58 +277,10 @@ export type Agen = {
 };
 
 export const AGEN: Agen[] = [
-  {
-    id: "agn-001",
-    nama: "Rizky Setiawan",
-    inisial: "RS",
-    email: "rizky@asrisentosa.co.id",
-    telp: "+62 812 1111 2222",
-    area: "Telanaipura & Jambi Selatan",
-    terjual: 7,
-    pendapatan: "Rp 4,2M",
-    leads: 14,
-    proyek: 2,
-    status: "aktif",
-  },
-  {
-    id: "agn-002",
-    nama: "Dewi Puspita",
-    inisial: "DP",
-    email: "dewi@asrisentosa.co.id",
-    telp: "+62 813 3333 4444",
-    area: "Alam Barajo & Kotabaru",
-    terjual: 5,
-    pendapatan: "Rp 3,1M",
-    leads: 9,
-    proyek: 3,
-    status: "aktif",
-  },
-  {
-    id: "agn-003",
-    nama: "Anton Hidayat",
-    inisial: "AH",
-    email: "anton@asrisentosa.co.id",
-    telp: "+62 878 5555 6666",
-    area: "Jambi Timur",
-    terjual: 3,
-    pendapatan: "Rp 1,8M",
-    leads: 11,
-    proyek: 2,
-    status: "aktif",
-  },
-  {
-    id: "agn-004",
-    nama: "Linda Kusuma",
-    inisial: "LK",
-    email: "linda@asrisentosa.co.id",
-    telp: "+62 857 7777 8888",
-    area: "Jambi Selatan",
-    terjual: 2,
-    pendapatan: "Rp 1,2M",
-    leads: 7,
-    proyek: 1,
-    status: "cuti",
-  },
+  { id: "agn-001", nama: "Rizky Setiawan", inisial: "RS", email: "rizky@asrisentosa.co.id", telp: "+62 812 1111 2222", area: "Telanaipura & Jambi Selatan", terjual: 7, pendapatan: "Rp 4,2M", leads: 14, proyek: 2, status: "aktif" },
+  { id: "agn-002", nama: "Dewi Puspita",   inisial: "DP", email: "dewi@asrisentosa.co.id",  telp: "+62 813 3333 4444", area: "Alam Barajo & Kotabaru",      terjual: 5, pendapatan: "Rp 3,1M", leads: 9,  proyek: 3, status: "aktif" },
+  { id: "agn-003", nama: "Anton Hidayat",  inisial: "AH", email: "anton@asrisentosa.co.id", telp: "+62 878 5555 6666", area: "Jambi Timur",                  terjual: 3, pendapatan: "Rp 1,8M", leads: 11, proyek: 2, status: "aktif" },
+  { id: "agn-004", nama: "Linda Kusuma",   inisial: "LK", email: "linda@asrisentosa.co.id", telp: "+62 857 7777 8888", area: "Jambi Selatan",                terjual: 2, pendapatan: "Rp 1,2M", leads: 7,  proyek: 1, status: "cuti" },
 ];
 
 // ── Pembayaran ────────────────────────────────────────────────
@@ -427,109 +296,11 @@ export type Pembayaran = {
 };
 
 export const PEMBAYARAN: Pembayaran[] = [
-  {
-    id: "pay-001",
-    pembeli: "Budi Santoso",
-    unit: "A-01",
-    jenis: "Cicilan KPR #8",
-    jatuh_tempo: "1 Mar 2026",
-    jumlah: 7200000,
-    status: "lunas",
-    bank: "BCA",
-  },
-  {
-    id: "pay-002",
-    pembeli: "Rina Wulandari",
-    unit: "B-07",
-    jenis: "Cicilan KPR #5",
-    jatuh_tempo: "1 Mar 2026",
-    jumlah: 6800000,
-    status: "lunas",
-    bank: "BNI",
-  },
-  {
-    id: "pay-003",
-    pembeli: "Ahmad Fauzi",
-    unit: "C-03",
-    jenis: "Cash bertahap #2",
-    jatuh_tempo: "25 Feb 2026",
-    jumlah: 156000000,
-    status: "menunggak",
-    bank: "-",
-  },
-  {
-    id: "pay-004",
-    pembeli: "Siti Marlina",
-    unit: "A-05",
-    jenis: "Uang muka",
-    jatuh_tempo: "15 Mar 2026",
-    jumlah: 78000000,
-    status: "menunggu",
-    bank: "Mandiri",
-  },
-  {
-    id: "pay-005",
-    pembeli: "Hendra Gunawan",
-    unit: "D-01",
-    jenis: "Pelunasan akhir",
-    jatuh_tempo: "20 Mar 2026",
-    jumlah: 220000000,
-    status: "akan_datang",
-    bank: "-",
-  },
-];
-
-// ── Biaya konstruksi ──────────────────────────────────────────
-export type BiayaItem = {
-  item: string;
-  anggaran: number;
-  realisasi: number | null;
-  status: string;
-};
-
-export const BIAYA: BiayaItem[] = [
-  {
-    item: "Material pondasi",
-    anggaran: 45000000,
-    realisasi: 43200000,
-    status: "sesuai",
-  },
-  {
-    item: "Baja struktural",
-    anggaran: 120000000,
-    realisasi: 134500000,
-    status: "melebihi",
-  },
-  {
-    item: "Beton & pasangan bata",
-    anggaran: 80000000,
-    realisasi: 76800000,
-    status: "sesuai",
-  },
-  {
-    item: "Atap & genteng",
-    anggaran: 55000000,
-    realisasi: 52000000,
-    status: "sesuai",
-  },
-  {
-    item: "Instalasi listrik",
-    anggaran: 35000000,
-    realisasi: 38500000,
-    status: "melebihi",
-  },
-  {
-    item: "Instalasi pipa (plumbing)",
-    anggaran: 28000000,
-    realisasi: 27100000,
-    status: "sesuai",
-  },
-  {
-    item: "Finishing interior",
-    anggaran: 65000000,
-    realisasi: null,
-    status: "berjalan",
-  },
+  { id: "pay-001", pembeli: "Budi Santoso",   unit: "A-01", jenis: "Cicilan KPR #8",    jatuh_tempo: "1 Mar 2026",  jumlah: 7200000,   status: "lunas",      bank: "BCA" },
+  { id: "pay-002", pembeli: "Rina Wulandari", unit: "B-07", jenis: "Cicilan KPR #5",    jatuh_tempo: "1 Mar 2026",  jumlah: 6800000,   status: "lunas",      bank: "BNI" },
+  { id: "pay-003", pembeli: "Ahmad Fauzi",    unit: "C-03", jenis: "Cash bertahap #2",   jatuh_tempo: "25 Feb 2026", jumlah: 156000000, status: "menunggak",  bank: "-" },
+  { id: "pay-004", pembeli: "Siti Marlina",   unit: "A-05", jenis: "Uang muka",          jatuh_tempo: "15 Mar 2026", jumlah: 78000000,  status: "menunggu",   bank: "Mandiri" },
+  { id: "pay-005", pembeli: "Hendra Gunawan", unit: "D-01", jenis: "Pelunasan akhir",    jatuh_tempo: "20 Mar 2026", jumlah: 220000000, status: "akan_datang", bank: "-" },
 ];
 
 // ── Notifikasi ────────────────────────────────────────────────
@@ -543,46 +314,11 @@ export type Notifikasi = {
 };
 
 export const NOTIFIKASI: Notifikasi[] = [
-  {
-    id: "n1",
-    judul: "Progres konstruksi diperbarui",
-    pesan: "Unit A-01 diperbarui ke 85% — fase finishing interior",
-    waktu: "2 jam lalu",
-    dibaca: false,
-    tipe: "info",
-  },
-  {
-    id: "n2",
-    judul: "Pembeli baru terdaftar",
-    pesan: "Siti Marlina dihubungkan ke Unit A-05",
-    waktu: "5 jam lalu",
-    dibaca: false,
-    tipe: "sukses",
-  },
-  {
-    id: "n3",
-    judul: "Pembayaran menunggak!",
-    pesan: "Unit C-03 cicilan #2 menunggak 16 hari",
-    waktu: "1 hari lalu",
-    dibaca: false,
-    tipe: "peringatan",
-  },
-  {
-    id: "n4",
-    judul: "Penjualan baru tercatat",
-    pesan: "Unit B-07 terjual Agen Dewi — Rp 920 juta",
-    waktu: "2 hari lalu",
-    dibaca: false,
-    tipe: "sukses",
-  },
-  {
-    id: "n5",
-    judul: "Laporan bulanan siap",
-    pesan: "Laporan Februari 2026 siap diunduh",
-    waktu: "3 hari lalu",
-    dibaca: true,
-    tipe: "info",
-  },
+  { id: "n1", judul: "Progres konstruksi diperbarui", pesan: "Unit A-01 diperbarui ke 85% — fase finishing interior", waktu: "2 jam lalu",  dibaca: false, tipe: "info" },
+  { id: "n2", judul: "Pembeli baru terdaftar",        pesan: "Siti Marlina dihubungkan ke Unit A-05",                  waktu: "5 jam lalu",  dibaca: false, tipe: "sukses" },
+  { id: "n3", judul: "Pembayaran menunggak!",         pesan: "Unit C-03 cicilan #2 menunggak 16 hari",                 waktu: "1 hari lalu", dibaca: false, tipe: "peringatan" },
+  { id: "n4", judul: "Penjualan baru tercatat",       pesan: "Unit B-07 terjual Agen Dewi — Rp 920 juta",             waktu: "2 hari lalu", dibaca: false, tipe: "sukses" },
+  { id: "n5", judul: "Laporan bulanan siap",          pesan: "Laporan Februari 2026 siap diunduh",                     waktu: "3 hari lalu", dibaca: true,  tipe: "info" },
 ];
 
 // ── Log aktivitas ─────────────────────────────────────────────
@@ -593,36 +329,12 @@ export type LogItem = {
 };
 
 export const LOG: LogItem[] = [
-  {
-    waktu: "10:32 hari ini",
-    pengguna: "Teknisi Arif",
-    aksi: "Mengunggah 3 foto untuk Unit A-01",
-  },
-  {
-    waktu: "09:14 hari ini",
-    pengguna: "Admin ASP",
-    aksi: "Memperbarui progres Unit A-01 → 85%",
-  },
-  {
-    waktu: "Kemarin",
-    pengguna: "Agen Rizky",
-    aksi: "Membuat data pembeli baru: Siti Marlina",
-  },
-  {
-    waktu: "Kemarin",
-    pengguna: "Agen Dewi",
-    aksi: "Mencatat penjualan Unit B-07 — Rp 920.000.000",
-  },
-  {
-    waktu: "2 hari lalu",
-    pengguna: "Sistem",
-    aksi: "Mengirim pengingat pembayaran ke Ahmad Fauzi (C-03)",
-  },
-  {
-    waktu: "3 hari lalu",
-    pengguna: "Admin ASP",
-    aksi: "Membuat proyek baru: Perumahan Asri Grand D",
-  },
+  { waktu: "10:32 hari ini", pengguna: "Teknisi Arif",  aksi: "Mengunggah 3 foto untuk Unit A-01" },
+  { waktu: "09:14 hari ini", pengguna: "Admin ASP",     aksi: "Memperbarui progres Unit A-01 → 85%" },
+  { waktu: "Kemarin",        pengguna: "Agen Rizky",    aksi: "Membuat data pembeli baru: Siti Marlina" },
+  { waktu: "Kemarin",        pengguna: "Agen Dewi",     aksi: "Mencatat penjualan Unit B-07 — Rp 920.000.000" },
+  { waktu: "2 hari lalu",    pengguna: "Sistem",        aksi: "Mengirim pengingat pembayaran ke Ahmad Fauzi (C-03)" },
+  { waktu: "3 hari lalu",    pengguna: "Admin ASP",     aksi: "Membuat proyek baru: Perumahan Asri Grand D" },
 ];
 
 // ── Grafik penjualan ──────────────────────────────────────────
@@ -632,10 +344,10 @@ export type DataGrafik = {
 };
 
 export const GRAFIK_PENJUALAN: DataGrafik[] = [
-  { bulan: "Okt", penjualan: 5 },
-  { bulan: "Nov", penjualan: 7 },
-  { bulan: "Des", penjualan: 4 },
-  { bulan: "Jan", penjualan: 9 },
+  { bulan: "Okt", penjualan: 5  },
+  { bulan: "Nov", penjualan: 7  },
+  { bulan: "Des", penjualan: 4  },
+  { bulan: "Jan", penjualan: 9  },
   { bulan: "Feb", penjualan: 11 },
   { bulan: "Mar", penjualan: 13 },
 ];
@@ -669,9 +381,6 @@ export function badgeStatus(s: string): string {
     menunggak:    "badge-red",
     proses_bank:  "badge-amber",
     akan_datang:  "badge-blue",
-    melebihi:     "badge-red",
-    sesuai:       "badge-green",
-    berjalan:     "badge-blue",
     cuti:         "badge-amber",
     lancar:       "badge-green",
   };
@@ -693,9 +402,6 @@ export function labelStatus(s: string): string {
     menunggak:    "Menunggak",
     proses_bank:  "Proses Bank",
     akan_datang:  "Akan Datang",
-    melebihi:     "Melebihi Anggaran",
-    sesuai:       "Sesuai Anggaran",
-    berjalan:     "Berjalan",
     cuti:         "Cuti",
     lancar:       "Lancar",
   };
