@@ -2,7 +2,7 @@
 # === backend/apps/organizations/serializers.py ===
 # =============================================================================
 """
-RumahAsri — Organizations Serializers
+DevelopIndo — Organizations Serializers
 
 Three levels of detail:
   OrganizationSerializer       — list view (counts only, no nested data)
