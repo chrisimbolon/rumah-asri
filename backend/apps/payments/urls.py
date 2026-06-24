@@ -1,5 +1,5 @@
 """
-RumahAsri — Payments URLs
+DevelopIndo — Payments URLs
 """
 
 from django.urls import path
