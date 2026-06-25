@@ -1,5 +1,5 @@
 """
-RumahAsri — Buyer Portal Views
+DevelopIndo — Buyer Portal Views
 
 All buyer-facing API endpoints in one clean place.
 Every buyer sees ONLY their own unit data.
