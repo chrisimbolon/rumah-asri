@@ -9,6 +9,8 @@ Endpoints:
   GET /api/organizations/mine/    ← current user's organization (any authenticated role)
   GET /api/organizations/<id>/    ← org detail with memberships (super_admin only)
 """
+from apps.core.views import TenantScopedAPIView 
+from apps.authentication.models import CustomUser
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -99,3 +101,47 @@ class OrganizationDetailView(APIView):
 
         serializer = OrganizationDetailSerializer(org)
         return Response({"success": True, "organization": serializer.data})
+
+class BuyerListView(TenantScopedAPIView):
+    """
+    GET /api/organizations/buyers/
+    Returns all buyer accounts — used by booking modal
+    to populate the buyer dropdown.
+    
+    Note: TenantScopedAPIView is used for auth,
+    but buyers don't have org membership —
+    we return all buyers visible to this developer.
+    """
+    model = None  # override — not a TenantScopedModel query
+
+    def get_queryset(self):
+        # Override — buyers don't belong to organizations
+        # Return all active buyers
+        from apps.authentication.models import CustomUser
+        return CustomUser.objects.filter(
+            role="buyer", is_active=True
+        ).order_by("full_name")
+
+    def get(self, request):
+        if request.user.role not in ("developer", "super_admin"):
+            from rest_framework import status as drf_status
+            from rest_framework.response import Response
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=drf_status.HTTP_403_FORBIDDEN,
+            )
+        from rest_framework.response import Response
+        buyers = self.get_queryset()
+        return Response({
+            "success": True,
+            "count":   buyers.count(),
+            "results": [
+                {
+                    "id":        str(b.id),
+                    "full_name": b.full_name,
+                    "email":     b.email,
+                    "phone":     b.phone,
+                }
+                for b in buyers
+            ],
+        })
