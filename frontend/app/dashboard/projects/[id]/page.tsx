@@ -219,7 +219,7 @@ function RequirementRow({
               onClick={() => handleStatusChange("in_progress")}
               disabled={saving || req.status === "in_progress"}
               style={{
-                padding: "4px 8px", borderRadius: 4, border: "none",
+                padding: "4px 8px", borderRadius: 4,
                 fontSize: 10, fontWeight: 600, cursor: "pointer",
                 backgroundColor: req.status === "in_progress" ? "var(--color-warning-light)" : "white",
                 color: "var(--color-warning)",
@@ -233,7 +233,7 @@ function RequirementRow({
               onClick={() => handleStatusChange("completed")}
               disabled={saving}
               style={{
-                padding: "4px 10px", borderRadius: 4, border: "none",
+                padding: "4px 10px", borderRadius: 4,
                 fontSize: 10, fontWeight: 600, cursor: "pointer",
                 backgroundColor: "var(--color-success)",
                 color: "white",

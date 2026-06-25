@@ -1,5 +1,5 @@
 """
-RumahAsri — Buyer Portal URLs
+DevelopIndo — Buyer Portal URLs
 Mounted at /api/buyer/ in config/urls.py
 
 All routes:
