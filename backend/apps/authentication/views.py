@@ -1,5 +1,5 @@
 """
-RumahAsri — Authentication Views
+DevelopIndo — Authentication Views
 
 Endpoints:
   POST /api/auth/register/   ← create new account
