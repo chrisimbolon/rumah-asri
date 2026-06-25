@@ -2,7 +2,7 @@
 # === apps/construction/models.py ===
 # =============================================================================
 """
-RumahAsri — Construction Phases Model
+DevelopIndo — Construction Phases Model
 """
 import uuid
 
