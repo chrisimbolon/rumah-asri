@@ -2,7 +2,7 @@
 # === apps/documents/models.py ===
 # =============================================================================
 """
-RumahAsri — Documents Model
+DevelopIndo — Documents Model
 """
 from django.conf import settings
 from django.db import models
