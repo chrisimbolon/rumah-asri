@@ -1,5 +1,5 @@
 """
-RumahAsri — Construction Admin
+DevelopIndo — Construction Admin
 """
 
 from django.contrib import admin
