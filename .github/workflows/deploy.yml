@@ -1,0 +1,277 @@
+# .github/workflows/deploy.yml
+# Build on GitHub runner → upload → deploy on Droplet
+# Smart rebuild rules:
+#   - push:              only rebuild what changed (backend/ or frontend/)
+#   - workflow_dispatch: always rebuild EVERYTHING (emergency full deploy)
+#
+name: Deploy DevelopIndo to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ── 1. Checkout ─────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # need HEAD~1 for diff check
+
+      # ── 2. Detect what changed ───────────────────────────────
+      - name: Detect changed paths
+        id: changes
+        run: |
+          # ── Manual trigger → always rebuild everything ───────
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "backend=true"  >> $GITHUB_OUTPUT
+            echo "frontend=true" >> $GITHUB_OUTPUT
+            echo "🔧 Manual trigger — deploying EVERYTHING"
+            exit 0
+          fi
+
+          # ── Push → check what actually changed ───────────────
+          CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          echo "=== Changed files ==="
+          echo "$CHANGED"
+          echo "====================="
+
+          # Backend changed if backend/ OR docker-compose.yml changed
+          if echo "$CHANGED" | grep -qE "^backend/|^docker-compose\.yml$"; then
+            echo "backend=true"  >> $GITHUB_OUTPUT
+            echo "✅ Backend/compose changed — will rebuild Django"
+          else
+            echo "backend=false" >> $GITHUB_OUTPUT
+            echo "⏭️  Backend unchanged — skipping Django rebuild"
+          fi
+
+          # Frontend changed if frontend/ OR docker-compose.yml changed
+          if echo "$CHANGED" | grep -qE "^frontend/|^docker-compose\.yml$"; then
+            echo "frontend=true"  >> $GITHUB_OUTPUT
+            echo "✅ Frontend/compose changed — will rebuild Next.js"
+          else
+            echo "frontend=false" >> $GITHUB_OUTPUT
+            echo "⏭️  Frontend unchanged — skipping Next.js rebuild"
+          fi
+
+      # ── 3. Run Django tests (only if backend changed) ────────
+      - name: Setup Python
+        if: steps.changes.outputs.backend == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install backend dependencies
+        if: steps.changes.outputs.backend == 'true'
+        run: pip install -r backend/requirements/base.txt
+
+      - name: Run test suite
+        if: steps.changes.outputs.backend == 'true'
+        run: |
+          cd backend
+          python manage.py test apps.authentication apps.core --verbosity=2
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.local
+          DATABASE_URL:           sqlite:///test_db.sqlite3
+          SECRET_KEY:             ci-secret-key-minimum-50-characters-long-for-django
+          DEBUG:                  "True"
+
+      # ── 4. Build Next.js standalone (only if frontend changed)
+      - name: Setup Node
+        if: steps.changes.outputs.frontend == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        if: steps.changes.outputs.frontend == 'true'
+        run: cd frontend && npm ci
+
+      - name: Build Next.js standalone
+        if: steps.changes.outputs.frontend == 'true'
+        run: cd frontend && npm run build
+        env:
+          NEXT_PUBLIC_API_URL: https://developindo.com
+
+      # ── 5. Write production .env (always) ────────────────────
+      - name: Write .env file
+        env:
+          SECRET_KEY:            ${{ secrets.SECRET_KEY }}
+          DB_NAME:               ${{ secrets.DB_NAME }}
+          DB_USER:               ${{ secrets.DB_USER }}
+          DB_PASSWORD:           ${{ secrets.DB_PASSWORD }}
+          ALLOWED_HOSTS:         ${{ secrets.ALLOWED_HOSTS }}
+          CORS_ALLOWED_ORIGINS:  ${{ secrets.CORS_ALLOWED_ORIGINS }}
+          CSRF_TRUSTED_ORIGINS:  ${{ secrets.CSRF_TRUSTED_ORIGINS }}
+        run: |
+          printf '%s\n' \
+            "SECRET_KEY=${SECRET_KEY}" \
+            "DEBUG=False" \
+            "DJANGO_SETTINGS_MODULE=config.settings.production" \
+            "ALLOWED_HOSTS=${ALLOWED_HOSTS}" \
+            "CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}" \
+            "CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS}" \
+            "DB_NAME=${DB_NAME}" \
+            "DB_USER=${DB_USER}" \
+            "DB_PASSWORD=${DB_PASSWORD}" \
+            "DB_HOST=developindo_db" \
+            "DB_PORT=5432" \
+            "SECURE_PROXY_SSL_HEADER=HTTP_X_FORWARDED_PROTO,https" \
+            "USE_X_FORWARDED_HOST=True" \
+            "NEXT_PUBLIC_API_URL=https://developindo.com" \
+            > .env
+
+      # ── 6. Set up SSH (always) ────────────────────────────────
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      # ── 7. Upload .env (always) ───────────────────────────────
+      - name: Upload .env file
+        run: |
+          rsync -avz .env \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/apps/developindo/.env
+
+      # ── 8. Upload Next.js standalone (only if frontend changed)
+      - name: Upload Next.js standalone build
+        if: steps.changes.outputs.frontend == 'true'
+        run: |
+          rsync -avz --delete \
+            frontend/.next/standalone/ \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/apps/developindo/frontend/.next/standalone/
+
+          rsync -avz --delete \
+            frontend/.next/static/ \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/apps/developindo/frontend/.next/static/
+
+          if [ -d "frontend/public" ] && [ "$(ls -A frontend/public)" ]; then
+            rsync -avz --delete \
+              frontend/public/ \
+              ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/apps/developindo/frontend/public/
+          else
+            echo "frontend/public empty — skipping"
+          fi
+
+      # ── 9. Deploy backend (only if backend changed) ───────────
+      - name: Deploy backend
+        if: steps.changes.outputs.backend == 'true'
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'ENDSSH'
+            set -e
+            cd /home/apps/developindo
+
+            echo "=== Pulling latest code ==="
+            git pull origin main
+
+            echo "=== Clearing Docker build cache ==="
+            docker builder prune -f
+
+            echo "=== Building backend image ==="
+            docker compose build --no-cache --pull developindo_backend
+
+            echo "=== Starting DB ==="
+            docker compose up -d developindo_db
+
+            echo "=== Waiting for DB to be healthy ==="
+            for i in $(seq 1 30); do
+              STATUS=$(docker inspect developindo_db \
+                --format='{{.State.Health.Status}}' 2>/dev/null || echo "starting")
+              echo "DB: $STATUS ($i/30)"
+              [ "$STATUS" = "healthy" ] && echo "✅ DB ready!" && break
+              [ "$i" -eq 30 ] && echo "❌ DB timeout!" && exit 1
+              sleep 3
+            done
+
+            echo "=== Running migrations ==="
+            docker compose run --rm developindo_backend \
+              python manage.py migrate --noinput
+
+            echo "=== Collecting static files ==="
+            docker compose run --rm developindo_backend \
+              python manage.py collectstatic --noinput
+
+            echo "=== Restarting backend ==="
+            docker stop developindo_backend 2>/dev/null || true
+            docker rm   developindo_backend 2>/dev/null || true
+            docker compose up -d --no-deps developindo_backend
+
+            echo "=== Backend restarted ==="
+          ENDSSH
+
+      # ── 10. Pull code if only frontend changed ────────────────
+      - name: Pull latest code (frontend-only deploy)
+        if: >
+          steps.changes.outputs.backend == 'false' &&
+          steps.changes.outputs.frontend == 'true'
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'ENDSSH'
+            set -e
+            cd /home/apps/developindo
+            echo "=== Pulling latest code ==="
+            git pull origin main
+          ENDSSH
+
+      # ── 11. Deploy frontend (only if frontend changed) ────────
+      - name: Deploy frontend
+        if: steps.changes.outputs.frontend == 'true'
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'ENDSSH'
+            set -e
+            cd /home/apps/developindo
+
+            echo "=== Restarting frontend with new build ==="
+            docker stop developindo_frontend 2>/dev/null || true
+            docker rm   developindo_frontend 2>/dev/null || true
+            docker compose up -d --no-deps developindo_frontend
+
+            echo "=== Frontend restarted ==="
+            sleep 5
+            docker ps | grep developindo
+          ENDSSH
+
+      # ── 12. Health check + Caddy reload (always) ──────────────
+      - name: Health check and Caddy reload
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'ENDSSH'
+            echo "=== Waiting for backend health ==="
+            for i in $(seq 1 30); do
+              docker exec developindo_backend \
+                curl -sf http://localhost:8000/api/organizations/mine/ \
+                -H "Authorization: Bearer skip" \
+                > /dev/null 2>&1
+              # 401 is fine — means Django is up and responding
+              CODE=$(docker exec developindo_backend \
+                curl -s -o /dev/null -w "%{http_code}" \
+                http://localhost:8000/api/organizations/mine/ \
+                -H "Authorization: Bearer skip" 2>/dev/null || echo "000")
+              echo "Backend response: $CODE ($i/30)"
+              [ "$CODE" = "401" ] || [ "$CODE" = "200" ] \
+                && echo "✅ Backend healthy!" && break
+              [ "$i" -eq 30 ] && echo "❌ Backend timeout!" && exit 1
+              sleep 3
+            done
+
+            echo "=== Reloading Caddy ==="
+            CADDY=$(docker ps -qf "name=caddy")
+            [ -n "$CADDY" ] && docker exec $CADDY \
+              caddy reload --config /etc/caddy/Caddyfile 2>/dev/null \
+              && echo "✅ Caddy reloaded!" \
+              || echo "⚠️  Caddy reload skipped"
+
+            echo "=== Deploy complete! ==="
+            cd /home/apps/developindo
+            echo "$(date) | $(git rev-parse --short HEAD) | OK" >> deploy.log
+            docker ps | grep developindo
+          ENDSSH
