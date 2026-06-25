@@ -1,9 +1,7 @@
 """
 DevelopIndo — Production Settings
 """
-
 from decouple import config
-
 from .base import *  # noqa
 
 # ── Debug — NEVER True in production!! ───────────────────────
@@ -22,7 +20,8 @@ DATABASES = {
 }
 
 # ── Security ─────────────────────────────────────────────────
-SECURE_SSL_REDIRECT         = True
+SECURE_SSL_REDIRECT         = False  # Caddy handles SSL termination
+SECURE_PROXY_SSL_HEADER     = ("HTTP_X_FORWARDED_PROTO", "https")
 SESSION_COOKIE_SECURE       = True
 CSRF_COOKIE_SECURE          = True
 SECURE_BROWSER_XSS_FILTER  = True
