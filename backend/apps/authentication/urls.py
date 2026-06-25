@@ -1,5 +1,5 @@
 """
-RumahAsri — Authentication URLs
+DevelopIndo — Authentication URLs
 
 All routes prefixed with /api/auth/
 """
