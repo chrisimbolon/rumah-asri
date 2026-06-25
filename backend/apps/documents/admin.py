@@ -1,5 +1,5 @@
 """
-RumahAsri — Documents Admin
+DevelopIndo — Documents Admin
 """
 
 from django.contrib import admin
