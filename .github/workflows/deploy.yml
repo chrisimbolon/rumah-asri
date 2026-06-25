@@ -248,15 +248,12 @@ jobs:
           ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'ENDSSH'
             echo "=== Waiting for backend health ==="
             for i in $(seq 1 30); do
-              docker exec developindo_backend \
-                curl -sf http://localhost:8000/api/organizations/mine/ \
-                -H "Authorization: Bearer skip" \
-                > /dev/null 2>&1
-              # 401 is fine — means Django is up and responding
               CODE=$(docker exec developindo_backend \
                 curl -s -o /dev/null -w "%{http_code}" \
+                -H "Authorization: Bearer skip" \
+                -H "Host: developindo.com" \
                 http://localhost:8000/api/organizations/mine/ \
-                -H "Authorization: Bearer skip" 2>/dev/null || echo "000")
+                2>/dev/null || echo "000")
               echo "Backend response: $CODE ($i/30)"
               [ "$CODE" = "401" ] || [ "$CODE" = "200" ] \
                 && echo "✅ Backend healthy!" && break
