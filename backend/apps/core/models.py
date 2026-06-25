@@ -21,7 +21,7 @@ class TenantScopedQuerySet(models.QuerySet):
     def for_user(self, user):
         """
         The one supported entry point for fetching tenant-scoped rows.
-        super_admin (RumahAsri platform staff) sees everything.
+        super_admin (DevelopIndo platform staff) sees everything.
         Everyone else sees only rows in an organization they have an
         active membership in.
         """
