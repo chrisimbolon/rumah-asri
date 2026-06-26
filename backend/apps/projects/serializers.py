@@ -1,30 +1,43 @@
 # =============================================================================
 # === backend/apps/projects/serializers.py ===
+# Sprint 1: adds readiness_dimensions, risk_reasons, alerts,
+# parallel_stages, collection_efficiency, is_selling, is_constructing
+# BACKWARD COMPATIBLE — all original fields preserved.
 # =============================================================================
-"""
-DevelopIndo — Projects Serializers
-"""
+from datetime import date
+
 from rest_framework import serializers
 
 from .models import Project, ProjectRequirementStatus, StageRequirement
 
 
 class ProjectSerializer(serializers.ModelSerializer):
-    """Full read serializer — includes intelligence fields."""
-    units_sold        = serializers.SerializerMethodField()
-    overall_progress  = serializers.SerializerMethodField()
-    stage_display     = serializers.CharField(read_only=True)
-    organization_name = serializers.CharField(source="organization.name", read_only=True)
-    # Intelligence fields
-    readiness_score   = serializers.IntegerField(read_only=True)
-    blocking_count    = serializers.IntegerField(read_only=True)
-    next_action       = serializers.CharField(read_only=True, allow_null=True)
-    risk_level        = serializers.CharField(read_only=True)
+    """Full read serializer — includes all intelligence fields."""
+
+    units_sold         = serializers.SerializerMethodField()
+    overall_progress   = serializers.SerializerMethodField()
+    stage_display      = serializers.CharField(read_only=True)
+    organization_name  = serializers.CharField(source="organization.name", read_only=True)
+
+    # Original intelligence fields — UNCHANGED
+    readiness_score    = serializers.IntegerField(read_only=True)
+    blocking_count     = serializers.IntegerField(read_only=True)
+    next_action        = serializers.CharField(read_only=True, allow_null=True)
+    risk_level         = serializers.CharField(read_only=True)
     risk_level_display = serializers.CharField(read_only=True)
-    trend             = serializers.CharField(read_only=True)
-    can_advance       = serializers.BooleanField(read_only=True)
-    next_stage        = serializers.CharField(read_only=True, allow_null=True)
-    stage_checklist   = serializers.ListField(read_only=True)
+    trend              = serializers.CharField(read_only=True)
+    can_advance        = serializers.BooleanField(read_only=True)
+    next_stage         = serializers.CharField(read_only=True, allow_null=True)
+    stage_checklist    = serializers.ListField(read_only=True)
+
+    # Sprint 1: new intelligence fields
+    readiness_dimensions  = serializers.DictField(read_only=True)
+    risk_reasons          = serializers.ListField(read_only=True)
+    alerts                = serializers.ListField(read_only=True)
+    parallel_stages       = serializers.DictField(
+        source="parallel_stage_status", read_only=True
+    )
+    collection_efficiency = serializers.DictField(read_only=True)
 
     class Meta:
         model  = Project
@@ -34,9 +47,14 @@ class ProjectSerializer(serializers.ModelSerializer):
             # Lifecycle
             "stage", "stage_display", "can_advance", "next_stage",
             "stage_checklist",
-            # Intelligence
+            # Original intelligence
             "readiness_score", "blocking_count", "next_action",
             "risk_level", "risk_level_display", "trend",
+            # Sprint 1 intelligence
+            "readiness_dimensions", "risk_reasons",
+            "alerts", "parallel_stages", "collection_efficiency",
+            # Sprint 1 parallel flags
+            "is_selling", "is_constructing",
             # Planning
             "total_units", "units_sold", "overall_progress",
             "target_budget", "start_date", "end_date",
@@ -58,7 +76,7 @@ class ProjectSerializer(serializers.ModelSerializer):
 
 
 class ProjectCreateSerializer(serializers.ModelSerializer):
-    """POST /api/projects/ — creates at DRAFT stage. Only name+location required."""
+    """POST /api/projects/ — creates at DRAFT stage. Unchanged."""
 
     class Meta:
         model  = Project
@@ -82,7 +100,10 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
 
 
 class ProjectUpdateSerializer(serializers.ModelSerializer):
-    """PUT /api/projects/<id>/ — stage not writable here, use advance endpoint."""
+    """
+    PUT /api/projects/<id>/
+    Sprint 1: is_selling and is_constructing now writable.
+    """
 
     class Meta:
         model  = Project
@@ -94,10 +115,11 @@ class ProjectUpdateSerializer(serializers.ModelSerializer):
             "ipr_status", "ipr_date",
             "amdal_status", "amdal_date",
             "pbg_status", "pbg_date",
+            # Sprint 1: parallel stage flags
+            "is_selling", "is_constructing",
         ]
 
     def validate(self, data):
-        from datetime import date
         # Auto-set PBG date when approved
         if (data.get("pbg_status") == Project.PermitStatus.APPROVED
                 and not data.get("pbg_date")
@@ -108,7 +130,7 @@ class ProjectUpdateSerializer(serializers.ModelSerializer):
 
 
 class ProjectAdvanceSerializer(serializers.Serializer):
-    """POST /api/projects/<id>/advance/"""
+    """POST /api/projects/<id>/advance/ — unchanged."""
     confirm = serializers.BooleanField(required=True)
 
     def validate_confirm(self, value):
