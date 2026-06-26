@@ -14,7 +14,7 @@ from apps.construction.models import ConstructionPhase
 from apps.documents.models import Document
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.payments.models import Payment
-from apps.projects.models import Project
+from apps.projects.models import Project, ProjectRequirementStatus, StageRequirement
 from apps.units.models import Unit
 from django.core.management.base import BaseCommand
 
@@ -36,6 +36,7 @@ class Command(BaseCommand):
             Payment.objects.all().delete()
             ConstructionPhase.objects.all().delete()
             Unit.objects.all().delete()
+            ProjectRequirementStatus.objects.all().delete()
             Project.objects.all().delete()
             CustomUser.objects.filter(role__in=["developer", "buyer", "agent"]).delete()
             Organization.objects.all().delete()
@@ -43,7 +44,7 @@ class Command(BaseCommand):
 
         self.stdout.write("🌱 Seeding DevelopIndo database...")
 
-        # ── 1. Create Developer ────────────────────────────────
+        # ── 1. Developer ───────────────────────────────────────
         developer, created = CustomUser.objects.get_or_create(
             email="developer@asrisentosa.co.id",
             defaults={
@@ -58,7 +59,7 @@ class Command(BaseCommand):
             developer.save()
         self.stdout.write(f"  ✅ Developer: {developer.email}")
 
-        # ── 1b. Create Organization + Membership ──────────────
+        # ── 1b. Organization ───────────────────────────────────
         org, org_created = Organization.objects.get_or_create(
             name="PT Asri Sentosa Properti",
         )
@@ -70,7 +71,7 @@ class Command(BaseCommand):
             f"({'created' if org_created else 'existing'})"
         )
 
-        # ── 2. Create Buyers ───────────────────────────────────
+        # ── 2. Buyers ──────────────────────────────────────────
         buyers_data = [
             {"email": "budi@gmail.com",   "full_name": "Budi Santoso",   "phone": "+62 812 3456 7890"},
             {"email": "rina@gmail.com",   "full_name": "Rina Wulandari", "phone": "+62 813 5678 9012"},
@@ -90,9 +91,7 @@ class Command(BaseCommand):
             buyers.append(buyer)
             self.stdout.write(f"  ✅ Buyer: {buyer.email}")
 
-        # ── 3. Create Projects ─────────────────────────────────
-        # stage=konstruksi — these are active construction projects
-        # PBG already approved (required to be in konstruksi stage)
+        # ── 3. Projects ────────────────────────────────────────
         projects_data = [
             {
                 "name":         "Perumahan Asri Cluster A",
@@ -103,13 +102,14 @@ class Command(BaseCommand):
                 "target_budget": 15000000000,
                 "start_date":   date(2025, 1, 15),
                 "end_date":     date(2025, 12, 31),
-                # Permits — all approved to be in konstruksi
                 "ipr_status":   Project.PermitStatus.APPROVED,
                 "ipr_date":     date(2024, 10, 1),
                 "amdal_status": Project.PermitStatus.APPROVED,
                 "amdal_date":   date(2024, 11, 1),
                 "pbg_status":   Project.PermitStatus.APPROVED,
                 "pbg_date":     date(2025, 1, 10),
+                # Intelligence snapshot — reflects completed requirements
+                "readiness_score_last": 50,
             },
             {
                 "name":         "Perumahan Asri Cluster B",
@@ -126,6 +126,7 @@ class Command(BaseCommand):
                 "amdal_date":   date(2024, 12, 1),
                 "pbg_status":   Project.PermitStatus.APPROVED,
                 "pbg_date":     date(2025, 2, 20),
+                "readiness_score_last": 100,
             },
             {
                 "name":         "Perumahan Asri Cluster C",
@@ -142,6 +143,7 @@ class Command(BaseCommand):
                 "amdal_date":   date(2025, 2, 15),
                 "pbg_status":   Project.PermitStatus.APPROVED,
                 "pbg_date":     date(2025, 5, 20),
+                "readiness_score_last": 0,
             },
         ]
         projects = []
@@ -154,7 +156,56 @@ class Command(BaseCommand):
             projects.append(project)
             self.stdout.write(f"  ✅ Project: {project.name} (stage: {project.stage})")
 
-        # ── 4. Create Units ────────────────────────────────────
+        # ── 4. Stage requirement statuses ──────────────────────
+        # Auto-create ProjectRequirementStatus rows for each project
+        # Then seed realistic completion states for the demo:
+        #   Cluster A — 50% done (1/2 mandatory complete)
+        #   Cluster B — 100% done (both mandatory complete, can advance)
+        #   Cluster C — 0% done (nothing started)
+        from django.utils import timezone
+
+        for project in projects:
+            project._create_stage_requirements()
+
+        self.stdout.write("  ✅ Stage requirement statuses created")
+
+        # Cluster A — "Rencana kerja" completed, "Kontraktor" pending
+        cluster_a = projects[0]
+        req_rencana = StageRequirement.objects.filter(
+            stage=Project.Stage.CONSTRUCTION, name="Rencana kerja"
+        ).first()
+        if req_rencana:
+            status_obj = ProjectRequirementStatus.objects.filter(
+                project=cluster_a, requirement=req_rencana
+            ).first()
+            if status_obj:
+                status_obj.status       = ProjectRequirementStatus.Status.COMPLETED
+                status_obj.completed_at = timezone.now()
+                status_obj.updated_by   = developer
+                status_obj.save()
+                self.stdout.write("  ✅ Cluster A: Rencana kerja → selesai (50% readiness)")
+
+        # Cluster B — both mandatory requirements completed (can advance!)
+        cluster_b = projects[1]
+        for req_name in ["Rencana kerja", "Kontraktor"]:
+            req = StageRequirement.objects.filter(
+                stage=Project.Stage.CONSTRUCTION, name=req_name
+            ).first()
+            if req:
+                status_obj = ProjectRequirementStatus.objects.filter(
+                    project=cluster_b, requirement=req
+                ).first()
+                if status_obj:
+                    status_obj.status       = ProjectRequirementStatus.Status.COMPLETED
+                    status_obj.completed_at = timezone.now()
+                    status_obj.updated_by   = developer
+                    status_obj.save()
+        self.stdout.write("  ✅ Cluster B: Rencana kerja + Kontraktor → selesai (100% readiness, siap maju)")
+
+        # Cluster C — nothing done (0% readiness, shows "Risiko Sedang")
+        self.stdout.write("  ✅ Cluster C: Belum ada requirement selesai (0% readiness)")
+
+        # ── 5. Units ───────────────────────────────────────────
         units_data = [
             {
                 "project":           projects[0],
@@ -242,7 +293,7 @@ class Command(BaseCommand):
             units.append(unit)
             self.stdout.write(f"  ✅ Unit: {unit.unit_number} ({unit.project.name})")
 
-        # ── 5. Construction Phases for Unit A-01 ──────────────
+        # ── 6. Construction Phases for Unit A-01 ──────────────
         phases_data = [
             {"phase_order": 1, "phase_name": "Pembersihan & persiapan lahan",   "phase_date": "Jan 2025",     "status": "selesai", "notes": "Lahan dibersihkan & diratakan. Uji tanah lulus."},
             {"phase_order": 2, "phase_name": "Pekerjaan pondasi",               "phase_date": "Feb 2025",     "status": "selesai", "notes": "Pondasi beton dituang. 3 foto lapangan diunggah."},
@@ -261,7 +312,7 @@ class Command(BaseCommand):
             )
         self.stdout.write("  ✅ Construction phases for Unit A-01 (7 phases)")
 
-        # ── 6. Payments for Unit A-01 ──────────────────────────
+        # ── 7. Payments for Unit A-01 ──────────────────────────
         payments_data = [
             {"payment_type": "Cicilan KPR #8",  "due_date": date(2026, 3, 1), "amount": 7200000, "status": "lunas",       "bank": "BCA"},
             {"payment_type": "Cicilan KPR #9",  "due_date": date(2026, 4, 1), "amount": 7200000, "status": "akan_datang", "bank": "BCA"},
@@ -275,7 +326,7 @@ class Command(BaseCommand):
             )
         self.stdout.write("  ✅ Payments for Unit A-01 (3 records)")
 
-        # ── 7. Documents for Unit A-01 ─────────────────────────
+        # ── 8. Documents for Unit A-01 ─────────────────────────
         documents_data = [
             {"doc_type": "ppjb",     "name": "PPJB — Perjanjian Pengikatan Jual Beli", "status": "tersedia", "issued_date": "Jan 2025"},
             {"doc_type": "imb",      "name": "IMB — Izin Mendirikan Bangunan",          "status": "tersedia", "issued_date": "Des 2024"},
@@ -295,18 +346,17 @@ class Command(BaseCommand):
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS("🎉 Database seeded successfully!!"))
         self.stdout.write("")
+        self.stdout.write("📊 Intelligence state:")
+        self.stdout.write("  Cluster A: 50% readiness  — 1 blocking  — Risk: Sedang  — Trend: ↘ Declining")
+        self.stdout.write("  Cluster B: 100% readiness — 0 blocking  — Risk: Rendah  — Trend: ↗ Improving")
+        self.stdout.write("  Cluster C: 0% readiness   — 2 blocking  — Risk: Sedang  — Trend: → Stable")
+        self.stdout.write("")
         self.stdout.write("📋 Test accounts:")
         self.stdout.write("  Developer: developer@asrisentosa.co.id / DevelopIndo2026!")
         self.stdout.write("  Buyer:     budi@gmail.com / Pembeli2026!")
-        self.stdout.write("  Buyer:     rina@gmail.com / Pembeli2026!")
-        self.stdout.write("  Buyer:     ahmad@gmail.com / Pembeli2026!")
         self.stdout.write("")
         self.stdout.write("🔗 API endpoints ready:")
-        self.stdout.write("  GET  /api/projects/")
-        self.stdout.write("  POST /api/projects/                ← Tambah Proyek")
-        self.stdout.write("  POST /api/projects/<id>/advance/   ← Lanjutkan Tahap")
-        self.stdout.write("  GET  /api/units/")
-        self.stdout.write("  GET  /api/buyer/me/")
-        self.stdout.write("  GET  /api/buyer/timeline/")
-        self.stdout.write("  GET  /api/buyer/payments/")
-        self.stdout.write("  GET  /api/buyer/documents/")
+        self.stdout.write("  GET  /api/projects/portfolio/              ← Intelligence overview")
+        self.stdout.write("  GET  /api/projects/<id>/intelligence/      ← Full intelligence")
+        self.stdout.write("  PUT  /api/projects/<id>/requirements/<id>/ ← Update requirement")
+        self.stdout.write("  POST /api/projects/<id>/advance/           ← Advance stage")
