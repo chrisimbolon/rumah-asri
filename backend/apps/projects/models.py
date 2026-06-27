@@ -13,8 +13,13 @@ Sprint 1 additions:
   collection_efficiency      → AR snapshot from Chris's visualization
   is_selling / is_constructing → parallel stage flags on Project
 
+Sprint 2 additions:
+  ProjectRequirementStatus.Status → added "menunggu_verifikasi"
+  RequirementEvidence             → proof document per requirement
+  approve() / reject()            → verifier workflow
+  get_intelligence_summary()      → now includes evidence counts per requirement
+
 ZERO BREAKING CHANGES — all existing fields preserved.
-New fields added alongside. 59 tests still green.
 """
 import uuid
 from datetime import date
@@ -26,8 +31,7 @@ from apps.core.models import TenantScopedModel
 
 
 # =============================================================================
-# StageRequirement — global template of what must be done per stage
-# Sprint 1: added `category` field for 4-dimension readiness mapping
+# StageRequirement — unchanged from Sprint 1
 # =============================================================================
 
 class StageRequirement(models.Model):
@@ -54,15 +58,13 @@ class StageRequirement(models.Model):
     is_mandatory = models.BooleanField(default=True, verbose_name="Wajib (memblokir)")
     order        = models.PositiveIntegerField(default=0, verbose_name="Urutan")
     is_active    = models.BooleanField(default=True, verbose_name="Aktif")
-    # Sprint 1: category maps this requirement to a readiness dimension
     category     = models.CharField(
-        max_length=20,
-        choices=Category.choices,
+        max_length=20, choices=Category.choices,
         default=Category.GENERAL,
         verbose_name="Kategori Requirement",
     )
-    created_at   = models.DateTimeField(auto_now_add=True)
-    updated_at   = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name        = "Stage Requirement"
@@ -76,15 +78,16 @@ class StageRequirement(models.Model):
 
 
 # =============================================================================
-# ProjectRequirementStatus — per-project completion tracking (unchanged)
+# ProjectRequirementStatus — Sprint 2: added menunggu_verifikasi status
 # =============================================================================
 
 class ProjectRequirementStatus(models.Model):
     class Status(models.TextChoices):
-        PENDING        = "pending",        "Belum Dimulai"
-        IN_PROGRESS    = "in_progress",    "Sedang Diproses"
-        COMPLETED      = "completed",      "Selesai"
-        NOT_APPLICABLE = "not_applicable", "Tidak Berlaku"
+        PENDING               = "pending",             "Belum Dimulai"
+        IN_PROGRESS           = "in_progress",         "Sedang Diproses"
+        AWAITING_VERIFICATION = "menunggu_verifikasi", "Menunggu Verifikasi"  # Sprint 2
+        COMPLETED             = "completed",           "Selesai"
+        NOT_APPLICABLE        = "not_applicable",      "Tidak Berlaku"
 
     id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     project     = models.ForeignKey(
@@ -96,7 +99,7 @@ class ProjectRequirementStatus(models.Model):
         related_name="project_statuses",
     )
     status      = models.CharField(
-        max_length=20, choices=Status.choices,
+        max_length=25, choices=Status.choices,
         default=Status.PENDING,
     )
     notes        = models.TextField(blank=True, verbose_name="Catatan")
@@ -123,9 +126,154 @@ class ProjectRequirementStatus(models.Model):
         self.updated_by   = user
         self.save(update_fields=["status", "completed_at", "updated_by", "updated_at"])
 
+    def mark_awaiting_verification(self, user=None):
+        """Sprint 2: called when developer uploads evidence."""
+        self.status     = self.Status.AWAITING_VERIFICATION
+        self.updated_by = user
+        self.save(update_fields=["status", "updated_by", "updated_at"])
+
 
 # =============================================================================
-# Project — Sprint 1 intelligence engine upgrade
+# RequirementEvidence — Sprint 2 NEW MODEL
+# Proof document uploaded by developer as evidence for a requirement.
+# =============================================================================
+
+class RequirementEvidence(models.Model):
+    """
+    Evidence document for a StageRequirement.
+
+    Flow:
+      Developer uploads file/URL
+              ↓
+      RequirementStatus → "menunggu_verifikasi"
+              ↓
+      Verifier reviews evidence
+              ↓
+      APPROVED → RequirementStatus → "completed"
+      REJECTED → RequirementStatus → "in_progress" (re-upload needed)
+
+    File storage: media/evidence/%Y/%m/ (mirrors Document model)
+    """
+
+    class VerificationStatus(models.TextChoices):
+        PENDING  = "pending",  "Menunggu Review"
+        APPROVED = "approved", "Disetujui"
+        REJECTED = "rejected", "Ditolak"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # ── Core relationship ─────────────────────────────────────
+    requirement_status = models.ForeignKey(
+        ProjectRequirementStatus,
+        on_delete=models.CASCADE,
+        related_name="evidence",
+        verbose_name="Status Requirement",
+    )
+
+    # ── File or URL ───────────────────────────────────────────
+    file      = models.FileField(
+        upload_to="evidence/%Y/%m/",
+        null=True, blank=True,
+        verbose_name="File Bukti",
+    )
+    file_name = models.CharField(
+        max_length=300, blank=True,
+        verbose_name="Nama File",
+        help_text="Original filename for display",
+    )
+    file_url  = models.URLField(
+        blank=True,
+        verbose_name="URL Bukti",
+        help_text="External URL if no file upload (Google Drive, etc.)",
+    )
+    notes     = models.TextField(
+        blank=True,
+        verbose_name="Catatan / Deskripsi Bukti",
+    )
+
+    # ── Upload audit ──────────────────────────────────────────
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL, null=True,
+        related_name="uploaded_evidence",
+        verbose_name="Diunggah oleh",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    # ── Verification ──────────────────────────────────────────
+    verification_status = models.CharField(
+        max_length=20,
+        choices=VerificationStatus.choices,
+        default=VerificationStatus.PENDING,
+        verbose_name="Status Verifikasi",
+        db_index=True,
+    )
+    verifier       = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="verified_evidence",
+        verbose_name="Verifikator",
+    )
+    verified_at    = models.DateTimeField(null=True, blank=True)
+    verifier_notes = models.TextField(
+        blank=True,
+        verbose_name="Catatan Verifikator",
+        help_text="Reason for approval or rejection",
+    )
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name        = "Bukti Requirement"
+        verbose_name_plural = "Bukti Requirement"
+        ordering            = ["-uploaded_at"]
+
+    def __str__(self):
+        req_name = self.requirement_status.requirement.name
+        return f"Bukti: {req_name} — {self.get_verification_status_display()}"
+
+    def approve(self, verifier_user, notes=""):
+        """
+        Approve evidence → auto-completes the requirement.
+        Snapshots readiness on the project for trend tracking.
+        """
+        from django.utils import timezone
+        self.verification_status = self.VerificationStatus.APPROVED
+        self.verifier            = verifier_user
+        self.verified_at         = timezone.now()
+        self.verifier_notes      = notes
+        self.save(update_fields=[
+            "verification_status", "verifier",
+            "verified_at", "verifier_notes", "updated_at",
+        ])
+        # Auto-complete the parent requirement
+        self.requirement_status.mark_completed(user=verifier_user)
+        # Snapshot readiness for trend tracking
+        self.requirement_status.project.snapshot_readiness()
+
+    def reject(self, verifier_user, notes=""):
+        """
+        Reject evidence → requirement goes back to in_progress.
+        Developer must re-upload better evidence.
+        """
+        from django.utils import timezone
+        self.verification_status = self.VerificationStatus.REJECTED
+        self.verifier            = verifier_user
+        self.verified_at         = timezone.now()
+        self.verifier_notes      = notes
+        self.save(update_fields=[
+            "verification_status", "verifier",
+            "verified_at", "verifier_notes", "updated_at",
+        ])
+        # Move requirement back to in_progress
+        req_status            = self.requirement_status
+        req_status.status     = ProjectRequirementStatus.Status.IN_PROGRESS
+        req_status.updated_by = verifier_user
+        req_status.save(update_fields=["status", "updated_by", "updated_at"])
+
+
+# =============================================================================
+# Project — all Sprint 1 code preserved, Sprint 2 adds evidence to summary
 # =============================================================================
 
 class Project(TenantScopedModel):
@@ -152,34 +300,26 @@ class Project(TenantScopedModel):
     description = models.TextField(blank=True, verbose_name="Deskripsi")
     stage       = models.CharField(
         max_length=20, choices=Stage.choices,
-        default=Stage.DRAFT,
-        verbose_name="Tahap", db_index=True,
+        default=Stage.DRAFT, verbose_name="Tahap", db_index=True,
     )
 
     # ── Sprint 1: parallel stage flags ────────────────────────
-    # Indonesian pre-sales reality: selling and construction
-    # run simultaneously — not sequentially.
     is_selling = models.BooleanField(
-        default=False,
-        verbose_name="Aktif Penjualan (5A)",
-        help_text="Unit sudah dipasarkan/dijual (bisa paralel dengan konstruksi)",
+        default=False, verbose_name="Aktif Penjualan (5A)",
     )
     is_constructing = models.BooleanField(
-        default=False,
-        verbose_name="Aktif Konstruksi (5B)",
-        help_text="Konstruksi sudah berjalan",
+        default=False, verbose_name="Aktif Konstruksi (5B)",
     )
 
     # ── Planning fields ───────────────────────────────────────
-    total_units   = models.PositiveIntegerField(default=0, verbose_name="Total Unit")
+    total_units   = models.PositiveIntegerField(default=0)
     target_budget = models.DecimalField(
-        max_digits=15, decimal_places=2,
-        null=True, blank=True, verbose_name="Target Anggaran (Rp)",
+        max_digits=15, decimal_places=2, null=True, blank=True,
     )
-    start_date      = models.DateField(null=True, blank=True, verbose_name="Tanggal Mulai")
-    end_date        = models.DateField(null=True, blank=True, verbose_name="Target Selesai")
-    master_plan_url = models.URLField(blank=True, verbose_name="URL Master Plan")
-    site_plan_url   = models.URLField(blank=True, verbose_name="URL Site Plan")
+    start_date      = models.DateField(null=True, blank=True)
+    end_date        = models.DateField(null=True, blank=True)
+    master_plan_url = models.URLField(blank=True)
+    site_plan_url   = models.URLField(blank=True)
 
     # ── Permit fields ─────────────────────────────────────────
     class PermitStatus(models.TextChoices):
@@ -263,7 +403,6 @@ class Project(TenantScopedModel):
 
     @property
     def readiness_score(self):
-        """% of mandatory requirements completed. Unchanged."""
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         total = requirements.count()
         if total == 0:
@@ -278,7 +417,10 @@ class Project(TenantScopedModel):
 
     @property
     def blocking_count(self):
-        """Number of mandatory requirements still blocking. Unchanged."""
+        """
+        menunggu_verifikasi does NOT block — evidence is uploaded,
+        just waiting for verifier. Only pending and in_progress block.
+        """
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         statuses = self._get_requirement_statuses()
         blocking = 0
@@ -293,7 +435,6 @@ class Project(TenantScopedModel):
 
     @property
     def next_action(self):
-        """First pending mandatory requirement. Unchanged."""
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         statuses = self._get_requirement_statuses()
         for r in requirements:
@@ -304,22 +445,12 @@ class Project(TenantScopedModel):
 
     @property
     def risk_level(self):
-        """
-        Sprint 1 upgrade: risk now considers permit status AND
-        timeline overrun — not just blocking count.
-        """
         count = self.blocking_count
-
-        # PBG rejected is always high risk regardless of count
         if self.pbg_status == self.PermitStatus.REJECTED:
             return "high"
-
-        # Timeline overrun
         if (self.end_date and date.today() > self.end_date
                 and self.stage not in (self.Stage.COMPLETED, self.Stage.HANDOVER)):
             return "high"
-
-        # Standard blocking count logic
         if count == 0:
             return "low"
         if count <= 3:
@@ -334,7 +465,6 @@ class Project(TenantScopedModel):
 
     @property
     def trend(self):
-        """Comparing current vs last readiness snapshot. Unchanged."""
         current  = self.readiness_score
         previous = self.readiness_score_last
         if current > previous:
@@ -345,7 +475,6 @@ class Project(TenantScopedModel):
 
     @property
     def can_advance(self):
-        """Unchanged."""
         if self.stage == self.Stage.COMPLETED:
             return False
         if self.stage == self.Stage.ON_HOLD:
@@ -355,22 +484,13 @@ class Project(TenantScopedModel):
         return True
 
     # =========================================================
-    # SPRINT 1: NEW INTELLIGENCE PROPERTIES
+    # SPRINT 1: NEW INTELLIGENCE PROPERTIES — UNCHANGED
     # =========================================================
 
     @property
     def readiness_dimensions(self):
-        """
-        4-dimension readiness breakdown.
-        Co-founder visualization: Project Readiness panel.
-        Each dimension = % of mandatory requirements in that
-        category that are completed.
-        Returns 100 for dimensions with no requirements
-        (not applicable to this stage).
-        """
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         statuses     = self._get_requirement_statuses()
-
         dims = {
             "inventory":   {"total": 0, "completed": 0},
             "compliance":  {"total": 0, "completed": 0},
@@ -378,33 +498,22 @@ class Project(TenantScopedModel):
             "sales_setup": {"total": 0, "completed": 0},
             "general":     {"total": 0, "completed": 0},
         }
-
         for r in requirements:
             cat = r.category if r.category in dims else "general"
             dims[cat]["total"] += 1
             s = statuses.get(str(r.id))
             if s and s.status == ProjectRequirementStatus.Status.COMPLETED:
                 dims[cat]["completed"] += 1
-
         result = {}
         for dim, data in dims.items():
-            if data["total"] == 0:
-                result[dim] = 100  # not applicable = 100%
-            else:
-                result[dim] = round((data["completed"] / data["total"]) * 100)
-
+            result[dim] = 100 if data["total"] == 0 else round(
+                (data["completed"] / data["total"]) * 100
+            )
         return result
 
     @property
     def risk_reasons(self):
-        """
-        Human-readable list of WHY the risk level is what it is.
-        Closes co-founder gap 2: "Risk Reason Is Hidden".
-        Example output: ["PBG ditolak", "Kontraktor belum selesai"]
-        """
         reasons = []
-
-        # Permit-based reasons
         if self.pbg_status == self.PermitStatus.REJECTED:
             reasons.append("PBG ditolak — perlu pengajuan ulang")
         elif (self.pbg_status == self.PermitStatus.NOT_STARTED
@@ -413,17 +522,12 @@ class Project(TenantScopedModel):
                   self.Stage.SALES, self.Stage.HANDOVER,
               )):
             reasons.append("PBG belum dimulai")
-
         if self.amdal_status == self.PermitStatus.REJECTED:
             reasons.append("AMDAL ditolak")
-
-        # Timeline overrun
         if (self.end_date and date.today() > self.end_date
                 and self.stage not in (self.Stage.COMPLETED, self.Stage.HANDOVER)):
             overrun_days = (date.today() - self.end_date).days
             reasons.append(f"Proyek terlambat {overrun_days} hari dari target")
-
-        # Pending mandatory requirements (show max 3 specific names)
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         statuses     = self._get_requirement_statuses()
         pending = [
@@ -435,122 +539,78 @@ class Project(TenantScopedModel):
             reasons.append(f"{name} belum selesai")
         if len(pending) > 3:
             reasons.append(f"...dan {len(pending) - 3} item wajib lainnya")
-
         return reasons
 
     @property
     def alerts(self):
-        """
-        Severity-ranked actionable alerts ledger.
-        Co-founder visualization: Actionable Alerts Ledger.
-
-        Levels:
-          critical → blocks everything (red) — fix immediately
-          warning  → needs attention soon (amber)
-          info     → informational (blue)
-
-        Sorted: critical first, then warning, then info.
-        """
         result = []
-
-        # ── CRITICAL: PBG rejected ────────────────────────────
         if self.pbg_status == self.PermitStatus.REJECTED:
             result.append({
-                "level":    "critical",
-                "category": "permit",
-                "message":  "PBG ditolak — unit pipeline terkunci sampai PBG disetujui",
-                "action":   "Ajukan ulang PBG ke instansi terkait",
+                "level": "critical", "category": "permit",
+                "message": "PBG ditolak — unit pipeline terkunci sampai PBG disetujui",
+                "action": "Ajukan ulang PBG ke instansi terkait",
             })
-
-        # ── CRITICAL: AMDAL rejected ──────────────────────────
         if self.amdal_status == self.PermitStatus.REJECTED:
             result.append({
-                "level":    "critical",
-                "category": "permit",
-                "message":  "AMDAL ditolak — tahap perizinan tidak dapat diselesaikan",
-                "action":   "Revisi dokumen AMDAL dan ajukan ulang",
+                "level": "critical", "category": "permit",
+                "message": "AMDAL ditolak — tahap perizinan tidak dapat diselesaikan",
+                "action": "Revisi dokumen AMDAL dan ajukan ulang",
             })
-
-        # ── CRITICAL: blocking mandatory requirements ─────────
         if self.blocking_count > 0:
             next_act = self.next_action
             result.append({
-                "level":    "critical",
-                "category": "requirement",
-                "message":  (
+                "level": "critical", "category": "requirement",
+                "message": (
                     f"{self.blocking_count} requirement wajib memblokir "
                     f"tahap {self.stage_display}"
                 ),
-                "action":   (
-                    f"Mulai dengan: {next_act}"
-                    if next_act else
-                    "Selesaikan semua requirement wajib"
+                "action": (
+                    f"Mulai dengan: {next_act}" if next_act
+                    else "Selesaikan semua requirement wajib"
                 ),
             })
-
-        # ── WARNING: timeline overrun ─────────────────────────
         if (self.end_date and date.today() > self.end_date
                 and self.stage not in (self.Stage.COMPLETED, self.Stage.HANDOVER)):
             overrun_days = (date.today() - self.end_date).days
             result.append({
-                "level":    "warning",
-                "category": "timeline",
-                "message":  f"Proyek terlambat {overrun_days} hari dari target selesai",
-                "action":   "Perbarui target selesai atau percepat konstruksi",
+                "level": "warning", "category": "timeline",
+                "message": f"Proyek terlambat {overrun_days} hari dari target selesai",
+                "action": "Perbarui target selesai atau percepat konstruksi",
             })
-
-        # ── WARNING: no units yet (past perencanaan) ──────────
         if (self.stage in (
                 self.Stage.CONSTRUCTION, self.Stage.SALES, self.Stage.HANDOVER)
                 and not self.units.exists()):
             result.append({
-                "level":    "warning",
-                "category": "inventory",
-                "message":  "Belum ada unit terdaftar di tahap ini",
-                "action":   "Tambah unit di modul Unit",
+                "level": "warning", "category": "inventory",
+                "message": "Belum ada unit terdaftar di tahap ini",
+                "action": "Tambah unit di modul Unit",
             })
-
-        # ── WARNING: selling but no priced units ──────────────
         if self.is_selling and not self.units.filter(price__gt=0).exists():
             result.append({
-                "level":    "warning",
-                "category": "sales",
-                "message":  "Mode penjualan aktif tapi belum ada unit dengan harga",
-                "action":   "Set harga unit sebelum memasarkan",
+                "level": "warning", "category": "sales",
+                "message": "Mode penjualan aktif tapi belum ada unit dengan harga",
+                "action": "Set harga unit sebelum memasarkan",
             })
-
-        # ── WARNING: financial delinquency ────────────────────
         overdue = self._get_overdue_payments_count()
         if overdue > 0:
             result.append({
-                "level":    "warning",
-                "category": "financial",
-                "message":  f"{overdue} invoice pembayaran melewati jatuh tempo",
-                "action":   "Tindak lanjuti pembayaran yang tertunggak",
+                "level": "warning", "category": "financial",
+                "message": f"{overdue} invoice pembayaran melewati jatuh tempo",
+                "action": "Tindak lanjuti pembayaran yang tertunggak",
             })
-
-        # ── INFO: PBG not started but in perizinan ────────────
         if (self.pbg_status == self.PermitStatus.NOT_STARTED
                 and self.stage == self.Stage.PERMITS):
             result.append({
-                "level":    "info",
-                "category": "permit",
-                "message":  "PBG belum dimulai — diperlukan sebelum konstruksi",
-                "action":   "Mulai pengajuan PBG",
+                "level": "info", "category": "permit",
+                "message": "PBG belum dimulai — diperlukan sebelum konstruksi",
+                "action": "Mulai pengajuan PBG",
             })
-
-        # Sort: critical → warning → info
         order = {"critical": 0, "warning": 1, "info": 2}
         result.sort(key=lambda a: order.get(a["level"], 3))
-
         return result
 
     @property
     def parallel_stage_status(self):
-        """
-        Sprint 1: Indonesian pre-sales reality.
-        5A = selling, 5B = construction — can run simultaneously.
-        """
         return {
             "is_selling":      self.is_selling,
             "is_constructing": self.is_constructing,
@@ -565,49 +625,28 @@ class Project(TenantScopedModel):
 
     @property
     def collection_efficiency(self):
-        """
-        Sprint 1: Financial snapshot — Chris's visualization.
-        Total AR, Lunas, Menunggak, efficiency %.
-        Gracefully returns empty state if payments app unavailable.
-        """
         try:
             from apps.payments.models import Payment
-            payments = list(Payment.objects.filter(unit__project=self))
+            payments      = list(Payment.objects.filter(unit__project=self))
             total_billed  = sum(p.amount for p in payments)
             total_settled = sum(p.amount for p in payments if p.status == "lunas")
             total_arrears = total_billed - total_settled
-            efficiency    = (
-                round((total_settled / total_billed) * 100)
-                if total_billed > 0 else 100
-            )
+            efficiency    = round((total_settled / total_billed) * 100) if total_billed > 0 else 100
             return {
                 "total_billed":   int(total_billed),
                 "total_settled":  int(total_settled),
                 "total_arrears":  int(total_arrears),
                 "efficiency_pct": efficiency,
-                "status":         (
-                    "healthy"   if efficiency >= 90 else
-                    "attention" if efficiency >= 70 else
-                    "critical"
-                ),
-                "status_display": (
-                    "Sehat"           if efficiency >= 90 else
-                    "Perlu Perhatian" if efficiency >= 70 else
-                    "Kritis"
-                ),
+                "status":         "healthy" if efficiency >= 90 else "attention" if efficiency >= 70 else "critical",
+                "status_display": "Sehat" if efficiency >= 90 else "Perlu Perhatian" if efficiency >= 70 else "Kritis",
             }
         except Exception:
             return {
-                "total_billed":   0,
-                "total_settled":  0,
-                "total_arrears":  0,
-                "efficiency_pct": 100,
-                "status":         "healthy",
-                "status_display": "Sehat",
+                "total_billed": 0, "total_settled": 0, "total_arrears": 0,
+                "efficiency_pct": 100, "status": "healthy", "status_display": "Sehat",
             }
 
     def _get_overdue_payments_count(self):
-        """Count overdue payments — used by alerts property."""
         try:
             from apps.payments.models import Payment
             from django.utils import timezone
@@ -620,17 +659,17 @@ class Project(TenantScopedModel):
             return 0
 
     # =========================================================
-    # get_intelligence_summary — SPRINT 1 UPGRADE
-    # Backward compatible — all original fields preserved.
-    # New fields added alongside.
+    # get_intelligence_summary — Sprint 2 upgrade
+    # Now includes evidence count and verification status per requirement
     # =========================================================
 
     def get_intelligence_summary(self):
         """
-        Returns full intelligence data for API response.
-        Sprint 1: adds dimensions, risk_reasons, alerts,
-        parallel_stages, collection_efficiency.
-        All original fields unchanged.
+        Sprint 2: each requirement item now includes evidence data:
+          evidence_count       → how many evidence docs uploaded
+          evidence_status      → latest evidence verification status
+          has_pending_evidence → True if any evidence awaiting review
+        All original fields preserved.
         """
         requirements = self._get_current_requirements()
         statuses     = self._get_requirement_statuses()
@@ -638,13 +677,30 @@ class Project(TenantScopedModel):
         items = []
         for r in requirements:
             s = statuses.get(str(r.id))
+
+            # Sprint 2: fetch evidence for this requirement status
+            evidence_count          = 0
+            latest_evidence_status  = None
+            has_pending_evidence    = False
+
+            if s:
+                evidence_qs = s.evidence.all().order_by("-uploaded_at")
+                evidence_count = evidence_qs.count()
+                if evidence_count > 0:
+                    latest = evidence_qs.first()
+                    latest_evidence_status = latest.verification_status
+                    has_pending_evidence   = evidence_qs.filter(
+                        verification_status="pending"
+                    ).exists()
+
             items.append({
+                # Original fields — UNCHANGED
                 "id":             str(r.id),
                 "name":           r.name,
                 "description":    r.description,
                 "is_mandatory":   r.is_mandatory,
                 "order":          r.order,
-                "category":       r.category,       # Sprint 1
+                "category":       r.category,
                 "status":         s.status if s else ProjectRequirementStatus.Status.PENDING,
                 "status_display": dict(ProjectRequirementStatus.Status.choices).get(
                     s.status if s else "pending", "Belum Dimulai"
@@ -652,6 +708,10 @@ class Project(TenantScopedModel):
                 "notes":          s.notes if s else "",
                 "completed_at":   s.completed_at.isoformat() if s and s.completed_at else None,
                 "status_id":      str(s.id) if s else None,
+                # Sprint 2: evidence fields
+                "evidence_count":         evidence_count,
+                "latest_evidence_status": latest_evidence_status,
+                "has_pending_evidence":   has_pending_evidence,
             })
 
         return {
@@ -664,8 +724,7 @@ class Project(TenantScopedModel):
             "trend":              self.trend,
             "can_advance":        self.can_advance,
             "requirements":       items,
-
-            # Sprint 1: new fields
+            # Sprint 1 fields — UNCHANGED
             "readiness_dimensions":  self.readiness_dimensions,
             "risk_reasons":          self.risk_reasons,
             "alerts":                self.alerts,
@@ -674,12 +733,10 @@ class Project(TenantScopedModel):
         }
 
     # =========================================================
-    # SNAPSHOT / ADVANCE / CHECKLIST — UNCHANGED except
-    # advance_stage() auto-sets parallel flags
+    # SNAPSHOT / ADVANCE / CHECKLIST — UNCHANGED
     # =========================================================
 
     def snapshot_readiness(self):
-        """Store current readiness as last snapshot. Unchanged."""
         from django.utils import timezone
         current = self.readiness_score
         if current != self.readiness_score_last:
@@ -692,7 +749,6 @@ class Project(TenantScopedModel):
             ])
 
     def _create_stage_requirements(self):
-        """Auto-create requirement status rows for new stage. Unchanged."""
         requirements = StageRequirement.objects.filter(
             stage=self.stage, is_active=True
         )
@@ -704,11 +760,6 @@ class Project(TenantScopedModel):
             )
 
     def advance_stage(self):
-        """
-        Move project to next stage.
-        Sprint 1: auto-sets is_constructing / is_selling flags
-        when advancing to those stages.
-        """
         if self.stage == self.Stage.COMPLETED:
             raise ValueError("Proyek sudah selesai.")
         if self.stage == self.Stage.ON_HOLD:
@@ -718,25 +769,20 @@ class Project(TenantScopedModel):
                 f"Proyek diblokir — {self.blocking_count} requirement wajib belum selesai. "
                 f"Tindakan berikutnya: {self.next_action}."
             )
-
         self.snapshot_readiness()
         self.stage = self.next_stage
         self.save(update_fields=["stage", "updated_at"])
-
-        # Sprint 1: auto-set parallel flags
         if self.stage == self.Stage.CONSTRUCTION:
             self.is_constructing = True
             self.save(update_fields=["is_constructing", "updated_at"])
         if self.stage == self.Stage.SALES:
             self.is_selling = True
             self.save(update_fields=["is_selling", "updated_at"])
-
         self._create_stage_requirements()
         return self.stage
 
     @property
     def stage_checklist(self):
-        """Backward compat — unchanged."""
         intelligence = self.get_intelligence_summary()
         reqs = intelligence["requirements"]
         if reqs:

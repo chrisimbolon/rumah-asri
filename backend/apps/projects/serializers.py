@@ -1,15 +1,58 @@
 # =============================================================================
 # === backend/apps/projects/serializers.py ===
-# Sprint 1: adds readiness_dimensions, risk_reasons, alerts,
-# parallel_stages, collection_efficiency, is_selling, is_constructing
-# BACKWARD COMPATIBLE — all original fields preserved.
+# Sprint 2: adds RequirementEvidenceSerializer
+# All Sprint 1 serializers preserved — additive only.
 # =============================================================================
 from datetime import date
 
 from rest_framework import serializers
 
-from .models import Project, ProjectRequirementStatus, StageRequirement
+from .models import Project, ProjectRequirementStatus, RequirementEvidence, StageRequirement
 
+
+# =============================================================================
+# Sprint 2: NEW serializer
+# =============================================================================
+
+class RequirementEvidenceSerializer(serializers.ModelSerializer):
+    """Read serializer for RequirementEvidence."""
+    uploaded_by_name  = serializers.CharField(
+        source="uploaded_by.full_name", read_only=True, default=""
+    )
+    verifier_name     = serializers.CharField(
+        source="verifier.full_name", read_only=True, default=""
+    )
+    verification_display = serializers.CharField(
+        source="get_verification_status_display", read_only=True
+    )
+    file_url_display  = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = RequirementEvidence
+        fields = [
+            "id",
+            "file_name", "file_url", "file_url_display",
+            "notes",
+            "uploaded_by", "uploaded_by_name", "uploaded_at",
+            "verification_status", "verification_display",
+            "verifier", "verifier_name", "verified_at",
+            "verifier_notes",
+        ]
+        read_only_fields = ["id", "uploaded_at", "verified_at"]
+
+    def get_file_url_display(self, obj):
+        """Returns the file download URL or external URL."""
+        if obj.file:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.file.url)
+            return obj.file.url
+        return obj.file_url or ""
+
+
+# =============================================================================
+# Original serializers — UNCHANGED from Sprint 1
+# =============================================================================
 
 class ProjectSerializer(serializers.ModelSerializer):
     """Full read serializer — includes all intelligence fields."""
@@ -19,7 +62,7 @@ class ProjectSerializer(serializers.ModelSerializer):
     stage_display      = serializers.CharField(read_only=True)
     organization_name  = serializers.CharField(source="organization.name", read_only=True)
 
-    # Original intelligence fields — UNCHANGED
+    # Original intelligence fields
     readiness_score    = serializers.IntegerField(read_only=True)
     blocking_count     = serializers.IntegerField(read_only=True)
     next_action        = serializers.CharField(read_only=True, allow_null=True)
@@ -30,7 +73,7 @@ class ProjectSerializer(serializers.ModelSerializer):
     next_stage         = serializers.CharField(read_only=True, allow_null=True)
     stage_checklist    = serializers.ListField(read_only=True)
 
-    # Sprint 1: new intelligence fields
+    # Sprint 1 intelligence fields
     readiness_dimensions  = serializers.DictField(read_only=True)
     risk_reasons          = serializers.ListField(read_only=True)
     alerts                = serializers.ListField(read_only=True)
@@ -42,28 +85,20 @@ class ProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Project
         fields = [
-            # Identity
             "id", "name", "location", "description",
-            # Lifecycle
             "stage", "stage_display", "can_advance", "next_stage",
             "stage_checklist",
-            # Original intelligence
             "readiness_score", "blocking_count", "next_action",
             "risk_level", "risk_level_display", "trend",
-            # Sprint 1 intelligence
             "readiness_dimensions", "risk_reasons",
             "alerts", "parallel_stages", "collection_efficiency",
-            # Sprint 1 parallel flags
             "is_selling", "is_constructing",
-            # Planning
             "total_units", "units_sold", "overall_progress",
             "target_budget", "start_date", "end_date",
             "master_plan_url", "site_plan_url",
-            # Permits
             "ipr_status", "ipr_date",
             "amdal_status", "amdal_date",
             "pbg_status", "pbg_date",
-            # Meta
             "organization_name", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
@@ -76,8 +111,6 @@ class ProjectSerializer(serializers.ModelSerializer):
 
 
 class ProjectCreateSerializer(serializers.ModelSerializer):
-    """POST /api/projects/ — creates at DRAFT stage. Unchanged."""
-
     class Meta:
         model  = Project
         fields = ["name", "location", "description"]
@@ -100,11 +133,6 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
 
 
 class ProjectUpdateSerializer(serializers.ModelSerializer):
-    """
-    PUT /api/projects/<id>/
-    Sprint 1: is_selling and is_constructing now writable.
-    """
-
     class Meta:
         model  = Project
         fields = [
@@ -115,12 +143,10 @@ class ProjectUpdateSerializer(serializers.ModelSerializer):
             "ipr_status", "ipr_date",
             "amdal_status", "amdal_date",
             "pbg_status", "pbg_date",
-            # Sprint 1: parallel stage flags
             "is_selling", "is_constructing",
         ]
 
     def validate(self, data):
-        # Auto-set PBG date when approved
         if (data.get("pbg_status") == Project.PermitStatus.APPROVED
                 and not data.get("pbg_date")
                 and self.instance
@@ -130,7 +156,6 @@ class ProjectUpdateSerializer(serializers.ModelSerializer):
 
 
 class ProjectAdvanceSerializer(serializers.Serializer):
-    """POST /api/projects/<id>/advance/ — unchanged."""
     confirm = serializers.BooleanField(required=True)
 
     def validate_confirm(self, value):
