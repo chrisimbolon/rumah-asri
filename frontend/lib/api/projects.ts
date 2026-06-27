@@ -210,6 +210,55 @@ export interface UpdateProjectPayload {
   is_constructing?: boolean;
 }
 
+// Sprint 3 types — add to projects.ts
+
+export interface ActivityItem {
+  id:        string;
+  type:      string;
+  action:    string;
+  actor:     string;
+  actor_id:  string | null;
+  subject:   string;
+  message:   string;
+  notes:     string;
+  old_value: string;
+  new_value: string;
+  timestamp: string;
+}
+
+export interface OverdueItem {
+  id:           string;
+  unit_number:  string;
+  buyer_name:   string;
+  payment_type: string;
+  amount:       number;
+  due_date:     string;
+  days_overdue: number;
+}
+
+export interface UpcomingItem {
+  id:           string;
+  unit_number:  string;
+  buyer_name:   string;
+  payment_type: string;
+  amount:       number;
+  due_date:     string;
+  days_until:   number;
+}
+
+export interface FinancialSnapshot {
+  has_data:        boolean;
+  total_billed:    number;
+  total_lunas:     number;
+  total_menunggak: number;
+  total_upcoming:  number;
+  efficiency_pct:  number;
+  status:          "healthy" | "attention" | "critical";
+  status_display:  string;
+  overdue_items:   OverdueItem[];
+  upcoming_items:  UpcomingItem[];
+}
+
 // ── Metadata — UNCHANGED ──────────────────────────────────────
 
 export const STAGE_META: Record<ProjectStage, {
@@ -323,6 +372,18 @@ export const projectsApi = {
   async toggleConstructing(id: string, active: boolean): Promise<Project> {
     const { data } = await api.put(`/api/projects/${id}/`, { is_constructing: active });
     return data.project;
+  },
+
+  async getActivity(id: string, limit = 20): Promise<ActivityItem[]> {
+  const { data } = await api.get(
+    `/api/projects/${id}/activity/?limit=${limit}`
+  );
+  return data.results;
+  },
+
+  async getFinancial(id: string): Promise<FinancialSnapshot> {
+  const { data } = await api.get(`/api/projects/${id}/financial/`);
+  return data.financial;
   },
 };
 
