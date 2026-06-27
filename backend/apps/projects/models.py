@@ -459,7 +459,8 @@ class Project(TenantScopedModel):
         if self.pbg_status == self.PermitStatus.REJECTED:
             return "high"
         if (self.end_date and date.today() > self.end_date
-                and self.stage not in (self.Stage.COMPLETED, self.Stage.HANDOVER)):
+                and self.stage not in (self.Stage.COMPLETED, self.Stage.HANDOVER)
+                and self.blocking_count > 0):
             return "high"
         if count == 0:
             return "low"
@@ -524,7 +525,8 @@ class Project(TenantScopedModel):
         if self.amdal_status == self.PermitStatus.REJECTED:
             reasons.append("AMDAL ditolak")
         if (self.end_date and date.today() > self.end_date
-                and self.stage not in (self.Stage.COMPLETED, self.Stage.HANDOVER)):
+                and self.stage not in (self.Stage.COMPLETED, self.Stage.HANDOVER)
+                and self.blocking_count > 0):
             overrun_days = (date.today() - self.end_date).days
             reasons.append(f"Proyek terlambat {overrun_days} hari dari target")
         requirements = self._get_current_requirements().filter(is_mandatory=True)
@@ -551,7 +553,8 @@ class Project(TenantScopedModel):
             next_act = self.next_action
             result.append({"level": "critical", "category": "requirement", "message": f"{self.blocking_count} requirement wajib memblokir tahap {self.stage_display}", "action": f"Mulai dengan: {next_act}" if next_act else "Selesaikan semua requirement wajib"})
         if (self.end_date and date.today() > self.end_date
-                and self.stage not in (self.Stage.COMPLETED, self.Stage.HANDOVER)):
+                and self.stage not in (self.Stage.COMPLETED, self.Stage.HANDOVER)
+                and self.blocking_count > 0):
             overrun_days = (date.today() - self.end_date).days
             result.append({"level": "warning", "category": "timeline", "message": f"Proyek terlambat {overrun_days} hari dari target selesai", "action": "Perbarui target selesai atau percepat konstruksi"})
         if self.stage in (self.Stage.CONSTRUCTION, self.Stage.SALES, self.Stage.HANDOVER) and not self.units.exists():
