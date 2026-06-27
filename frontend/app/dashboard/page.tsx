@@ -5,7 +5,7 @@
 //   + Alerts ledger (critical/warning/info) from portfolio
 //   + Readiness dimensions breakdown panel
 //   + Collection efficiency financial snapshot
-//   + Parallel stage (5A/5B) indicators on portfolio table
+//   + Parallel stage (5A/5B) indicators on portfolio table + this has to be solved on with REAL DATA
 //   All original sections preserved — additive only.
 // =============================================================================
 
