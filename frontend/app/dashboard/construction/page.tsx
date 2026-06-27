@@ -1,6 +1,6 @@
 "use client";
 // =============================================================================
-// === frontend/app/dashboard/construction/page.tsx ===
+// frontend/app/dashboard/construction/page.tsx 
 // =============================================================================
 /**
  * Construction timeline — wired to real units + construction phases APIs.
