@@ -2,7 +2,7 @@
 // === frontend/app/dashboard/admin/page.tsx ===
 // =============================================================================
 /**
- * Super Admin — Platform Management
+ * Super Admin — Platform Management - this is so dense, need to dig dive intensively
  * Lists all organizations on the platform.
  * Only accessible to super_admin role (enforced by proxy.ts + this page's own guard).
  */
@@ -11,11 +11,11 @@
 import { useAuth } from "@/context/AuthContext";
 import { Organization, organizationsApi } from "@/lib/api/organizations";
 import {
-    Building2, CheckCircle2,
-    FolderOpen,
-    Loader2,
-    Shield,
-    Users,
+  Building2, CheckCircle2,
+  FolderOpen,
+  Loader2,
+  Shield,
+  Users,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
