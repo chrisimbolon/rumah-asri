@@ -3,7 +3,7 @@
 // === frontend/app/dashboard/payments/page.tsx ===
 // =============================================================================
 /**
- * Payments tracker — wired to real payments API.
+ * Payments tracker — wired to real payments API. - Payment has data on DB, but not via CRUD
  *
  * Field mapping from mock → real API:
  *   pembeli      → buyer_name
