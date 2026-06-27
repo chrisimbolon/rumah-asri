@@ -1,8 +1,7 @@
 // =============================================================================
 // === frontend/lib/api/projects.ts ===
-// Sprint 1: adds ReadinessDimensions, Alert, ParallelStages,
-// CollectionEfficiency types + new fields on Project & IntelligenceSummary.
-// BACKWARD COMPATIBLE — all original fields preserved.
+// Sprint 2: adds RequirementEvidence types + evidenceApi calls
+// All Sprint 1 types preserved — additive only.
 // =============================================================================
 import api from "@/lib/api";
 
@@ -15,45 +14,72 @@ export type ProjectStage =
 export type PermitStatus = "belum" | "proses" | "approved" | "rejected";
 export type RiskLevel    = "low" | "medium" | "high";
 export type Trend        = "improving" | "stable" | "declining";
-export type ReqStatus    = "pending" | "in_progress" | "completed" | "not_applicable";
 
-// ── Sprint 1: new types ───────────────────────────────────────
+// Sprint 2: menunggu_verifikasi added
+export type ReqStatus =
+  | "pending"
+  | "in_progress"
+  | "menunggu_verifikasi"   // ← Sprint 2
+  | "completed"
+  | "not_applicable";
 
-export type AlertLevel = "critical" | "warning" | "info";
+export type AlertLevel           = "critical" | "warning" | "info";
+export type EvidenceVerifStatus  = "pending" | "approved" | "rejected";  // Sprint 2
+
+// ── Sprint 1 types — UNCHANGED ────────────────────────────────
 
 export interface ReadinessDimensions {
-  inventory:   number;  // % of inventory requirements completed
-  compliance:  number;  // % of compliance requirements completed
-  site_plan:   number;  // % of site plan requirements completed
-  sales_setup: number;  // % of sales setup requirements completed
-  general:     number;  // % of general requirements completed
+  inventory:   number;
+  compliance:  number;
+  site_plan:   number;
+  sales_setup: number;
+  general:     number;
 }
 
 export interface Alert {
   level:    AlertLevel;
-  category: string;   // "permit" | "requirement" | "timeline" | "financial" | "inventory" | "sales"
-  message:  string;   // human-readable alert message
-  action:   string;   // what to do about it
+  category: string;
+  message:  string;
+  action:   string;
 }
 
 export interface ParallelStages {
-  is_selling:      boolean;  // 5A — actively selling units
-  is_constructing: boolean;  // 5B — construction underway
-  label_5a:        string;   // "Aktif Penjualan" | "Belum Dipasarkan"
-  label_5b:        string;   // "Aktif Konstruksi" | "Belum Konstruksi"
-  can_sell_now:    boolean;  // whether selling is allowed at current stage
+  is_selling:      boolean;
+  is_constructing: boolean;
+  label_5a:        string;
+  label_5b:        string;
+  can_sell_now:    boolean;
 }
 
 export interface CollectionEfficiency {
-  total_billed:   number;  // total AR (Rp)
-  total_settled:  number;  // total lunas (Rp)
-  total_arrears:  number;  // total menunggak (Rp)
-  efficiency_pct: number;  // collection efficiency %
+  total_billed:   number;
+  total_settled:  number;
+  total_arrears:  number;
+  efficiency_pct: number;
   status:         "healthy" | "attention" | "critical";
-  status_display: string;  // "Sehat" | "Perlu Perhatian" | "Kritis"
+  status_display: string;
 }
 
-// ── RequirementItem — Sprint 1: adds category field ──────────
+// ── Sprint 2: NEW types ───────────────────────────────────────
+
+export interface RequirementEvidence {
+  id:                   string;
+  file_name:            string;
+  file_url:             string;
+  file_url_display:     string;   // resolved download URL
+  notes:                string;
+  uploaded_by:          string;
+  uploaded_by_name:     string;
+  uploaded_at:          string;
+  verification_status:  EvidenceVerifStatus;
+  verification_display: string;
+  verifier:             string | null;
+  verifier_name:        string;
+  verified_at:          string | null;
+  verifier_notes:       string;
+}
+
+// ── RequirementItem — Sprint 2: adds evidence fields ─────────
 
 export interface RequirementItem {
   id:             string;
@@ -61,18 +87,21 @@ export interface RequirementItem {
   description:    string;
   is_mandatory:   boolean;
   order:          number;
-  category:       string;  // Sprint 1: "inventory" | "compliance" | etc.
+  category:       string;
   status:         ReqStatus;
   status_display: string;
   notes:          string;
   completed_at:   string | null;
   status_id:      string | null;
+  // Sprint 2: evidence
+  evidence_count:         number;
+  latest_evidence_status: EvidenceVerifStatus | null;
+  has_pending_evidence:   boolean;
 }
 
-// ── IntelligenceSummary — Sprint 1: new fields added ─────────
+// ── IntelligenceSummary — UNCHANGED ──────────────────────────
 
 export interface IntelligenceSummary {
-  // Original fields — UNCHANGED
   readiness_score:    number;
   blocking_count:     number;
   next_action:        string | null;
@@ -81,8 +110,6 @@ export interface IntelligenceSummary {
   trend:              Trend;
   can_advance:        boolean;
   requirements:       RequirementItem[];
-
-  // Sprint 1: new fields
   readiness_dimensions:  ReadinessDimensions;
   risk_reasons:          string[];
   alerts:                Alert[];
@@ -96,36 +123,31 @@ export interface StageChecklistItem {
   blocking?: boolean;
 }
 
-// ── Project — Sprint 1: new fields added ─────────────────────
+// ── Project — UNCHANGED ───────────────────────────────────────
 
 export interface Project {
   id:               string;
   name:             string;
   location:         string;
   description:      string;
-  // Lifecycle
   stage:            ProjectStage;
   stage_display:    string;
   can_advance:      boolean;
   next_stage:       ProjectStage | null;
   stage_checklist:  StageChecklistItem[];
-  // Original intelligence
   readiness_score:    number;
   blocking_count:     number;
   next_action:        string | null;
   risk_level:         RiskLevel;
   risk_level_display: string;
   trend:              Trend;
-  // Sprint 1 intelligence
   readiness_dimensions:  ReadinessDimensions;
   risk_reasons:          string[];
   alerts:                Alert[];
   parallel_stages:       ParallelStages;
   collection_efficiency: CollectionEfficiency;
-  // Sprint 1 parallel flags
   is_selling:      boolean;
   is_constructing: boolean;
-  // Planning
   total_units:      number;
   units_sold:       number;
   overall_progress: number;
@@ -134,14 +156,12 @@ export interface Project {
   end_date:         string | null;
   master_plan_url:  string;
   site_plan_url:    string;
-  // Permits
   ipr_status:    PermitStatus;
   ipr_date:      string | null;
   amdal_status:  PermitStatus;
   amdal_date:    string | null;
   pbg_status:    PermitStatus;
   pbg_date:      string | null;
-  // Meta
   organization_name: string;
   created_at:        string;
   updated_at:        string;
@@ -186,12 +206,11 @@ export interface UpdateProjectPayload {
   amdal_date?:      string;
   pbg_status?:      PermitStatus;
   pbg_date?:        string;
-  // Sprint 1: parallel stage flags
   is_selling?:      boolean;
   is_constructing?: boolean;
 }
 
-// ── Stage metadata — UNCHANGED ────────────────────────────────
+// ── Metadata — UNCHANGED ──────────────────────────────────────
 
 export const STAGE_META: Record<ProjectStage, {
   label: string; color: string; bg: string; description: string; order: number;
@@ -218,11 +237,17 @@ export const TREND_META: Record<Trend, { icon: string; color: string }> = {
   declining: { icon: "↘", color: "var(--color-danger)"  },
 };
 
-// Sprint 1: alert level metadata
 export const ALERT_META: Record<AlertLevel, { color: string; bg: string; border: string }> = {
   critical: { color: "var(--color-danger)",  bg: "var(--color-danger-light)",  border: "rgba(220,38,38,0.2)"  },
   warning:  { color: "var(--color-warning)", bg: "var(--color-warning-light)", border: "rgba(234,179,8,0.2)"  },
   info:     { color: "var(--color-info)",    bg: "var(--color-info-light)",    border: "rgba(59,130,246,0.2)" },
+};
+
+// Sprint 2: evidence verification status colors
+export const EVIDENCE_META: Record<EvidenceVerifStatus, { label: string; color: string; bg: string }> = {
+  pending:  { label: "Menunggu Review", color: "var(--color-warning)", bg: "var(--color-warning-light)" },
+  approved: { label: "Disetujui ✓",    color: "var(--color-success)", bg: "var(--color-success-light)" },
+  rejected: { label: "Ditolak",        color: "var(--color-danger)",  bg: "var(--color-danger-light)"  },
 };
 
 // ── Derived stats — UNCHANGED ─────────────────────────────────
@@ -235,7 +260,7 @@ export function deriveStats(projects: Project[]) {
   };
 }
 
-// ── API calls — Sprint 1: adds toggleSelling, toggleConstructing ──
+// ── API calls — Sprint 2: adds evidenceApi ────────────────────
 
 export const projectsApi = {
   async list(stage?: ProjectStage): Promise<Project[]> {
@@ -290,7 +315,6 @@ export const projectsApi = {
     return data.results;
   },
 
-  // Sprint 1: toggle parallel stage flags
   async toggleSelling(id: string, active: boolean): Promise<Project> {
     const { data } = await api.put(`/api/projects/${id}/`, { is_selling: active });
     return data.project;
@@ -299,5 +323,50 @@ export const projectsApi = {
   async toggleConstructing(id: string, active: boolean): Promise<Project> {
     const { data } = await api.put(`/api/projects/${id}/`, { is_constructing: active });
     return data.project;
+  },
+};
+
+// Sprint 2: evidence API calls
+export const evidenceApi = {
+  async list(
+    projectId: string,
+    reqStatusId: string
+  ): Promise<{ count: number; results: RequirementEvidence[] }> {
+    const { data } = await api.get(
+      `/api/projects/${projectId}/requirements/${reqStatusId}/evidence/`
+    );
+    return { count: data.count, results: data.results };
+  },
+
+  async upload(
+    projectId: string,
+    reqStatusId: string,
+    payload: { file?: File; file_url?: string; notes?: string }
+  ): Promise<{ evidence: RequirementEvidence; intelligence: IntelligenceSummary }> {
+    const formData = new FormData();
+    if (payload.file)     formData.append("file",     payload.file);
+    if (payload.file_url) formData.append("file_url", payload.file_url);
+    if (payload.notes)    formData.append("notes",    payload.notes);
+
+    const { data } = await api.post(
+      `/api/projects/${projectId}/requirements/${reqStatusId}/evidence/`,
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return { evidence: data.evidence, intelligence: data.intelligence };
+  },
+
+  async verify(
+    projectId: string,
+    reqStatusId: string,
+    evidenceId: string,
+    action: "approve" | "reject",
+    notes?: string
+  ): Promise<{ evidence: RequirementEvidence; intelligence: IntelligenceSummary }> {
+    const { data } = await api.put(
+      `/api/projects/${projectId}/requirements/${reqStatusId}/evidence/${evidenceId}/verify/`,
+      { action, notes: notes ?? "" }
+    );
+    return { evidence: data.evidence, intelligence: data.intelligence };
   },
 };
