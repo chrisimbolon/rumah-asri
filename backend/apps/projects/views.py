@@ -1,29 +1,15 @@
 # =============================================================================
 # === backend/apps/projects/views.py ===
-# Sprint 2: adds RequirementEvidenceView + RequirementEvidenceVerifyView
+# Sprint 3: adds ProjectActivityView + ProjectFinancialView
+# Also: ProjectRequirementUpdateView now logs audit trail
 # All original views preserved — additive only.
 # =============================================================================
 """
-DevelopIndo — Projects Views + Intelligence Engine
+DevelopIndo — Projects Views
 
-Endpoints:
-  GET  /api/projects/                                          ← list
-  POST /api/projects/                                          ← create
-  GET  /api/projects/<id>/                                     ← detail
-  PUT  /api/projects/<id>/                                     ← update
-  DEL  /api/projects/<id>/                                     ← delete
-  POST /api/projects/<id>/advance/                             ← advance stage
-  GET  /api/projects/<id>/intelligence/                        ← intelligence
-  PUT  /api/projects/<id>/requirements/<req_status_id>/        ← update req
-  GET  /api/projects/portfolio/                                ← portfolio
-
-  Sprint 2 NEW:
-  POST /api/projects/<id>/requirements/<req_status_id>/evidence/
-       ← upload evidence for a requirement
-  GET  /api/projects/<id>/requirements/<req_status_id>/evidence/
-       ← list evidence for a requirement
-  PUT  /api/projects/<id>/requirements/<req_status_id>/evidence/<ev_id>/verify/
-       ← approve or reject evidence
+New Sprint 3 endpoints:
+  GET /api/projects/<id>/activity/   ← chronological audit timeline
+  GET /api/projects/<id>/financial/  ← detailed financial snapshot
 """
 from rest_framework import status
 from rest_framework.response import Response
@@ -33,6 +19,7 @@ from apps.core.views import TenantScopedAPIView
 from .models import (
     Project,
     ProjectRequirementStatus,
+    RequirementAudit,
     RequirementEvidence,
     StageRequirement,
 )
@@ -46,7 +33,7 @@ from .serializers import (
 
 
 # =============================================================================
-# Original views — UNCHANGED
+# Original views — UNCHANGED except RequirementUpdateView logs audit
 # =============================================================================
 
 class ProjectListView(TenantScopedAPIView):
@@ -58,21 +45,12 @@ class ProjectListView(TenantScopedAPIView):
         if stage:
             projects = projects.filter(stage=stage)
         serializer = ProjectSerializer(projects, many=True)
-        return Response({
-            "success": True,
-            "count":   projects.count(),
-            "results": serializer.data,
-        })
+        return Response({"success": True, "count": projects.count(), "results": serializer.data})
 
     def post(self, request):
         if request.user.role not in ("developer", "super_admin"):
-            return Response(
-                {"success": False, "message": "Tidak memiliki izin"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        serializer = ProjectCreateSerializer(
-            data=request.data, context={"request": request}
-        )
+            return Response({"success": False, "message": "Tidak memiliki izin"}, status=status.HTTP_403_FORBIDDEN)
+        serializer = ProjectCreateSerializer(data=request.data, context={"request": request})
         if serializer.is_valid():
             project = serializer.save()
             project._create_stage_requirements()
@@ -81,10 +59,7 @@ class ProjectListView(TenantScopedAPIView):
                 "message": f"Proyek '{project.name}' berhasil dibuat",
                 "project": ProjectSerializer(project).data,
             }, status=status.HTTP_201_CREATED)
-        return Response(
-            {"success": False, "errors": serializer.errors},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class ProjectDetailView(TenantScopedAPIView):
@@ -92,46 +67,24 @@ class ProjectDetailView(TenantScopedAPIView):
 
     def get(self, request, pk):
         project = self.get_object(pk)
-        return Response({
-            "success": True,
-            "project": ProjectSerializer(project).data,
-        })
+        return Response({"success": True, "project": ProjectSerializer(project).data})
 
     def put(self, request, pk):
         project = self.get_object(pk)
-        serializer = ProjectUpdateSerializer(
-            project, data=request.data, partial=True,
-            context={"request": request},
-        )
+        serializer = ProjectUpdateSerializer(project, data=request.data, partial=True, context={"request": request})
         if serializer.is_valid():
             serializer.save()
             project.snapshot_readiness()
-            return Response({
-                "success": True,
-                "message": "Proyek berhasil diperbarui",
-                "project": ProjectSerializer(project).data,
-            })
-        return Response(
-            {"success": False, "errors": serializer.errors},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+            return Response({"success": True, "message": "Proyek berhasil diperbarui", "project": ProjectSerializer(project).data})
+        return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
         project = self.get_object(pk)
         if project.stage != Project.Stage.DRAFT:
-            return Response({
-                "success": False,
-                "message": (
-                    f"Proyek hanya dapat dihapus saat masih dalam tahap Draft. "
-                    f"Tahap saat ini: {project.stage_display}."
-                ),
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"success": False, "message": f"Proyek hanya dapat dihapus saat masih dalam tahap Draft. Tahap saat ini: {project.stage_display}."}, status=status.HTTP_400_BAD_REQUEST)
         name = project.name
         project.delete()
-        return Response({
-            "success": True,
-            "message": f"Proyek '{name}' berhasil dihapus",
-        })
+        return Response({"success": True, "message": f"Proyek '{name}' berhasil dihapus"})
 
 
 class ProjectAdvanceView(TenantScopedAPIView):
@@ -139,30 +92,16 @@ class ProjectAdvanceView(TenantScopedAPIView):
 
     def post(self, request, pk):
         if request.user.role not in ("developer", "super_admin"):
-            return Response(
-                {"success": False, "message": "Tidak memiliki izin"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            return Response({"success": False, "message": "Tidak memiliki izin"}, status=status.HTTP_403_FORBIDDEN)
         project = self.get_object(pk)
         serializer = ProjectAdvanceSerializer(data=request.data)
         if not serializer.is_valid():
-            return Response(
-                {"success": False, "errors": serializer.errors},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         try:
             new_stage = project.advance_stage()
-            return Response({
-                "success":   True,
-                "message":   f"Proyek berhasil dilanjutkan ke tahap {project.stage_display}",
-                "new_stage": new_stage,
-                "project":   ProjectSerializer(project).data,
-            })
+            return Response({"success": True, "message": f"Proyek berhasil dilanjutkan ke tahap {project.stage_display}", "new_stage": new_stage, "project": ProjectSerializer(project).data})
         except ValueError as e:
-            return Response({
-                "success": False,
-                "message": str(e),
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"success": False, "message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class ProjectIntelligenceView(TenantScopedAPIView):
@@ -170,54 +109,48 @@ class ProjectIntelligenceView(TenantScopedAPIView):
 
     def get(self, request, pk):
         project = self.get_object(pk)
-        return Response({
-            "success":       True,
-            "project_id":    str(project.id),
-            "project_name":  project.name,
-            "stage":         project.stage,
-            "stage_display": project.stage_display,
-            "intelligence":  project.get_intelligence_summary(),
-        })
+        return Response({"success": True, "project_id": str(project.id), "project_name": project.name, "stage": project.stage, "stage_display": project.stage_display, "intelligence": project.get_intelligence_summary()})
 
 
 class ProjectRequirementUpdateView(TenantScopedAPIView):
+    """Sprint 3: now logs audit trail on every status change."""
     model = Project
 
     def put(self, request, pk, req_status_id):
         if request.user.role not in ("developer", "super_admin"):
-            return Response(
-                {"success": False, "message": "Tidak memiliki izin"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            return Response({"success": False, "message": "Tidak memiliki izin"}, status=status.HTTP_403_FORBIDDEN)
         project = self.get_object(pk)
         try:
-            req_status = ProjectRequirementStatus.objects.get(
-                id=req_status_id, project=project,
-            )
+            req_status = ProjectRequirementStatus.objects.get(id=req_status_id, project=project)
         except ProjectRequirementStatus.DoesNotExist:
-            return Response(
-                {"success": False, "message": "Requirement tidak ditemukan"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"success": False, "message": "Requirement tidak ditemukan"}, status=status.HTTP_404_NOT_FOUND)
+
         new_status = request.data.get("status")
         notes      = request.data.get("notes", req_status.notes)
 
         valid_statuses = [s[0] for s in ProjectRequirementStatus.Status.choices]
         if new_status not in valid_statuses:
-            return Response({
-                "success": False,
-                "message": f"Status tidak valid. Pilihan: {valid_statuses}",
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"success": False, "message": f"Status tidak valid. Pilihan: {valid_statuses}"}, status=status.HTTP_400_BAD_REQUEST)
 
+        old_status = req_status.status
         project.snapshot_readiness()
 
         if new_status == ProjectRequirementStatus.Status.COMPLETED:
-            req_status.mark_completed(user=request.user)
+            req_status.mark_completed(user=request.user)  # mark_completed now logs audit
         else:
             req_status.status     = new_status
             req_status.notes      = notes
             req_status.updated_by = request.user
             req_status.save(update_fields=["status", "notes", "updated_by", "updated_at"])
+            # Sprint 3: log the status change
+            RequirementAudit.log(
+                requirement_status=req_status,
+                action=RequirementAudit.Action.UPDATED,
+                changed_by=request.user,
+                old_value=old_status,
+                new_value=new_status,
+                notes=notes,
+            )
 
         return Response({
             "success":      True,
@@ -234,113 +167,57 @@ class ProjectPortfolioView(TenantScopedAPIView):
         rows = []
         for p in projects:
             rows.append({
-                "id":              str(p.id),
-                "name":            p.name,
-                "location":        p.location,
-                "stage":           p.stage,
-                "stage_display":   p.stage_display,
-                "readiness_score": p.readiness_score,
-                "blocking_count":  p.blocking_count,
-                "next_action":     p.next_action,
-                "risk_level":      p.risk_level,
-                "risk_level_display": p.risk_level_display,
-                "trend":           p.trend,
-                "overall_progress": p.overall_progress,
-                "total_units":     p.total_units,
-                "units_sold":      p.units_sold,
+                "id": str(p.id), "name": p.name, "location": p.location,
+                "stage": p.stage, "stage_display": p.stage_display,
+                "readiness_score": p.readiness_score, "blocking_count": p.blocking_count,
+                "next_action": p.next_action, "risk_level": p.risk_level,
+                "risk_level_display": p.risk_level_display, "trend": p.trend,
+                "overall_progress": p.overall_progress, "total_units": p.total_units,
+                "units_sold": p.units_sold,
             })
-        return Response({
-            "success": True,
-            "count":   len(rows),
-            "results": rows,
-        })
+        return Response({"success": True, "count": len(rows), "results": rows})
 
-
-# =============================================================================
-# Sprint 2: NEW VIEWS — Evidence upload + verification
-# =============================================================================
 
 class RequirementEvidenceView(TenantScopedAPIView):
-    """
-    GET  /api/projects/<id>/requirements/<req_status_id>/evidence/
-         → list all evidence for this requirement
-
-    POST /api/projects/<id>/requirements/<req_status_id>/evidence/
-         → upload new evidence
-         Body: { file (optional), file_url (optional), notes (optional) }
-         After upload: requirement status → "menunggu_verifikasi"
-    """
     model = Project
 
     def get(self, request, pk, req_status_id):
         project = self.get_object(pk)
         try:
-            req_status = ProjectRequirementStatus.objects.get(
-                id=req_status_id, project=project,
-            )
+            req_status = ProjectRequirementStatus.objects.get(id=req_status_id, project=project)
         except ProjectRequirementStatus.DoesNotExist:
-            return Response(
-                {"success": False, "message": "Requirement tidak ditemukan"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
+            return Response({"success": False, "message": "Requirement tidak ditemukan"}, status=status.HTTP_404_NOT_FOUND)
         evidence = req_status.evidence.all().order_by("-uploaded_at")
         serializer = RequirementEvidenceSerializer(evidence, many=True)
-        return Response({
-            "success":          True,
-            "requirement_name": req_status.requirement.name,
-            "requirement_status": req_status.status,
-            "count":            evidence.count(),
-            "results":          serializer.data,
-        })
+        return Response({"success": True, "requirement_name": req_status.requirement.name, "requirement_status": req_status.status, "count": evidence.count(), "results": serializer.data})
 
     def post(self, request, pk, req_status_id):
         if request.user.role not in ("developer", "super_admin"):
-            return Response(
-                {"success": False, "message": "Tidak memiliki izin"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
+            return Response({"success": False, "message": "Tidak memiliki izin"}, status=status.HTTP_403_FORBIDDEN)
         project = self.get_object(pk)
         try:
-            req_status = ProjectRequirementStatus.objects.get(
-                id=req_status_id, project=project,
-            )
+            req_status = ProjectRequirementStatus.objects.get(id=req_status_id, project=project)
         except ProjectRequirementStatus.DoesNotExist:
-            return Response(
-                {"success": False, "message": "Requirement tidak ditemukan"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        # Must provide either a file or a URL
+            return Response({"success": False, "message": "Requirement tidak ditemukan"}, status=status.HTTP_404_NOT_FOUND)
         uploaded_file = request.FILES.get("file")
         file_url      = request.data.get("file_url", "").strip()
         notes         = request.data.get("notes", "").strip()
-
         if not uploaded_file and not file_url:
-            return Response({
-                "success": False,
-                "message": "Upload file atau berikan URL bukti",
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Create the evidence record
+            return Response({"success": False, "message": "Upload file atau berikan URL bukti"}, status=status.HTTP_400_BAD_REQUEST)
         evidence = RequirementEvidence.objects.create(
-            requirement_status  = req_status,
-            file                = uploaded_file,
-            file_name           = uploaded_file.name if uploaded_file else "",
-            file_url            = file_url,
-            notes               = notes,
-            uploaded_by         = request.user,
-            verification_status = RequirementEvidence.VerificationStatus.PENDING,
+            requirement_status=req_status,
+            file=uploaded_file,
+            file_name=uploaded_file.name if uploaded_file else "",
+            file_url=file_url,
+            notes=notes,
+            uploaded_by=request.user,
+            verification_status=RequirementEvidence.VerificationStatus.PENDING,
         )
-
-        # Auto-move requirement to "menunggu_verifikasi"
         if req_status.status not in (
             ProjectRequirementStatus.Status.COMPLETED,
             ProjectRequirementStatus.Status.AWAITING_VERIFICATION,
         ):
-            req_status.mark_awaiting_verification(user=request.user)
-
+            req_status.mark_awaiting_verification(user=request.user)  # logs audit
         return Response({
             "success":      True,
             "message":      f"Bukti untuk '{req_status.requirement.name}' berhasil diunggah",
@@ -350,77 +227,79 @@ class RequirementEvidenceView(TenantScopedAPIView):
 
 
 class RequirementEvidenceVerifyView(TenantScopedAPIView):
-    """
-    PUT /api/projects/<id>/requirements/<req_status_id>/evidence/<ev_id>/verify/
-        → approve or reject evidence
-        Body: { action: "approve" | "reject", notes: "" }
-
-    Only developer or super_admin can verify.
-    In a real multi-role system, this would be restricted to managers/verifiers.
-    For MVP: developer self-verifies (common in small property companies).
-    """
     model = Project
 
     def put(self, request, pk, req_status_id, ev_id):
         if request.user.role not in ("developer", "super_admin"):
-            return Response(
-                {"success": False, "message": "Tidak memiliki izin"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
+            return Response({"success": False, "message": "Tidak memiliki izin"}, status=status.HTTP_403_FORBIDDEN)
         project = self.get_object(pk)
-
-        # Verify the requirement belongs to this project
         try:
-            req_status = ProjectRequirementStatus.objects.get(
-                id=req_status_id, project=project,
-            )
+            req_status = ProjectRequirementStatus.objects.get(id=req_status_id, project=project)
         except ProjectRequirementStatus.DoesNotExist:
-            return Response(
-                {"success": False, "message": "Requirement tidak ditemukan"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        # Get the evidence record
+            return Response({"success": False, "message": "Requirement tidak ditemukan"}, status=status.HTTP_404_NOT_FOUND)
         try:
-            evidence = RequirementEvidence.objects.get(
-                id=ev_id,
-                requirement_status=req_status,
-            )
+            evidence = RequirementEvidence.objects.get(id=ev_id, requirement_status=req_status)
         except RequirementEvidence.DoesNotExist:
-            return Response(
-                {"success": False, "message": "Bukti tidak ditemukan"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
+            return Response({"success": False, "message": "Bukti tidak ditemukan"}, status=status.HTTP_404_NOT_FOUND)
         action = request.data.get("action", "").strip()
         notes  = request.data.get("notes", "").strip()
-
         if action not in ("approve", "reject"):
-            return Response({
-                "success": False,
-                "message": "Action tidak valid. Pilihan: 'approve' atau 'reject'",
-            }, status=status.HTTP_400_BAD_REQUEST)
-
+            return Response({"success": False, "message": "Action tidak valid. Pilihan: 'approve' atau 'reject'"}, status=status.HTTP_400_BAD_REQUEST)
         if evidence.verification_status == RequirementEvidence.VerificationStatus.APPROVED:
-            return Response({
-                "success": False,
-                "message": "Bukti ini sudah disetujui sebelumnya",
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Snapshot readiness before change
+            return Response({"success": False, "message": "Bukti ini sudah disetujui sebelumnya"}, status=status.HTTP_400_BAD_REQUEST)
         project.snapshot_readiness()
-
         if action == "approve":
-            evidence.approve(verifier_user=request.user, notes=notes)
+            evidence.approve(verifier_user=request.user, notes=notes)  # logs audit
             message = f"Bukti disetujui — requirement '{req_status.requirement.name}' selesai"
         else:
-            evidence.reject(verifier_user=request.user, notes=notes)
-            message = f"Bukti ditolak — developer perlu mengunggah ulang"
+            evidence.reject(verifier_user=request.user, notes=notes)  # logs audit
+            message = "Bukti ditolak — developer perlu mengunggah ulang"
+        return Response({"success": True, "message": message, "evidence": RequirementEvidenceSerializer(evidence).data, "intelligence": project.get_intelligence_summary()})
 
+
+# =============================================================================
+# Sprint 3: NEW VIEWS
+# =============================================================================
+
+class ProjectActivityView(TenantScopedAPIView):
+    """
+    GET /api/projects/<id>/activity/
+    Returns chronological audit trail for this project.
+    Query params:
+      ?limit=20  (default 20, max 100)
+    """
+    model = Project
+
+    def get(self, request, pk):
+        project = self.get_object(pk)
+        limit = min(int(request.query_params.get("limit", 20)), 100)
+        activities = project.activity_timeline(limit=limit)
         return Response({
             "success":      True,
-            "message":      message,
-            "evidence":     RequirementEvidenceSerializer(evidence).data,
-            "intelligence": project.get_intelligence_summary(),
+            "project_id":   str(project.id),
+            "project_name": project.name,
+            "count":        len(activities),
+            "results":      activities,
+        })
+
+
+class ProjectFinancialView(TenantScopedAPIView):
+    """
+    GET /api/projects/<id>/financial/
+    Returns detailed financial snapshot:
+      - Total billed, lunas, menunggak, upcoming
+      - Collection efficiency %
+      - Overdue payments list with days overdue
+      - Upcoming payments (next 30 days)
+    """
+    model = Project
+
+    def get(self, request, pk):
+        project = self.get_object(pk)
+        snapshot = project.financial_snapshot()
+        return Response({
+            "success":      True,
+            "project_id":   str(project.id),
+            "project_name": project.name,
+            "financial":    snapshot,
         })
