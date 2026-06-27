@@ -1,25 +1,28 @@
 "use client";
 // =============================================================================
 // === frontend/app/dashboard/projects/[id]/page.tsx ===
-// Sprint 1 upgrade:
-//   + Alerts ledger panel (critical/warning/info)
-//   + Risk reasons ("WHY is this high risk?")
-//   + Readiness dimensions breakdown (4-dimension)
-//   + Parallel stage toggles (5A selling / 5B construction)
-//   + Collection efficiency on project info card
-//   All original sections preserved — additive only.
+// Sprint 2: adds evidence upload UI to RequirementRow
+//   + menunggu_verifikasi status badge
+//   + Upload Bukti button
+//   + Evidence upload modal (file or URL)
+//   + Evidence list with approve/reject
+// All Sprint 1 sections preserved — additive only.
 // =============================================================================
 
 import {
   ALERT_META,
+  EVIDENCE_META,
+  evidenceApi,
   IntelligenceSummary,
   Project,
+  projectsApi,
   ProjectStage,
+  RequirementEvidence,
+  RequirementItem,
   RISK_META,
   STAGE_META,
   TREND_META,
   UpdateProjectPayload,
-  projectsApi,
 } from "@/lib/api/projects";
 import {
   AlertTriangle,
@@ -34,13 +37,15 @@ import {
   Home,
   Loader2,
   MapPin,
+  Paperclip,
   Save,
   TrendingUp,
+  X,
   Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // ── Circular readiness gauge — UNCHANGED ─────────────────────
 function ReadinessGauge({ score }: { score: number }) {
@@ -51,15 +56,13 @@ function ReadinessGauge({ score }: { score: number }) {
     score >= 80 ? "var(--color-success)" :
     score >= 50 ? "var(--color-warning)" :
                   "var(--color-danger)";
-
   return (
     <div style={{ position: "relative", width: 100, height: 100, flexShrink: 0 }}>
       <svg width="100" height="100" style={{ transform: "rotate(-90deg)" }}>
         <circle cx="50" cy="50" r={radius} fill="none" stroke="rgba(14,13,11,0.08)" strokeWidth="8" />
         <circle cx="50" cy="50" r={radius} fill="none" stroke={color} strokeWidth="8"
           strokeDasharray={circumference} strokeDashoffset={offset}
-          strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.5s ease" }}
-        />
+          strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.5s ease" }} />
       </svg>
       <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
         <span style={{ fontSize: 20, fontWeight: 800, color, lineHeight: 1 }}>{score}%</span>
@@ -81,7 +84,6 @@ function StagePipeline({ stage }: { stage: ProjectStage }) {
     { key: "selesai",      label: "Selesai"      },
   ];
   const currentIdx = stages.findIndex((s) => s.key === stage);
-
   return (
     <div style={{ display: "flex", alignItems: "flex-start" }}>
       {stages.map((s, i) => {
@@ -93,13 +95,7 @@ function StagePipeline({ stage }: { stage: ProjectStage }) {
             {i < stages.length - 1 && (
               <div style={{ position: "absolute", top: 14, left: "50%", right: "-50%", height: 2, zIndex: 0, backgroundColor: done ? "var(--color-success)" : "rgba(14,13,11,0.08)" }} />
             )}
-            <div style={{
-              width: 28, height: 28, borderRadius: "50%", position: "relative", zIndex: 1,
-              backgroundColor: done ? "var(--color-success)" : current ? meta.color : "rgba(14,13,11,0.08)",
-              border: current ? `3px solid ${meta.color}` : "none",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              boxShadow: current ? `0 0 0 4px ${meta.bg}` : "none",
-            }}>
+            <div style={{ width: 28, height: 28, borderRadius: "50%", position: "relative", zIndex: 1, backgroundColor: done ? "var(--color-success)" : current ? meta.color : "rgba(14,13,11,0.08)", border: current ? `3px solid ${meta.color}` : "none", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: current ? `0 0 0 4px ${meta.bg}` : "none" }}>
               {done    && <CheckCircle2 size={14} color="white" />}
               {current && <div style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: "white" }} />}
             </div>
@@ -113,97 +109,460 @@ function StagePipeline({ stage }: { stage: ProjectStage }) {
   );
 }
 
-// ── Requirement row — UNCHANGED ───────────────────────────────
-type ReqStatus = "pending" | "in_progress" | "completed" | "not_applicable";
+// ── Sprint 2: Evidence upload modal ──────────────────────────
+function EvidenceUploadModal({
+  req,
+  projectId,
+  onUploaded,
+  onClose,
+}: {
+  req:        RequirementItem;
+  projectId:  string;
+  onUploaded: (intel: IntelligenceSummary) => void;
+  onClose:    () => void;
+}) {
+  const [mode,     setMode]     = useState<"file" | "url">("url");
+  const [fileUrl,  setFileUrl]  = useState("");
+  const [notes,    setNotes]    = useState("");
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleSubmit = async () => {
+    if (mode === "url" && !fileUrl.trim()) {
+      setError("Masukkan URL bukti"); return;
+    }
+    if (mode === "file" && !fileRef.current?.files?.[0]) {
+      setError("Pilih file untuk diunggah"); return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await evidenceApi.upload(
+        projectId,
+        req.status_id ?? req.id,
+        {
+          file:     mode === "file" ? fileRef.current?.files?.[0] : undefined,
+          file_url: mode === "url"  ? fileUrl.trim() : undefined,
+          notes:    notes.trim(),
+        }
+      );
+      onUploaded(result.intelligence);
+    } catch {
+      setError("Gagal mengunggah bukti");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%", padding: "8px 10px",
+    border: "1px solid rgba(14,13,11,0.15)",
+    borderRadius: 6, fontSize: 13,
+    color: "var(--color-ink)", outline: "none",
+    boxSizing: "border-box",
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 200, backgroundColor: "rgba(14,13,11,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ backgroundColor: "white", borderRadius: 12, width: "100%", maxWidth: 460, boxShadow: "0 20px 60px rgba(14,13,11,0.2)", overflow: "hidden" }}>
+
+        {/* Header */}
+        <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid rgba(14,13,11,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+              <Paperclip size={13} style={{ color: "var(--color-accent)" }} />
+              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Upload Bukti</span>
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--color-ink)" }}>{req.name}</div>
+          </div>
+          <button onClick={onClose} style={{ padding: 6, borderRadius: 6, border: "none", backgroundColor: "transparent", cursor: "pointer", color: "var(--color-ink-3)" }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div style={{ padding: "16px 20px 20px" }}>
+          {error && (
+            <div style={{ marginBottom: 12, padding: "8px 12px", backgroundColor: "var(--color-danger-light)", borderRadius: 6, fontSize: 12, color: "var(--color-danger)" }}>
+              {error}
+            </div>
+          )}
+
+          {/* Mode toggle */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+            {(["url", "file"] as const).map((m) => (
+              <button key={m} onClick={() => setMode(m)}
+                style={{ flex: 1, padding: "7px 10px", borderRadius: 6, border: "1px solid rgba(14,13,11,0.12)", fontSize: 12, fontWeight: 600, cursor: "pointer", backgroundColor: mode === m ? "var(--color-accent)" : "white", color: mode === m ? "white" : "var(--color-ink-3)", transition: "all 0.15s" }}>
+                {m === "url" ? "🔗 Link URL" : "📎 Upload File"}
+              </button>
+            ))}
+          </div>
+
+          {/* URL input */}
+          {mode === "url" && (
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--color-ink-3)", marginBottom: 5 }}>
+                URL Bukti <span style={{ color: "var(--color-danger)" }}>*</span>
+              </label>
+              <input type="url" placeholder="https://drive.google.com/... atau URL lainnya"
+                value={fileUrl} onChange={(e) => setFileUrl(e.target.value)}
+                style={inputStyle} />
+              <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 3 }}>
+                Google Drive, Dropbox, OneDrive, atau URL dokumen lainnya
+              </div>
+            </div>
+          )}
+
+          {/* File input */}
+          {mode === "file" && (
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--color-ink-3)", marginBottom: 5 }}>
+                File Bukti <span style={{ color: "var(--color-danger)" }}>*</span>
+              </label>
+              <input ref={fileRef} type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+                style={{ ...inputStyle, padding: "6px 10px" }} />
+              <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 3 }}>
+                PDF, gambar, atau dokumen Word/Excel
+              </div>
+            </div>
+          )}
+
+          {/* Notes */}
+          <div style={{ marginBottom: 18 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--color-ink-3)", marginBottom: 5 }}>
+              Deskripsi Bukti <span style={{ fontSize: 10, color: "var(--color-ink-3)", fontWeight: 400 }}>(opsional)</span>
+            </label>
+            <textarea rows={2} placeholder="Jelaskan bukti yang diunggah..."
+              value={notes} onChange={(e) => setNotes(e.target.value)}
+              style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onClose} className="btn-ghost" style={{ flex: 1 }} disabled={saving}>Batal</button>
+            <button onClick={handleSubmit} className="btn-accent" disabled={saving}
+              style={{ flex: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              {saving
+                ? <><Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> Mengunggah…</>
+                : <><Paperclip size={13} /> Upload Bukti</>
+              }
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Sprint 2: Evidence list item ──────────────────────────────
+function EvidenceItem({
+  ev,
+  projectId,
+  reqStatusId,
+  onVerified,
+}: {
+  ev:          RequirementEvidence;
+  projectId:   string;
+  reqStatusId: string;
+  onVerified:  (intel: IntelligenceSummary) => void;
+}) {
+  const [verifying, setVerifying] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+  const [notes,     setNotes]     = useState("");
+  const [action,    setAction]    = useState<"approve" | "reject" | null>(null);
+
+  const meta = EVIDENCE_META[ev.verification_status];
+
+  const handleVerify = async (act: "approve" | "reject") => {
+    setVerifying(true);
+    try {
+      const result = await evidenceApi.verify(projectId, reqStatusId, ev.id, act, notes);
+      onVerified(result.intelligence);
+    } catch {
+      console.error("Verify failed");
+    } finally {
+      setVerifying(false);
+      setShowNotes(false);
+      setAction(null);
+    }
+  };
+
+  return (
+    <div style={{ padding: "8px 10px", backgroundColor: meta.bg, border: `1px solid rgba(14,13,11,0.06)`, borderRadius: 6, marginBottom: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {/* File icon + name */}
+        <Paperclip size={11} style={{ color: meta.color, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {ev.file_name || (ev.file_url ? "Link eksternal" : "Bukti")}
+          </div>
+          {ev.file_url_display && (
+            <a href={ev.file_url_display} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 10, color: "var(--color-accent)", textDecoration: "none" }}>
+              Lihat bukti →
+            </a>
+          )}
+          {ev.notes && (
+            <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 1 }}>{ev.notes}</div>
+          )}
+          <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 1 }}>
+            {ev.uploaded_by_name} · {new Date(ev.uploaded_at).toLocaleDateString("id-ID")}
+          </div>
+        </div>
+        {/* Status badge */}
+        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999, color: meta.color, backgroundColor: "white", flexShrink: 0 }}>
+          {meta.label}
+        </span>
+      </div>
+
+      {/* Verifier notes if rejected */}
+      {ev.verification_status === "rejected" && ev.verifier_notes && (
+        <div style={{ marginTop: 6, fontSize: 11, color: "var(--color-danger)", padding: "4px 8px", backgroundColor: "var(--color-danger-light)", borderRadius: 4 }}>
+          Alasan penolakan: {ev.verifier_notes}
+        </div>
+      )}
+
+      {/* Approve/reject buttons — only if pending */}
+      {ev.verification_status === "pending" && (
+        <div style={{ marginTop: 8 }}>
+          {!showNotes ? (
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => { setAction("approve"); setShowNotes(true); }} disabled={verifying}
+                style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-success)", color: "white", opacity: verifying ? 0.5 : 1 }}>
+                ✓ Setujui
+              </button>
+              <button onClick={() => { setAction("reject"); setShowNotes(true); }} disabled={verifying}
+                style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(220,38,38,0.3)", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "white", color: "var(--color-danger)", opacity: verifying ? 0.5 : 1 }}>
+                ✕ Tolak
+              </button>
+            </div>
+          ) : (
+            <div>
+              <textarea rows={2} placeholder={action === "reject" ? "Alasan penolakan..." : "Catatan (opsional)..."}
+                value={notes} onChange={(e) => setNotes(e.target.value)}
+                style={{ width: "100%", padding: "6px 8px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 4, fontSize: 11, resize: "none", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 6 }} />
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => setShowNotes(false)} disabled={verifying}
+                  style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", fontSize: 10, cursor: "pointer", backgroundColor: "white", color: "var(--color-ink-3)" }}>
+                  Batal
+                </button>
+                <button onClick={() => handleVerify(action!)} disabled={verifying}
+                  style={{ flex: 2, padding: "4px 8px", borderRadius: 4, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: action === "approve" ? "var(--color-success)" : "var(--color-danger)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                  {verifying
+                    ? <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} />
+                    : action === "approve" ? "✓ Konfirmasi Setujui" : "✕ Konfirmasi Tolak"
+                  }
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Requirement row — Sprint 2: adds evidence section ────────
+type ReqStatus = "pending" | "in_progress" | "menunggu_verifikasi" | "completed" | "not_applicable";
 
 function RequirementRow({
   req, projectId, onUpdated,
 }: {
-  req:       IntelligenceSummary["requirements"][0];
+  req:       RequirementItem;
   projectId: string;
   onUpdated: (intel: IntelligenceSummary) => void;
 }) {
-  const [saving, setSaving] = useState(false);
-  const [notes]             = useState(req.notes);
+  const [saving,          setSaving]          = useState(false);
+  const [notes]                               = useState(req.notes);
+  const [showEvidence,    setShowEvidence]    = useState(false);
+  const [evidenceList,    setEvidenceList]    = useState<RequirementEvidence[]>([]);
+  const [loadingEvidence, setLoadingEvidence] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
 
   const handleStatusChange = async (newStatus: ReqStatus) => {
     if (newStatus === req.status) return;
     setSaving(true);
     try {
       const intel = await projectsApi.updateRequirement(
-        projectId,
-        req.status_id ?? req.id,
-        { status: newStatus, notes }
+        projectId, req.status_id ?? req.id, { status: newStatus, notes }
       );
       onUpdated(intel);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSaving(false);
-    }
+    } catch (e) { console.error(e); }
+    finally { setSaving(false); }
   };
 
+  const loadEvidence = async () => {
+    if (!req.status_id) return;
+    setLoadingEvidence(true);
+    try {
+      const { results } = await evidenceApi.list(projectId, req.status_id);
+      setEvidenceList(results);
+    } catch { setEvidenceList([]); }
+    finally { setLoadingEvidence(false); }
+  };
+
+  const toggleEvidence = () => {
+    if (!showEvidence && evidenceList.length === 0) loadEvidence();
+    setShowEvidence(!showEvidence);
+  };
+
+  const handleEvidenceUploaded = (intel: IntelligenceSummary) => {
+    setShowUploadModal(false);
+    loadEvidence();
+    onUpdated(intel);
+  };
+
+  const handleEvidenceVerified = (intel: IntelligenceSummary) => {
+    loadEvidence();
+    onUpdated(intel);
+  };
+
+  // Sprint 2: menunggu_verifikasi added to statusConfig
   const statusConfig: Record<ReqStatus, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-    pending:        { label: "Belum Dimulai",   color: "var(--color-ink-3)",   bg: "var(--color-paper-2)",       icon: <Circle size={14} />      },
-    in_progress:    { label: "Sedang Diproses", color: "var(--color-warning)", bg: "var(--color-warning-light)", icon: <Clock size={14} />       },
-    completed:      { label: "Selesai",         color: "var(--color-success)", bg: "var(--color-success-light)", icon: <CheckCircle2 size={14} /> },
-    not_applicable: { label: "Tidak Berlaku",   color: "var(--color-ink-3)",   bg: "var(--color-paper-2)",       icon: <Circle size={14} />      },
+    pending:               { label: "Belum Dimulai",      color: "var(--color-ink-3)",   bg: "var(--color-paper-2)",       icon: <Circle size={14} />       },
+    in_progress:           { label: "Sedang Diproses",    color: "var(--color-warning)", bg: "var(--color-warning-light)", icon: <Clock size={14} />        },
+    menunggu_verifikasi:   { label: "Menunggu Verifikasi",color: "var(--color-accent)",  bg: "var(--color-accent-light)",  icon: <Paperclip size={14} />    }, // Sprint 2
+    completed:             { label: "Selesai",            color: "var(--color-success)", bg: "var(--color-success-light)", icon: <CheckCircle2 size={14} /> },
+    not_applicable:        { label: "Tidak Berlaku",      color: "var(--color-ink-3)",   bg: "var(--color-paper-2)",       icon: <Circle size={14} />       },
   };
 
   const current    = statusConfig[req.status as ReqStatus] ?? statusConfig.pending;
-  const isBlocking = req.is_mandatory && req.status !== "completed";
+  const isBlocking = req.is_mandatory && !["completed", "menunggu_verifikasi"].includes(req.status);
 
   return (
-    <div style={{
-      padding: "12px 14px", borderRadius: 8, marginBottom: 8,
-      backgroundColor: req.status === "completed" ? "var(--color-success-light)" : isBlocking ? "rgba(220,38,38,0.04)" : "var(--color-paper-2)",
-      border: isBlocking ? "1px solid rgba(220,38,38,0.15)" : "1px solid transparent",
-      transition: "all 0.2s",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ color: current.color, flexShrink: 0 }}>
-          {saving ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : current.icon}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: req.status === "completed" ? "var(--color-ink-3)" : "var(--color-ink)", textDecoration: req.status === "completed" ? "line-through" : "none" }}>
-              {req.name}
-            </span>
-            {req.is_mandatory && req.status !== "completed" && (
-              <span style={{ fontSize: 10, color: "var(--color-danger)", fontWeight: 600 }}>⚡ Wajib</span>
-            )}
-            {!req.is_mandatory && (
-              <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>opsional</span>
-            )}
+    <>
+      {/* Evidence upload modal */}
+      {showUploadModal && req.status_id && (
+        <EvidenceUploadModal
+          req={req}
+          projectId={projectId}
+          onUploaded={handleEvidenceUploaded}
+          onClose={() => setShowUploadModal(false)}
+        />
+      )}
+
+      <div style={{
+        padding: "12px 14px", borderRadius: 8, marginBottom: 8,
+        backgroundColor: req.status === "completed" ? "var(--color-success-light)" : isBlocking ? "rgba(220,38,38,0.04)" : "var(--color-paper-2)",
+        border: isBlocking ? "1px solid rgba(220,38,38,0.15)" : "1px solid transparent",
+        transition: "all 0.2s",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {/* Status icon */}
+          <div style={{ color: current.color, flexShrink: 0 }}>
+            {saving ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : current.icon}
           </div>
-          {req.description && (
-            <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>{req.description}</div>
-          )}
-          {req.completed_at && (
-            <div style={{ fontSize: 10, color: "var(--color-success)", marginTop: 2 }}>
-              ✓ Selesai {new Date(req.completed_at).toLocaleDateString("id-ID")}
+
+          {/* Name + badges */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: req.status === "completed" ? "var(--color-ink-3)" : "var(--color-ink)", textDecoration: req.status === "completed" ? "line-through" : "none" }}>
+                {req.name}
+              </span>
+              {req.is_mandatory && !["completed", "menunggu_verifikasi"].includes(req.status) && (
+                <span style={{ fontSize: 10, color: "var(--color-danger)", fontWeight: 600 }}>⚡ Wajib</span>
+              )}
+              {!req.is_mandatory && (
+                <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>opsional</span>
+              )}
+              {/* Sprint 2: evidence count badge */}
+              {req.evidence_count > 0 && (
+                <button onClick={toggleEvidence}
+                  style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 999, backgroundColor: "var(--color-accent-light)", color: "var(--color-accent)", border: "none", cursor: "pointer" }}>
+                  📎 {req.evidence_count} bukti
+                </button>
+              )}
+              {/* Sprint 2: pending evidence indicator */}
+              {req.has_pending_evidence && (
+                <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-warning)" }}>
+                  ⏳ Menunggu review
+                </span>
+              )}
             </div>
-          )}
-        </div>
-        {req.status !== "completed" ? (
-          <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-            <button onClick={() => handleStatusChange("in_progress")} disabled={saving || req.status === "in_progress"}
-              style={{ padding: "4px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: req.status === "in_progress" ? "var(--color-warning-light)" : "white", color: "var(--color-warning)", border: "1px solid rgba(14,13,11,0.1)", opacity: saving ? 0.5 : 1 }}>
-              Diproses
-            </button>
-            <button onClick={() => handleStatusChange("completed")} disabled={saving}
-              style={{ padding: "4px 10px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-success)", color: "white", opacity: saving ? 0.5 : 1 }}>
-              Selesai ✓
-            </button>
+            {req.description && (
+              <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>{req.description}</div>
+            )}
+            {req.completed_at && (
+              <div style={{ fontSize: 10, color: "var(--color-success)", marginTop: 2 }}>
+                ✓ Selesai {new Date(req.completed_at).toLocaleDateString("id-ID")}
+              </div>
+            )}
           </div>
-        ) : (
-          <button onClick={() => handleStatusChange("pending")} disabled={saving}
-            style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", fontSize: 10, cursor: "pointer", backgroundColor: "white", color: "var(--color-ink-3)", opacity: saving ? 0.5 : 1 }}>
-            Batalkan
-          </button>
+
+          {/* Action buttons */}
+          <div style={{ display: "flex", gap: 4, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {req.status === "completed" ? (
+              <button onClick={() => handleStatusChange("pending")} disabled={saving}
+                style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", fontSize: 10, cursor: "pointer", backgroundColor: "white", color: "var(--color-ink-3)", opacity: saving ? 0.5 : 1 }}>
+                Batalkan
+              </button>
+            ) : req.status === "menunggu_verifikasi" ? (
+              // Sprint 2: show evidence toggle when awaiting verification
+              <button onClick={toggleEvidence}
+                style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-accent-light)", color: "var(--color-accent)" }}>
+                {showEvidence ? "Tutup" : "Lihat Bukti"}
+              </button>
+            ) : (
+              <>
+                {req.status !== "in_progress" && (
+                  <button onClick={() => handleStatusChange("in_progress")} disabled={saving}
+                    style={{ padding: "4px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "white", color: "var(--color-warning)", border: "1px solid rgba(14,13,11,0.1)", opacity: saving ? 0.5 : 1 }}>
+                    Diproses
+                  </button>
+                )}
+                {/* Sprint 2: Upload Bukti button */}
+                {req.status_id && (
+                  <button onClick={() => setShowUploadModal(true)} disabled={saving}
+                    style={{ padding: "4px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-accent-light)", color: "var(--color-accent)", border: "1px solid rgba(14,13,11,0.08)", display: "flex", alignItems: "center", gap: 3 }}>
+                    <Paperclip size={10} /> Bukti
+                  </button>
+                )}
+                <button onClick={() => handleStatusChange("completed")} disabled={saving}
+                  style={{ padding: "4px 10px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-success)", color: "white", opacity: saving ? 0.5 : 1 }}>
+                  Selesai ✓
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Sprint 2: Evidence list (expandable) */}
+        {showEvidence && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(14,13,11,0.06)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Bukti ({evidenceList.length})
+              </span>
+              {req.status_id && req.status !== "completed" && (
+                <button onClick={() => setShowUploadModal(true)}
+                  style={{ fontSize: 10, fontWeight: 600, color: "var(--color-accent)", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>
+                  <Paperclip size={10} /> + Tambah Bukti
+                </button>
+              )}
+            </div>
+            {loadingEvidence ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
+                <Loader2 size={14} style={{ animation: "spin 1s linear infinite", color: "var(--color-ink-3)" }} />
+              </div>
+            ) : evidenceList.length === 0 ? (
+              <div style={{ fontSize: 11, color: "var(--color-ink-3)", fontStyle: "italic", textAlign: "center", padding: "8px 0" }}>
+                Belum ada bukti diunggah
+              </div>
+            ) : (
+              evidenceList.map((ev) => (
+                <EvidenceItem
+                  key={ev.id}
+                  ev={ev}
+                  projectId={projectId}
+                  reqStatusId={req.status_id ?? req.id}
+                  onVerified={handleEvidenceVerified}
+                />
+              ))
+            )}
+          </div>
         )}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -223,7 +582,7 @@ function PermitBadge({ status }: { status: string }) {
   );
 }
 
-// ── Sprint 1: Alerts panel ────────────────────────────────────
+// ── Sprint 1 components — UNCHANGED ──────────────────────────
 function AlertsPanel({ alerts }: { alerts: IntelligenceSummary["alerts"] }) {
   if (!alerts || alerts.length === 0) {
     return (
@@ -233,7 +592,6 @@ function AlertsPanel({ alerts }: { alerts: IntelligenceSummary["alerts"] }) {
       </div>
     );
   }
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {alerts.map((alert, i) => {
@@ -242,16 +600,10 @@ function AlertsPanel({ alerts }: { alerts: IntelligenceSummary["alerts"] }) {
           <div key={i} style={{ padding: "10px 12px", backgroundColor: meta.bg, border: `1px solid ${meta.border}`, borderRadius: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
               <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: meta.color, flexShrink: 0 }} />
-              <span style={{ fontSize: 10, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                {alert.level}
-              </span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.05em" }}>{alert.level}</span>
             </div>
-            <div style={{ fontSize: 12, color: "var(--color-ink)", lineHeight: 1.4, marginBottom: 4 }}>
-              {alert.message}
-            </div>
-            <div style={{ fontSize: 11, color: "var(--color-ink-3)" }}>
-              → {alert.action}
-            </div>
+            <div style={{ fontSize: 12, color: "var(--color-ink)", lineHeight: 1.4, marginBottom: 4 }}>{alert.message}</div>
+            <div style={{ fontSize: 11, color: "var(--color-ink-3)" }}>→ {alert.action}</div>
           </div>
         );
       })}
@@ -259,25 +611,19 @@ function AlertsPanel({ alerts }: { alerts: IntelligenceSummary["alerts"] }) {
   );
 }
 
-// ── Sprint 1: Readiness dimensions ───────────────────────────
 function ReadinessDimensions({ dims }: { dims: IntelligenceSummary["readiness_dimensions"] }) {
   if (!dims) return null;
-
   const items = [
-    { key: "inventory",   label: "Inventori Unit"   },
-    { key: "compliance",  label: "Perizinan"         },
-    { key: "site_plan",   label: "Site Plan"         },
-    { key: "sales_setup", label: "Setup Penjualan"   },
+    { key: "inventory",   label: "Inventori Unit"  },
+    { key: "compliance",  label: "Perizinan"        },
+    { key: "site_plan",   label: "Site Plan"        },
+    { key: "sales_setup", label: "Setup Penjualan"  },
   ] as const;
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {items.map(({ key, label }) => {
         const value = dims[key] ?? 100;
-        const color =
-          value >= 80 ? "var(--color-success)" :
-          value >= 50 ? "var(--color-warning)" :
-                        "var(--color-danger)";
+        const color = value >= 80 ? "var(--color-success)" : value >= 50 ? "var(--color-warning)" : "var(--color-danger)";
         return (
           <div key={key}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
@@ -294,67 +640,28 @@ function ReadinessDimensions({ dims }: { dims: IntelligenceSummary["readiness_di
   );
 }
 
-// ── Sprint 1: Parallel stage toggles ─────────────────────────
-function ParallelStageToggles({
-  project,
-  onUpdated,
-}: {
-  project:   Project;
-  onUpdated: (p: Project) => void;
-}) {
+function ParallelStageToggles({ project, onUpdated }: { project: Project; onUpdated: (p: Project) => void }) {
   const [loading5A, setLoading5A] = useState(false);
   const [loading5B, setLoading5B] = useState(false);
-
   const toggle5A = async () => {
     setLoading5A(true);
-    try {
-      const updated = await projectsApi.toggleSelling(project.id, !project.is_selling);
-      onUpdated(updated);
-    } catch (e) { console.error(e); }
-    finally { setLoading5A(false); }
+    try { const u = await projectsApi.toggleSelling(project.id, !project.is_selling); onUpdated(u); }
+    catch (e) { console.error(e); } finally { setLoading5A(false); }
   };
-
   const toggle5B = async () => {
     setLoading5B(true);
-    try {
-      const updated = await projectsApi.toggleConstructing(project.id, !project.is_constructing);
-      onUpdated(updated);
-    } catch (e) { console.error(e); }
-    finally { setLoading5B(false); }
+    try { const u = await projectsApi.toggleConstructing(project.id, !project.is_constructing); onUpdated(u); }
+    catch (e) { console.error(e); } finally { setLoading5B(false); }
   };
-
   return (
     <div style={{ display: "flex", gap: 8 }}>
-      <button
-        onClick={toggle5A}
-        disabled={loading5A || !project.parallel_stages?.can_sell_now}
-        style={{
-          flex: 1, padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(14,13,11,0.12)",
-          fontSize: 11, fontWeight: 600, cursor: "pointer", transition: "all 0.15s",
-          backgroundColor: project.is_selling ? "var(--color-success-light)" : "white",
-          color: project.is_selling ? "var(--color-success)" : "var(--color-ink-3)",
-          opacity: (!project.parallel_stages?.can_sell_now) ? 0.4 : 1,
-        }}
-      >
-        {loading5A
-          ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite", display: "inline" }} />
-          : project.is_selling ? "✓ 5A Penjualan" : "5A Mulai Jual"
-        }
+      <button onClick={toggle5A} disabled={loading5A || !project.parallel_stages?.can_sell_now}
+        style={{ flex: 1, padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(14,13,11,0.12)", fontSize: 11, fontWeight: 600, cursor: "pointer", transition: "all 0.15s", backgroundColor: project.is_selling ? "var(--color-success-light)" : "white", color: project.is_selling ? "var(--color-success)" : "var(--color-ink-3)", opacity: !project.parallel_stages?.can_sell_now ? 0.4 : 1 }}>
+        {loading5A ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite", display: "inline" }} /> : project.is_selling ? "✓ 5A Penjualan" : "5A Mulai Jual"}
       </button>
-      <button
-        onClick={toggle5B}
-        disabled={loading5B}
-        style={{
-          flex: 1, padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(14,13,11,0.12)",
-          fontSize: 11, fontWeight: 600, cursor: "pointer", transition: "all 0.15s",
-          backgroundColor: project.is_constructing ? "var(--color-accent-light)" : "white",
-          color: project.is_constructing ? "var(--color-accent)" : "var(--color-ink-3)",
-        }}
-      >
-        {loading5B
-          ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite", display: "inline" }} />
-          : project.is_constructing ? "✓ 5B Konstruksi" : "5B Mulai Bangun"
-        }
+      <button onClick={toggle5B} disabled={loading5B}
+        style={{ flex: 1, padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(14,13,11,0.12)", fontSize: 11, fontWeight: 600, cursor: "pointer", transition: "all 0.15s", backgroundColor: project.is_constructing ? "var(--color-accent-light)" : "white", color: project.is_constructing ? "var(--color-accent)" : "var(--color-ink-3)" }}>
+        {loading5B ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite", display: "inline" }} /> : project.is_constructing ? "✓ 5B Konstruksi" : "5B Mulai Bangun"}
       </button>
     </div>
   );
@@ -394,19 +701,12 @@ export default function ProjectDetailPage() {
 
   function buildForm(p: Project): UpdateProjectPayload {
     return {
-      name:          p.name,
-      location:      p.location,
-      description:   p.description,
-      total_units:   p.total_units,
-      target_budget: p.target_budget ?? "",
-      start_date:    p.start_date ?? "",
-      end_date:      p.end_date ?? "",
-      ipr_status:    p.ipr_status,
-      ipr_date:      p.ipr_date ?? "",
-      amdal_status:  p.amdal_status,
-      amdal_date:    p.amdal_date ?? "",
-      pbg_status:    p.pbg_status,
-      pbg_date:      p.pbg_date ?? "",
+      name: p.name, location: p.location, description: p.description,
+      total_units: p.total_units, target_budget: p.target_budget ?? "",
+      start_date: p.start_date ?? "", end_date: p.end_date ?? "",
+      ipr_status: p.ipr_status, ipr_date: p.ipr_date ?? "",
+      amdal_status: p.amdal_status, amdal_date: p.amdal_date ?? "",
+      pbg_status: p.pbg_status, pbg_date: p.pbg_date ?? "",
     };
   }
 
@@ -421,11 +721,8 @@ export default function ProjectDetailPage() {
       const i = await projectsApi.getIntelligence(project.id);
       setIntel(i);
       setEditMode(false);
-    } catch {
-      setError("Gagal menyimpan perubahan");
-    } finally {
-      setSaving(false);
-    }
+    } catch { setError("Gagal menyimpan perubahan"); }
+    finally { setSaving(false); }
   };
 
   const handleAdvance = async () => {
@@ -438,11 +735,8 @@ export default function ProjectDetailPage() {
       const i = await projectsApi.getIntelligence(updated.id);
       setIntel(i);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Gagal melanjutkan tahap";
-      setError(msg);
-    } finally {
-      setAdvancing(false);
-    }
+      setError(e instanceof Error ? e.message : "Gagal melanjutkan tahap");
+    } finally { setAdvancing(false); }
   };
 
   const handleRequirementUpdated = (newIntel: IntelligenceSummary) => {
@@ -479,29 +773,20 @@ export default function ProjectDetailPage() {
         <ChevronLeft size={14} /> Kembali ke Semua Proyek
       </Link>
 
-      {/* ── Header — UNCHANGED ── */}
+      {/* ── Header ── */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              {meta.label}
-            </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.08em" }}>{meta.label}</span>
             <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>— {meta.description}</span>
-            {/* Sprint 1: parallel stage badges inline in header */}
             {project.is_selling && (
-              <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999, backgroundColor: "var(--color-success-light)", color: "var(--color-success)" }}>
-                5A Aktif Jual
-              </span>
+              <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999, backgroundColor: "var(--color-success-light)", color: "var(--color-success)" }}>5A Aktif Jual</span>
             )}
             {project.is_constructing && (
-              <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999, backgroundColor: "var(--color-accent-light)", color: "var(--color-accent)" }}>
-                5B Aktif Bangun
-              </span>
+              <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999, backgroundColor: "var(--color-accent-light)", color: "var(--color-accent)" }}>5B Aktif Bangun</span>
             )}
           </div>
-          <h1 style={{ fontSize: 26, fontWeight: 700, color: "var(--color-ink)", margin: 0, marginBottom: 4 }}>
-            {project.name}
-          </h1>
+          <h1 style={{ fontSize: 26, fontWeight: 700, color: "var(--color-ink)", margin: 0, marginBottom: 4 }}>{project.name}</h1>
           <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "var(--color-ink-3)" }}>
             <MapPin size={13} /> {project.location}
           </div>
@@ -528,33 +813,22 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* ── Intelligence summary bar — UNCHANGED + risk_reasons ── */}
+      {/* ── Intelligence summary bar ── */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
-
-          {/* Readiness gauge */}
           <ReadinessGauge score={intel.readiness_score} />
-
-          {/* Stats */}
           <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
             <div style={{ textAlign: "center", padding: "12px", backgroundColor: intel.blocking_count > 0 ? "var(--color-danger-light)" : "var(--color-success-light)", borderRadius: 8 }}>
-              <div style={{ fontSize: 24, fontWeight: 800, color: intel.blocking_count > 0 ? "var(--color-danger)" : "var(--color-success)" }}>
-                {intel.blocking_count}
-              </div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: intel.blocking_count > 0 ? "var(--color-danger)" : "var(--color-success)" }}>{intel.blocking_count}</div>
               <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>Item Blokir</div>
             </div>
-
             <div style={{ textAlign: "center", padding: "12px", backgroundColor: riskMeta.bg, borderRadius: 8 }}>
               <div style={{ fontSize: 18, fontWeight: 800, color: riskMeta.color }}>{riskMeta.label}</div>
               <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>Tingkat Risiko</div>
-              {/* Sprint 1: show first risk reason */}
               {intel.risk_reasons && intel.risk_reasons.length > 0 && (
-                <div style={{ fontSize: 10, color: riskMeta.color, marginTop: 4, fontStyle: "italic" }}>
-                  {intel.risk_reasons[0]}
-                </div>
+                <div style={{ fontSize: 10, color: riskMeta.color, marginTop: 4, fontStyle: "italic" }}>{intel.risk_reasons[0]}</div>
               )}
             </div>
-
             <div style={{ textAlign: "center", padding: "12px", backgroundColor: "var(--color-paper-2)", borderRadius: 8 }}>
               <div style={{ fontSize: 24, fontWeight: 800, color: trendMeta.color }}>{trendMeta.icon}</div>
               <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>
@@ -562,25 +836,16 @@ export default function ProjectDetailPage() {
               </div>
             </div>
           </div>
-
-          {/* Next action + advance button */}
           <div style={{ minWidth: 220 }}>
             {intel.next_action && (
               <div style={{ marginBottom: 12, padding: "10px 12px", backgroundColor: "var(--color-warning-light)", borderRadius: 8 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-warning)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-                  Tindakan Berikutnya
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
-                  {intel.next_action}
-                </div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-warning)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Tindakan Berikutnya</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>{intel.next_action}</div>
               </div>
             )}
-            <button
-              onClick={handleAdvance}
-              disabled={advancing || !intel.can_advance}
+            <button onClick={handleAdvance} disabled={advancing || !intel.can_advance}
               className={intel.can_advance ? "btn-accent" : "btn-ghost"}
-              style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: intel.can_advance ? 1 : 0.5 }}
-            >
+              style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: intel.can_advance ? 1 : 0.5 }}>
               {advancing ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <ArrowRight size={14} />}
               {intel.can_advance ? "Lanjutkan Tahap" : "Tahap Diblokir"}
             </button>
@@ -588,17 +853,13 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* ── Sprint 1: Alerts + Dimensions row ── */}
+      {/* ── Sprint 1: Alerts + Dimensions ── */}
       {((intel.alerts && intel.alerts.length > 0) || intel.readiness_dimensions) && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-
-          {/* Alerts panel */}
           <div className="card">
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
               <Zap size={14} style={{ color: intel.alerts?.some((a) => a.level === "critical") ? "var(--color-danger)" : "var(--color-warning)" }} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
-                Alerts Aktif
-              </span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>Alerts Aktif</span>
               {intel.alerts && intel.alerts.length > 0 && (
                 <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, backgroundColor: intel.alerts.some((a) => a.level === "critical") ? "var(--color-danger)" : "var(--color-warning)", color: "white" }}>
                   {intel.alerts.length}
@@ -606,55 +867,38 @@ export default function ProjectDetailPage() {
               )}
             </div>
             <AlertsPanel alerts={intel.alerts ?? []} />
-
-            {/* Risk reasons */}
             {intel.risk_reasons && intel.risk_reasons.length > 0 && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(14,13,11,0.06)" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
-                  Alasan Risiko
-                </div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Alasan Risiko</div>
                 {intel.risk_reasons.map((reason, i) => (
                   <div key={i} style={{ display: "flex", gap: 6, marginBottom: 4, fontSize: 11, color: "var(--color-ink)" }}>
-                    <span style={{ color: "var(--color-danger)", flexShrink: 0 }}>⚠</span>
-                    {reason}
+                    <span style={{ color: "var(--color-danger)", flexShrink: 0 }}>⚠</span>{reason}
                   </div>
                 ))}
               </div>
             )}
           </div>
-
-          {/* Readiness dimensions */}
           <div className="card">
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 4 }}>
-              Kesiapan per Dimensi
-            </div>
-            <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginBottom: 16 }}>
-              Breakdown readiness score tahap ini
-            </div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 4 }}>Kesiapan per Dimensi</div>
+            <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginBottom: 16 }}>Breakdown readiness score tahap ini</div>
             <ReadinessDimensions dims={intel.readiness_dimensions} />
-
-            {/* Sprint 1: Parallel stage toggles */}
             <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid rgba(14,13,11,0.06)" }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-                Mode Paralel (5A/5B)
-              </div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Mode Paralel (5A/5B)</div>
               <ParallelStageToggles project={project} onUpdated={setProject} />
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Stage pipeline — UNCHANGED ── */}
+      {/* ── Stage pipeline ── */}
       <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-ink)", marginBottom: 20 }}>
-          Alur Tahap Proyek
-        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-ink)", marginBottom: 20 }}>Alur Tahap Proyek</div>
         <StagePipeline stage={project.stage} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
 
-        {/* ── Requirements — UNCHANGED ── */}
+        {/* ── Requirements ── */}
         <div className="card">
           <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 16 }}>
             Checklist Tahap {meta.label}
@@ -695,13 +939,8 @@ export default function ProjectDetailPage() {
 
         {/* ── Project info / edit ── */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-
-          {/* Basic info card — UNCHANGED */}
           <div className="card">
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 16 }}>
-              Informasi Proyek
-            </div>
-
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 16 }}>Informasi Proyek</div>
             {editMode ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {[
@@ -713,25 +952,16 @@ export default function ProjectDetailPage() {
                   { label: "Target Selesai",  key: "end_date",      type: "date"   },
                 ].map((field) => (
                   <div key={field.key}>
-                    <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--color-ink-3)", marginBottom: 3 }}>
-                      {field.label}
-                    </label>
-                    <input
-                      type={field.type}
-                      value={(form as Record<string, unknown>)[field.key] as string ?? ""}
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--color-ink-3)", marginBottom: 3 }}>{field.label}</label>
+                    <input type={field.type} value={(form as Record<string, unknown>)[field.key] as string ?? ""}
                       onChange={(e) => setForm({ ...form, [field.key]: field.type === "number" ? Number(e.target.value) : e.target.value })}
-                      style={{ width: "100%", padding: "7px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 12, color: "var(--color-ink)", outline: "none", boxSizing: "border-box" }}
-                    />
+                      style={{ width: "100%", padding: "7px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 12, color: "var(--color-ink)", outline: "none", boxSizing: "border-box" }} />
                   </div>
                 ))}
                 <div>
                   <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--color-ink-3)", marginBottom: 3 }}>Deskripsi</label>
-                  <textarea
-                    value={form.description ?? ""}
-                    onChange={(e) => setForm({ ...form, description: e.target.value })}
-                    rows={3}
-                    style={{ width: "100%", padding: "7px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 12, color: "var(--color-ink)", outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }}
-                  />
+                  <textarea value={form.description ?? ""} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3}
+                    style={{ width: "100%", padding: "7px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 12, color: "var(--color-ink)", outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }} />
                 </div>
               </div>
             ) : (
@@ -750,17 +980,11 @@ export default function ProjectDetailPage() {
                     <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-ink)" }}>{row.value}</div>
                   </div>
                 ))}
-
-                {/* Sprint 1: Collection efficiency row */}
                 {project.collection_efficiency && project.collection_efficiency.total_billed > 0 && (
                   <div style={{ marginTop: 10, padding: "10px 12px", backgroundColor: "var(--color-paper-2)", borderRadius: 8 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                       <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>Efisiensi Penagihan</span>
-                      <span style={{
-                        fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
-                        color: project.collection_efficiency.status === "healthy" ? "var(--color-success)" : project.collection_efficiency.status === "attention" ? "var(--color-warning)" : "var(--color-danger)",
-                        backgroundColor: project.collection_efficiency.status === "healthy" ? "var(--color-success-light)" : project.collection_efficiency.status === "attention" ? "var(--color-warning-light)" : "var(--color-danger-light)",
-                      }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, color: project.collection_efficiency.status === "healthy" ? "var(--color-success)" : project.collection_efficiency.status === "attention" ? "var(--color-warning)" : "var(--color-danger)", backgroundColor: project.collection_efficiency.status === "healthy" ? "var(--color-success-light)" : project.collection_efficiency.status === "attention" ? "var(--color-warning-light)" : "var(--color-danger-light)" }}>
                         {project.collection_efficiency.efficiency_pct}% — {project.collection_efficiency.status_display}
                       </span>
                     </div>
@@ -775,17 +999,14 @@ export default function ProjectDetailPage() {
             )}
           </div>
 
-          {/* Permits card — UNCHANGED */}
           {["perizinan", "konstruksi", "penjualan", "serah_terima", "selesai"].includes(project.stage) && (
             <div className="card">
-              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 16 }}>
-                Status Perizinan
-              </div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 16 }}>Status Perizinan</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {[
-                  { label: "IPR",           status: project.ipr_status,   date: project.ipr_date,   key_s: "ipr_status",   desc: "Izin Pemanfaatan Ruang"      },
-                  { label: "AMDAL/UKL-UPL", status: project.amdal_status, date: project.amdal_date, key_s: "amdal_status", desc: "Kajian Lingkungan"            },
-                  { label: "PBG ⚡",         status: project.pbg_status,   date: project.pbg_date,   key_s: "pbg_status",   desc: "Persetujuan Bangunan Gedung"  },
+                  { label: "IPR",           status: project.ipr_status,   date: project.ipr_date,   key_s: "ipr_status",   desc: "Izin Pemanfaatan Ruang"     },
+                  { label: "AMDAL/UKL-UPL", status: project.amdal_status, date: project.amdal_date, key_s: "amdal_status", desc: "Kajian Lingkungan"           },
+                  { label: "PBG ⚡",         status: project.pbg_status,   date: project.pbg_date,   key_s: "pbg_status",   desc: "Persetujuan Bangunan Gedung" },
                 ].map((permit) => (
                   <div key={permit.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", backgroundColor: "var(--color-paper-2)", borderRadius: 8 }}>
                     <div>
@@ -794,11 +1015,9 @@ export default function ProjectDetailPage() {
                       {permit.date && <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 2 }}>{permit.date}</div>}
                     </div>
                     {editMode ? (
-                      <select
-                        value={(form as Record<string, unknown>)[permit.key_s] as string ?? "belum"}
+                      <select value={(form as Record<string, unknown>)[permit.key_s] as string ?? "belum"}
                         onChange={(e) => setForm({ ...form, [permit.key_s]: e.target.value })}
-                        style={{ padding: "5px 8px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 11, backgroundColor: "white" }}
-                      >
+                        style={{ padding: "5px 8px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 11, backgroundColor: "white" }}>
                         <option value="belum">Belum Dimulai</option>
                         <option value="proses">Sedang Diproses</option>
                         <option value="approved">Disetujui</option>
@@ -813,7 +1032,6 @@ export default function ProjectDetailPage() {
             </div>
           )}
 
-          {/* Quick links — UNCHANGED */}
           <div style={{ display: "flex", gap: 10 }}>
             <Link href={`/dashboard/units?project=${project.id}`} className="btn-ghost" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 12 }}>
               <Home size={13} /> Kelola Unit
