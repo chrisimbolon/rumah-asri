@@ -2,7 +2,7 @@
 
 /**
  * DevelopIndo — Buyer Portal Page
- * Wired to real Django API — no more mock data!!
+ * Wired to real Django API — no more mock data!! - Verify the real data from DB with mock data
  */
 
 import { useAuth } from "@/context/AuthContext";
