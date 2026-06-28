@@ -1,4 +1,5 @@
 /**
+ * frontend/lib/api/buyer.ts
  * DevelopIndo — Buyer API
  * All frontend API calls for the Buyer Portal
  * Connects to Django /api/buyer/* endpoints
