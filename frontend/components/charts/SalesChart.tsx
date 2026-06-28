@@ -1,3 +1,4 @@
+// frontend/components/charts/SalesChart.tsx
 "use client";
 
 import { DataGrafik } from "@/lib/mock-data";
