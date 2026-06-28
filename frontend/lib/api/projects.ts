@@ -79,6 +79,28 @@ export interface RequirementEvidence {
   verifier_notes:       string;
 }
 
+export interface ReadinessBreakdownItem {
+  id:                    string;
+  name:                  string;
+  category:              string;
+  weight:                number;   // raw weight value
+  weight_pct:            number;   // % of total weight (e.g. 40)
+  status:                ReqStatus;
+  is_completed:          boolean;
+  is_dependency_blocked: boolean;
+  contribution:          number;   // weight_pct if completed, else 0
+}
+
+export interface ReadinessBreakdown {
+  score:            number;   // 0-100
+  label:            string;   // "Sangat Siap" | "Cukup Siap" | "Sedang" | "Belum Siap"
+  total_weight:     number;   // sum of all mandatory weights
+  completed_weight: number;   // sum of completed mandatory weights
+  formula:          string;   // human-readable e.g. "Readiness = (40 / 100) × 100 = 40%"
+  items:            ReadinessBreakdownItem[];
+}
+
+
 // ── RequirementItem — Sprint 2: adds evidence fields ─────────
 
 export interface RequirementItem {
@@ -104,6 +126,9 @@ export interface RequirementItem {
   unmet_prerequisites:   string[];   // which prereqs are not done yet
   is_dependency_blocked: boolean;    // true if any prereq is unmet
   can_act_now:           boolean;    // true if developer can work on this now
+  weight:                number;   // raw weight value (0 if optional)
+  weight_pct:            number;   // % of total mandatory weight
+  contribution:          number;   // weight_pct if completed, else 0
 }
 
 // ── IntelligenceSummary — UNCHANGED ──────────────────────────
@@ -122,6 +147,8 @@ export interface IntelligenceSummary {
   alerts:                Alert[];
   parallel_stages:       ParallelStages;
   collection_efficiency: CollectionEfficiency;
+  readiness_breakdown: ReadinessBreakdown;
+  readiness_label:     string;
 }
 
 export interface StageChecklistItem {
@@ -305,6 +332,14 @@ export const EVIDENCE_META: Record<EvidenceVerifStatus, { label: string; color: 
   approved: { label: "Disetujui ✓",    color: "var(--color-success)", bg: "var(--color-success-light)" },
   rejected: { label: "Ditolak",        color: "var(--color-danger)",  bg: "var(--color-danger-light)"  },
 };
+
+export const READINESS_LABEL_META: Record<string, { color: string; bg: string }> = {
+  "Sangat Siap": { color: "var(--color-success)", bg: "var(--color-success-light)" },
+  "Cukup Siap":  { color: "var(--color-info)",    bg: "var(--color-info-light)"    },
+  "Sedang":      { color: "var(--color-warning)", bg: "var(--color-warning-light)" },
+  "Belum Siap":  { color: "var(--color-danger)",  bg: "var(--color-danger-light)"  },
+};
+
 
 // ── Derived stats — UNCHANGED ─────────────────────────────────
 
