@@ -13,10 +13,12 @@ Sprint 3: RequirementAudit — immutable audit trail
 Sprint 4: Dependency Graph & Rule Engine
           StageRequirement.prerequisites — M2M self-reference
           ProjectRequirementStatus.can_complete() — prereq check
-          _has_unmet_prerequisites() — dependency resolver
-          blocking_count — Option B: only root blockers count
-          next_action — always points to ROOT cause
-          dependency_status — new intelligence field
+Sprint 5: Explainable Weighted Readiness Engine
+          StageRequirement.weight — per-requirement weight (0-100)
+          Project.readiness_score — now weighted, not equal-count
+          Project.readiness_breakdown — full explainable calculation
+          Project.readiness_dimensions — now weighted per dimension
+          readiness_label — Rendah/Sedang/Tinggi/Sangat Tinggi
 
 ZERO BREAKING CHANGES — all existing fields preserved.
 59 tests still green.
@@ -31,7 +33,7 @@ from apps.core.models import TenantScopedModel
 
 
 # =============================================================================
-# StageRequirement — Sprint 4: adds prerequisites M2M
+# StageRequirement — Sprint 5: adds weight field
 # =============================================================================
 
 class StageRequirement(models.Model):
@@ -60,17 +62,26 @@ class StageRequirement(models.Model):
     is_active    = models.BooleanField(default=True)
     category     = models.CharField(max_length=20, choices=Category.choices, default=Category.GENERAL)
 
+    # ── Sprint 5: Weight field ────────────────────────────────
+    # Weight of this requirement in the readiness score calculation.
+    # Only applies to is_mandatory=True requirements.
+    # Non-mandatory requirements always have weight=0 in scoring.
+    # Total weight per stage should ideally sum to 100,
+    # but the engine normalises automatically so any values work.
+    # Default=10 so existing requirements all start equal-weighted.
+    weight = models.PositiveIntegerField(
+        default=10,
+        verbose_name="Bobot",
+        help_text="Bobot requirement dalam kalkulasi readiness (0-100). Hanya berlaku untuk requirement wajib.",
+    )
+
     # ── Sprint 4: Dependency graph ────────────────────────────
-    # Self-referential M2M: "this requirement needs THESE done first"
-    # Only within the same stage — cross-stage deps are handled
-    # by the stage advancement blocking logic.
     prerequisites = models.ManyToManyField(
         "self",
-        symmetrical=False,           # A requires B ≠ B requires A
+        symmetrical=False,
         blank=True,
-        related_name="dependents",   # req.dependents = what needs this done first
+        related_name="dependents",
         verbose_name="Prasyarat",
-        help_text="Requirement yang harus selesai sebelum ini bisa dikerjakan",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -84,15 +95,14 @@ class StageRequirement(models.Model):
 
     def __str__(self):
         flag = "⚡" if self.is_mandatory else "○"
-        return f"{flag} [{self.get_stage_display()}] {self.name}"
+        return f"{flag} [{self.get_stage_display()}] {self.name} (w={self.weight})"
 
     def get_prerequisite_names(self):
-        """Returns list of prerequisite names for display."""
         return list(self.prerequisites.values_list("name", flat=True))
 
 
 # =============================================================================
-# ProjectRequirementStatus — Sprint 4: adds can_complete() rule engine
+# ProjectRequirementStatus — Sprint 4: can_complete() rule engine
 # =============================================================================
 
 class ProjectRequirementStatus(models.Model):
@@ -121,47 +131,23 @@ class ProjectRequirementStatus(models.Model):
     def __str__(self):
         return f"{self.project.name} — {self.requirement.name}: {self.status}"
 
-    # ── Sprint 4: Rule engine ─────────────────────────────────
-
     def get_unmet_prerequisites(self):
-        """
-        Sprint 4: Returns list of prerequisite names that are NOT
-        yet completed for this requirement.
-        Empty list = all prerequisites met = safe to complete.
-
-        This is the RULE ENGINE core — called before any status change
-        to completed or menunggu_verifikasi.
-        """
         prereqs = self.requirement.prerequisites.all()
         if not prereqs.exists():
             return []
-
         unmet = []
         for prereq in prereqs:
-            # Check if this prerequisite is completed for this project
             try:
                 prereq_status = ProjectRequirementStatus.objects.get(
-                    project=self.project,
-                    requirement=prereq,
+                    project=self.project, requirement=prereq,
                 )
                 if prereq_status.status != self.Status.COMPLETED:
                     unmet.append(prereq.name)
             except ProjectRequirementStatus.DoesNotExist:
-                # Status row doesn't exist = not started = unmet
                 unmet.append(prereq.name)
-
         return unmet
 
     def can_complete(self):
-        """
-        Sprint 4: Returns (can_complete: bool, reason: str).
-        Checks prerequisites before allowing completion.
-
-        Usage:
-          ok, reason = req_status.can_complete()
-          if not ok:
-              raise ValueError(reason)
-        """
         unmet = self.get_unmet_prerequisites()
         if unmet:
             prereq_list = ", ".join(unmet)
@@ -172,16 +158,12 @@ class ProjectRequirementStatus(models.Model):
         return True, ""
 
     def mark_completed(self, user=None):
-        """Sprint 4: now enforces prerequisite rules before completing."""
         from django.utils import timezone
-
-        # Sprint 4: rule engine check
         ok, reason = self.can_complete()
         if not ok:
             raise ValueError(reason)
-
-        old_status    = self.status
-        self.status   = self.Status.COMPLETED
+        old_status        = self.status
+        self.status       = self.Status.COMPLETED
         self.completed_at = timezone.now()
         self.updated_by   = user
         self.save(update_fields=["status", "completed_at", "updated_by", "updated_at"])
@@ -194,12 +176,9 @@ class ProjectRequirementStatus(models.Model):
         )
 
     def mark_awaiting_verification(self, user=None):
-        """Sprint 4: also enforces prerequisite rules before upload."""
-        # Sprint 4: rule engine check — can't upload evidence if prereqs unmet
         ok, reason = self.can_complete()
         if not ok:
             raise ValueError(reason)
-
         old_status  = self.status
         self.status = self.Status.AWAITING_VERIFICATION
         self.updated_by = user
@@ -329,7 +308,6 @@ class RequirementAudit(models.Model):
 
     @classmethod
     def log(cls, requirement_status, action, changed_by=None, old_value="", new_value="", notes=""):
-        """Never raises — audit logging must never break main flow."""
         try:
             cls.objects.create(
                 requirement_status=requirement_status,
@@ -344,7 +322,7 @@ class RequirementAudit(models.Model):
 
 
 # =============================================================================
-# Project — Sprint 4: dependency-aware intelligence engine
+# Project — Sprint 5: weighted explainable readiness engine
 # =============================================================================
 
 class Project(TenantScopedModel):
@@ -365,17 +343,12 @@ class Project(TenantScopedModel):
         Stage.HANDOVER, Stage.COMPLETED,
     ]
 
-    # ── Core fields ───────────────────────────────────────────
     name        = models.CharField(max_length=200)
     location    = models.CharField(max_length=300)
     description = models.TextField(blank=True)
     stage       = models.CharField(max_length=20, choices=Stage.choices, default=Stage.DRAFT, db_index=True)
-
-    # ── Sprint 1: parallel stage flags ────────────────────────
     is_selling      = models.BooleanField(default=False)
     is_constructing = models.BooleanField(default=False)
-
-    # ── Planning fields ───────────────────────────────────────
     total_units     = models.PositiveIntegerField(default=0)
     target_budget   = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     start_date      = models.DateField(null=True, blank=True)
@@ -383,7 +356,6 @@ class Project(TenantScopedModel):
     master_plan_url = models.URLField(blank=True)
     site_plan_url   = models.URLField(blank=True)
 
-    # ── Permit fields ─────────────────────────────────────────
     class PermitStatus(models.TextChoices):
         NOT_STARTED = "belum",    "Belum Dimulai"
         IN_PROGRESS = "proses",   "Sedang Diproses"
@@ -396,12 +368,8 @@ class Project(TenantScopedModel):
     amdal_date   = models.DateField(null=True, blank=True)
     pbg_status   = models.CharField(max_length=20, choices=PermitStatus.choices, default=PermitStatus.NOT_STARTED)
     pbg_date     = models.DateField(null=True, blank=True)
-
-    # ── Intelligence snapshot ─────────────────────────────────
     readiness_score_last       = models.IntegerField(default=0)
     readiness_score_updated_at = models.DateTimeField(null=True, blank=True)
-
-    # ── Timestamps ────────────────────────────────────────────
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -414,7 +382,7 @@ class Project(TenantScopedModel):
         return f"{self.name} — {self.location}"
 
     # =========================================================
-    # BASIC COMPUTED PROPERTIES — UNCHANGED
+    # BASIC COMPUTED PROPERTIES
     # =========================================================
 
     @property
@@ -458,13 +426,6 @@ class Project(TenantScopedModel):
         return {str(s.requirement_id): s for s in statuses}
 
     def _has_unmet_prerequisites(self, requirement, statuses_map):
-        """
-        Sprint 4: Check if a requirement has unmet prerequisites.
-        Uses the already-fetched statuses_map for efficiency
-        (avoids N+1 queries in get_intelligence_summary).
-
-        Returns True if ANY prerequisite is not completed.
-        """
         for prereq in requirement.prerequisites.all():
             s = statuses_map.get(str(prereq.id))
             if not s or s.status != ProjectRequirementStatus.Status.COMPLETED:
@@ -472,40 +433,179 @@ class Project(TenantScopedModel):
         return False
 
     # =========================================================
-    # INTELLIGENCE PROPERTIES — Sprint 4 upgrades
+    # SPRINT 5: WEIGHTED READINESS ENGINE
     # =========================================================
+
+    def _get_readiness_data(self):
+        """
+        Sprint 5: Core weighted readiness calculation.
+        Returns a dict used by readiness_score, readiness_breakdown,
+        and readiness_dimensions — computed ONCE, shared across all.
+
+        Formula:
+          readiness_score = (completed_weight / total_weight) × 100
+
+        Where:
+          total_weight    = sum of weights of all mandatory requirements
+          completed_weight = sum of weights of completed mandatory requirements
+
+        If total_weight = 0 (no mandatory requirements), returns 100.
+
+        Each requirement item in the breakdown includes:
+          name, weight, weight_pct, status, is_completed,
+          is_dependency_blocked, category, contribution
+        """
+        requirements = self._get_current_requirements().filter(is_mandatory=True)
+        statuses     = self._get_requirement_statuses()
+
+        total_weight     = 0
+        completed_weight = 0
+        items            = []
+
+        for r in requirements:
+            w = r.weight if r.weight > 0 else 1  # guard against zero weight
+            s = statuses.get(str(r.id))
+            is_completed = (
+                s is not None and
+                s.status == ProjectRequirementStatus.Status.COMPLETED
+            )
+            is_dep_blocked = (
+                not is_completed and
+                self._has_unmet_prerequisites(r, statuses)
+            )
+
+            total_weight += w
+            if is_completed:
+                completed_weight += w
+
+            items.append({
+                "id":                   str(r.id),
+                "name":                 r.name,
+                "category":             r.category,
+                "weight":               w,
+                "status":               s.status if s else ProjectRequirementStatus.Status.PENDING,
+                "is_completed":         is_completed,
+                "is_dependency_blocked": is_dep_blocked,
+                # contribution filled after total_weight is known
+                "contribution":         0,
+            })
+
+        # Now compute weight_pct and contribution per item
+        for item in items:
+            item["weight_pct"]   = round((item["weight"] / total_weight) * 100) if total_weight > 0 else 0
+            item["contribution"] = item["weight_pct"] if item["is_completed"] else 0
+
+        score = round((completed_weight / total_weight) * 100) if total_weight > 0 else 100
+
+        return {
+            "score":            score,
+            "total_weight":     total_weight,
+            "completed_weight": completed_weight,
+            "items":            items,
+        }
 
     @property
     def readiness_score(self):
-        """Unchanged — counts completed mandatory requirements."""
-        requirements = self._get_current_requirements().filter(is_mandatory=True)
-        total = requirements.count()
-        if total == 0:
-            return 100
-        statuses = self._get_requirement_statuses()
-        completed = sum(
-            1 for r in requirements
-            if statuses.get(str(r.id)) and
-               statuses[str(r.id)].status == ProjectRequirementStatus.Status.COMPLETED
-        )
-        return round((completed / total) * 100)
+        """
+        Sprint 5: Weighted readiness score.
+        Replaces equal-count method from Sprint 1.
+
+        Formula: sum(completed weights) / sum(all weights) × 100
+        """
+        return self._get_readiness_data()["score"]
+
+    @property
+    def readiness_label(self):
+        """
+        Sprint 5: Human-readable readiness label.
+        Used alongside the numeric score for quick comprehension.
+        """
+        score = self.readiness_score
+        if score >= 80:
+            return "Sangat Siap"
+        if score >= 60:
+            return "Cukup Siap"
+        if score >= 30:
+            return "Sedang"
+        return "Belum Siap"
+
+    @property
+    def readiness_breakdown(self):
+        """
+        Sprint 5: Full explainable readiness breakdown.
+        This is the "show your working" panel the co-founders asked for.
+
+        Returns:
+          score:            int (0-100)
+          label:            str (Sangat Siap / Cukup Siap / Sedang / Belum Siap)
+          total_weight:     int (sum of all mandatory weights)
+          completed_weight: int (sum of completed mandatory weights)
+          formula:          str (human-readable formula)
+          items: [
+            {
+              name:                  str
+              category:              str
+              weight:                int  (raw weight value)
+              weight_pct:            int  (% of total weight)
+              status:                str
+              is_completed:          bool
+              is_dependency_blocked: bool
+              contribution:          int  (weight_pct if completed, else 0)
+            }
+          ]
+
+        Used by:
+          GET /api/projects/<id>/intelligence/
+          Project detail page — "Bagaimana kalkulasinya?" panel
+        """
+        data  = self._get_readiness_data()
+        score = data["score"]
+        return {
+            "score":            score,
+            "label":            self.readiness_label,
+            "total_weight":     data["total_weight"],
+            "completed_weight": data["completed_weight"],
+            "formula":          (
+                f"Readiness = ({data['completed_weight']} / {data['total_weight']}) × 100 = {score}%"
+            ),
+            "items":            data["items"],
+        }
+
+    @property
+    def readiness_dimensions(self):
+        """
+        Sprint 5: Weighted readiness per dimension.
+        Each dimension score = sum(completed weights in dim) / sum(all weights in dim) × 100
+        Dimensions with no mandatory requirements return 100 (nothing to do = done).
+        """
+        data = self._get_readiness_data()
+        dims = {
+            "inventory":   {"total": 0, "completed": 0},
+            "compliance":  {"total": 0, "completed": 0},
+            "site_plan":   {"total": 0, "completed": 0},
+            "sales_setup": {"total": 0, "completed": 0},
+            "general":     {"total": 0, "completed": 0},
+        }
+        for item in data["items"]:
+            cat = item["category"] if item["category"] in dims else "general"
+            dims[cat]["total"]     += item["weight"]
+            if item["is_completed"]:
+                dims[cat]["completed"] += item["weight"]
+
+        return {
+            dim: (
+                100 if d["total"] == 0
+                else round((d["completed"] / d["total"]) * 100)
+            )
+            for dim, d in dims.items()
+        }
+
+    # =========================================================
+    # INTELLIGENCE PROPERTIES — unchanged logic, score now weighted
+    # =========================================================
 
     @property
     def blocking_count(self):
-        """
-        Sprint 4 — Option B:
-        Only count requirements that are DIRECTLY actionable
-        (not blocked by unmet prerequisites).
-
-        A requirement is "blocking" if:
-          1. It is mandatory
-          2. It is not completed
-          3. It is NOT waiting on a prerequisite
-             (because the prereq is the real blocker)
-
-        This means blocking_count always = number of things
-        the developer can actually DO RIGHT NOW.
-        """
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         statuses = self._get_requirement_statuses()
         blocking = 0
@@ -515,25 +615,17 @@ class Project(TenantScopedModel):
                 ProjectRequirementStatus.Status.PENDING,
                 ProjectRequirementStatus.Status.IN_PROGRESS,
             ):
-                # Sprint 4: skip if blocked by an unmet prerequisite
                 if not self._has_unmet_prerequisites(r, statuses):
                     blocking += 1
         return blocking
 
     @property
     def next_action(self):
-        """
-        Sprint 4: Always returns the ROOT cause action —
-        the first mandatory requirement that:
-          1. Is not completed
-          2. Has NO unmet prerequisites (i.e. actionable now)
-        """
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         statuses = self._get_requirement_statuses()
         for r in requirements:
             s = statuses.get(str(r.id))
             if not s or s.status == ProjectRequirementStatus.Status.PENDING:
-                # Only return if no unmet prerequisites
                 if not self._has_unmet_prerequisites(r, statuses):
                     return r.name
         return None
@@ -578,28 +670,6 @@ class Project(TenantScopedModel):
         return True
 
     @property
-    def readiness_dimensions(self):
-        requirements = self._get_current_requirements().filter(is_mandatory=True)
-        statuses     = self._get_requirement_statuses()
-        dims = {
-            "inventory":   {"total": 0, "completed": 0},
-            "compliance":  {"total": 0, "completed": 0},
-            "site_plan":   {"total": 0, "completed": 0},
-            "sales_setup": {"total": 0, "completed": 0},
-            "general":     {"total": 0, "completed": 0},
-        }
-        for r in requirements:
-            cat = r.category if r.category in dims else "general"
-            dims[cat]["total"] += 1
-            s = statuses.get(str(r.id))
-            if s and s.status == ProjectRequirementStatus.Status.COMPLETED:
-                dims[cat]["completed"] += 1
-        return {
-            dim: 100 if data["total"] == 0 else round((data["completed"] / data["total"]) * 100)
-            for dim, data in dims.items()
-        }
-
-    @property
     def risk_reasons(self):
         reasons = []
         if self.pbg_status == self.PermitStatus.REJECTED:
@@ -616,7 +686,6 @@ class Project(TenantScopedModel):
             reasons.append(f"Proyek terlambat {overrun_days} hari dari target")
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         statuses     = self._get_requirement_statuses()
-        # Sprint 4: only show ROOT blockers in risk reasons
         pending = [
             r.name for r in requirements
             if (not statuses.get(str(r.id)) or
@@ -700,31 +769,31 @@ class Project(TenantScopedModel):
             return 0
 
     # =========================================================
-    # get_intelligence_summary — Sprint 4: adds dependency data
+    # get_intelligence_summary — Sprint 5: adds breakdown + weight
     # =========================================================
 
     def get_intelligence_summary(self):
         """
-        Sprint 4: each requirement now includes:
-          prerequisites        → list of prereq names
-          unmet_prerequisites  → list of unmet prereq names
-          is_dependency_blocked → True if waiting on a prereq
-          can_act_now          → True if developer can work on this now
+        Sprint 5: intelligence summary now includes:
+          readiness_breakdown — full explainable calculation
+          readiness_label     — Sangat Siap / Cukup Siap / Sedang / Belum Siap
+          Each requirement item now includes weight, weight_pct, contribution
         """
         requirements = self._get_current_requirements()
         statuses     = self._get_requirement_statuses()
+
+        # Sprint 5: get full breakdown data (computed once, shared)
+        breakdown_data = self._get_readiness_data()
+        breakdown_map  = {item["id"]: item for item in breakdown_data["items"]}
 
         items = []
         for r in requirements:
             s = statuses.get(str(r.id))
 
-            # Sprint 2: evidence data
             evidence_count         = 0
             latest_evidence_status = None
             has_pending_evidence   = False
-
-            # Sprint 3: audit count
-            audit_count = 0
+            audit_count            = 0
 
             if s:
                 evidence_qs    = s.evidence.all().order_by("-uploaded_at")
@@ -735,12 +804,11 @@ class Project(TenantScopedModel):
                     has_pending_evidence   = evidence_qs.filter(verification_status="pending").exists()
                 audit_count = s.audit_logs.count()
 
-            # Sprint 4: dependency data
-            current_status         = s.status if s else ProjectRequirementStatus.Status.PENDING
-            is_completed           = current_status == ProjectRequirementStatus.Status.COMPLETED
-            prereq_names           = r.get_prerequisite_names()
-            unmet_prereqs          = []
-            is_dependency_blocked  = False
+            current_status        = s.status if s else ProjectRequirementStatus.Status.PENDING
+            is_completed          = current_status == ProjectRequirementStatus.Status.COMPLETED
+            prereq_names          = r.get_prerequisite_names()
+            unmet_prereqs         = []
+            is_dependency_blocked = False
 
             if not is_completed and prereq_names:
                 for prereq in r.prerequisites.all():
@@ -749,10 +817,10 @@ class Project(TenantScopedModel):
                         unmet_prereqs.append(prereq.name)
                 is_dependency_blocked = len(unmet_prereqs) > 0
 
-            can_act_now = (
-                not is_completed and
-                not is_dependency_blocked
-            )
+            can_act_now = not is_completed and not is_dependency_blocked
+
+            # Sprint 5: weight data from breakdown_map
+            bd = breakdown_map.get(str(r.id), {})
 
             items.append({
                 # Original fields
@@ -763,9 +831,7 @@ class Project(TenantScopedModel):
                 "order":          r.order,
                 "category":       r.category,
                 "status":         current_status,
-                "status_display": dict(ProjectRequirementStatus.Status.choices).get(
-                    current_status, "Belum Dimulai"
-                ),
+                "status_display": dict(ProjectRequirementStatus.Status.choices).get(current_status, "Belum Dimulai"),
                 "notes":          s.notes if s else "",
                 "completed_at":   s.completed_at.isoformat() if s and s.completed_at else None,
                 "status_id":      str(s.id) if s else None,
@@ -775,11 +841,15 @@ class Project(TenantScopedModel):
                 "has_pending_evidence":   has_pending_evidence,
                 # Sprint 3
                 "audit_count":            audit_count,
-                # Sprint 4: dependency fields
+                # Sprint 4
                 "prerequisites":          prereq_names,
                 "unmet_prerequisites":    unmet_prereqs,
                 "is_dependency_blocked":  is_dependency_blocked,
                 "can_act_now":            can_act_now,
+                # Sprint 5: weight fields
+                "weight":                 r.weight if r.is_mandatory else 0,
+                "weight_pct":             bd.get("weight_pct", 0),
+                "contribution":           bd.get("contribution", 0),
             })
 
         return {
@@ -798,6 +868,9 @@ class Project(TenantScopedModel):
             "alerts":                self.alerts,
             "parallel_stages":       self.parallel_stage_status,
             "collection_efficiency": self.collection_efficiency,
+            # Sprint 5: explainable readiness
+            "readiness_breakdown":   self.readiness_breakdown,
+            "readiness_label":       self.readiness_label,
         }
 
     # =========================================================
@@ -816,8 +889,7 @@ class Project(TenantScopedModel):
         requirements = StageRequirement.objects.filter(stage=self.stage, is_active=True)
         for req in requirements:
             status_obj, created = ProjectRequirementStatus.objects.get_or_create(
-                project=self,
-                requirement=req,
+                project=self, requirement=req,
                 defaults={"status": ProjectRequirementStatus.Status.PENDING},
             )
             if created:
