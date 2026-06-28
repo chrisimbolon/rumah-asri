@@ -97,6 +97,13 @@ export interface RequirementItem {
   evidence_count:         number;
   latest_evidence_status: EvidenceVerifStatus | null;
   has_pending_evidence:   boolean;
+  // Sprint 3
+  audit_count: number;
+  // Sprint 4: dependency fields  ← ADD THESE
+  prerequisites:         string[];   // prereq names
+  unmet_prerequisites:   string[];   // which prereqs are not done yet
+  is_dependency_blocked: boolean;    // true if any prereq is unmet
+  can_act_now:           boolean;    // true if developer can work on this now
 }
 
 // ── IntelligenceSummary — UNCHANGED ──────────────────────────
