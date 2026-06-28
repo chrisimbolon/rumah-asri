@@ -1,5 +1,5 @@
 "use client";
-// =============================================================================
+// ===========================================================
 // === frontend/app/dashboard/projects/[id]/page.tsx ===
 // Sprint 4: dependency-aware RequirementRow
 //   + 🔒 Dependency blocked state (grey, locked icon)
@@ -8,7 +8,7 @@
 //   + handleStatusChange catches dependency_blocked errors
 //   + projects.ts: RequirementItem gets Sprint 4 fields
 // All Sprint 1/2/3 sections preserved — additive only.
-// =============================================================================
+// ============================================================
 
 import {
   ALERT_META,
