@@ -14,6 +14,7 @@ import {
   ALERT_META,
   EVIDENCE_META,
   evidenceApi,
+  getRiskScoreMeta,
   IntelligenceSummary,
   Project,
   projectsApi,
@@ -21,6 +22,7 @@ import {
   READINESS_LABEL_META,
   RequirementEvidence,
   RequirementItem,
+  RISK_FACTOR_IMPACT_META,
   RISK_META,
   STAGE_META,
   TREND_META,
@@ -684,6 +686,112 @@ function ReadinessBreakdownPanel({
   );
 }
 
+// ── Sprint 6: Risk explanation panel ─────────────────────────
+function RiskExplanationPanel({
+  intel,
+}: {
+  intel: IntelligenceSummary;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (!intel.risk_factors || intel.risk_factors.length === 0) return null;
+
+  const scoreMeta = getRiskScoreMeta(intel.risk_score);
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(14,13,11,0.06)" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            Mengapa risiko ini?
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 800, padding: "2px 10px", borderRadius: 999, color: scoreMeta.color, backgroundColor: scoreMeta.bg }}>
+            {intel.risk_score} / 100
+          </span>
+          {intel.risk_since && (
+            <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
+              sejak {new Date(intel.risk_since).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          style={{ fontSize: 11, color: "var(--color-accent)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+          {expanded ? "Sembunyikan ↑" : "Lihat detail ↓"}
+        </button>
+      </div>
+
+      {/* Score bar — always visible */}
+      <div style={{ padding: "8px 12px", backgroundColor: "var(--color-paper-2)", borderRadius: 8, marginBottom: expanded ? 10 : 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+          <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>Risk Score</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: scoreMeta.color }}>{scoreMeta.label}</span>
+        </div>
+        <div style={{ height: 6, backgroundColor: "rgba(14,13,11,0.08)", borderRadius: 3, overflow: "hidden" }}>
+          <div style={{
+            width: `${intel.risk_score}%`, height: "100%", borderRadius: 3,
+            backgroundColor: scoreMeta.color, transition: "width 0.5s",
+          }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+          <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
+            {intel.risk_factors.length} faktor aktif
+          </span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: scoreMeta.color }}>
+            {intel.risk_score} pts
+          </span>
+        </div>
+      </div>
+
+      {/* Expanded: per-factor breakdown */}
+      {expanded && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {intel.risk_factors.map((factor) => {
+            const impactMeta = RISK_FACTOR_IMPACT_META[factor.impact] ?? RISK_FACTOR_IMPACT_META["Sedang"];
+            return (
+              <div key={factor.key} style={{
+                padding: "10px 12px", borderRadius: 8,
+                backgroundColor: impactMeta.bg,
+                border: `1px solid ${impactMeta.color}22`,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 999, color: impactMeta.color, backgroundColor: "white", flexShrink: 0 }}>
+                    {factor.impact}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-ink)", flex: 1 }}>
+                    {factor.name}
+                  </span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: impactMeta.color, flexShrink: 0 }}>
+                    +{factor.points}pts
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginBottom: 5, lineHeight: 1.4 }}>
+                  {factor.description}
+                </div>
+                {/* Points bar */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <div style={{ flex: 1, height: 4, backgroundColor: "rgba(14,13,11,0.08)", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ width: `${(factor.points / factor.max_points) * 100}%`, height: "100%", borderRadius: 2, backgroundColor: impactMeta.color }} />
+                  </div>
+                  <span style={{ fontSize: 10, color: "var(--color-ink-3)", minWidth: 50, textAlign: "right" }}>
+                    {factor.points}/{factor.max_points} pts
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: impactMeta.color, fontWeight: 500 }}>
+                  → {factor.action}
+                </div>
+              </div>
+            );
+          })}
+          <div style={{ fontSize: 10, color: "var(--color-ink-3)", textAlign: "center", marginTop: 4, fontStyle: "italic" }}>
+            Skor risiko dihitung otomatis dari faktor-faktor di atas
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 // ── Sprint 1: Parallel stage toggles ─────────────────────────
 function ParallelStageToggles({ project, onUpdated }: { project: Project; onUpdated: (p: Project) => void }) {
@@ -867,7 +975,9 @@ export default function ProjectDetailPage() {
               <div style={{ fontSize: 18, fontWeight: 800, color: riskMeta.color }}>{riskMeta.label}</div>
               <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>Tingkat Risiko</div>
               {intel.risk_reasons && intel.risk_reasons.length > 0 && (
-                <div style={{ fontSize: 10, color: riskMeta.color, marginTop: 4, fontStyle: "italic" }}>{intel.risk_reasons[0]}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: riskMeta.color, marginTop: 4 }}>
+                  {intel.risk_score} / 100
+                </div>
               )}
             </div>
             <div style={{ textAlign: "center", padding: "12px", backgroundColor: "var(--color-paper-2)", borderRadius: 8 }}>
@@ -895,6 +1005,11 @@ export default function ProjectDetailPage() {
         {/* Sprint 5: Explainable readiness breakdown */}
         {intel.readiness_breakdown && (
           <ReadinessBreakdownPanel breakdown={intel.readiness_breakdown} />
+        )}
+
+        {/* Sprint 6: Risk explanation panel */}
+        {intel.risk_factors && intel.risk_factors.length > 0 && (
+          <RiskExplanationPanel intel={intel} />
         )}
       </div>
 
