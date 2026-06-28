@@ -1,16 +1,10 @@
 # =============================================================================
 # === backend/apps/projects/views.py ===
-# Sprint 3: adds ProjectActivityView + ProjectFinancialView
-# Also: ProjectRequirementUpdateView now logs audit trail
+# Sprint 4: dependency rule engine errors now surface to frontend
+# RequirementUpdateView + RequirementEvidenceView catch ValueError
+# from can_complete() / mark_completed() / mark_awaiting_verification()
 # All original views preserved — additive only.
 # =============================================================================
-"""
-DevelopIndo — Projects Views
-
-New Sprint 3 endpoints:
-  GET /api/projects/<id>/activity/   ← chronological audit timeline
-  GET /api/projects/<id>/financial/  ← detailed financial snapshot
-"""
 from rest_framework import status
 from rest_framework.response import Response
 
@@ -31,10 +25,6 @@ from .serializers import (
     RequirementEvidenceSerializer,
 )
 
-
-# =============================================================================
-# Original views — UNCHANGED except RequirementUpdateView logs audit
-# =============================================================================
 
 class ProjectListView(TenantScopedAPIView):
     model = Project
@@ -113,7 +103,10 @@ class ProjectIntelligenceView(TenantScopedAPIView):
 
 
 class ProjectRequirementUpdateView(TenantScopedAPIView):
-    """Sprint 3: now logs audit trail on every status change."""
+    """
+    Sprint 4: now catches ValueError from dependency rule engine.
+    If prerequisites are unmet, returns 400 with clear message.
+    """
     model = Project
 
     def put(self, request, pk, req_status_id):
@@ -135,22 +128,29 @@ class ProjectRequirementUpdateView(TenantScopedAPIView):
         old_status = req_status.status
         project.snapshot_readiness()
 
-        if new_status == ProjectRequirementStatus.Status.COMPLETED:
-            req_status.mark_completed(user=request.user)  # mark_completed now logs audit
-        else:
-            req_status.status     = new_status
-            req_status.notes      = notes
-            req_status.updated_by = request.user
-            req_status.save(update_fields=["status", "notes", "updated_by", "updated_at"])
-            # Sprint 3: log the status change
-            RequirementAudit.log(
-                requirement_status=req_status,
-                action=RequirementAudit.Action.UPDATED,
-                changed_by=request.user,
-                old_value=old_status,
-                new_value=new_status,
-                notes=notes,
-            )
+        try:
+            if new_status == ProjectRequirementStatus.Status.COMPLETED:
+                req_status.mark_completed(user=request.user)
+            else:
+                req_status.status     = new_status
+                req_status.notes      = notes
+                req_status.updated_by = request.user
+                req_status.save(update_fields=["status", "notes", "updated_by", "updated_at"])
+                RequirementAudit.log(
+                    requirement_status=req_status,
+                    action=RequirementAudit.Action.UPDATED,
+                    changed_by=request.user,
+                    old_value=old_status,
+                    new_value=new_status,
+                    notes=notes,
+                )
+        except ValueError as e:
+            # Sprint 4: dependency rule engine blocks completion
+            return Response({
+                "success": False,
+                "message": str(e),
+                "error_type": "dependency_blocked",
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({
             "success":      True,
@@ -199,11 +199,14 @@ class RequirementEvidenceView(TenantScopedAPIView):
             req_status = ProjectRequirementStatus.objects.get(id=req_status_id, project=project)
         except ProjectRequirementStatus.DoesNotExist:
             return Response({"success": False, "message": "Requirement tidak ditemukan"}, status=status.HTTP_404_NOT_FOUND)
+
         uploaded_file = request.FILES.get("file")
         file_url      = request.data.get("file_url", "").strip()
         notes         = request.data.get("notes", "").strip()
+
         if not uploaded_file and not file_url:
             return Response({"success": False, "message": "Upload file atau berikan URL bukti"}, status=status.HTTP_400_BAD_REQUEST)
+
         evidence = RequirementEvidence.objects.create(
             requirement_status=req_status,
             file=uploaded_file,
@@ -213,11 +216,23 @@ class RequirementEvidenceView(TenantScopedAPIView):
             uploaded_by=request.user,
             verification_status=RequirementEvidence.VerificationStatus.PENDING,
         )
-        if req_status.status not in (
-            ProjectRequirementStatus.Status.COMPLETED,
-            ProjectRequirementStatus.Status.AWAITING_VERIFICATION,
-        ):
-            req_status.mark_awaiting_verification(user=request.user)  # logs audit
+
+        try:
+            if req_status.status not in (
+                ProjectRequirementStatus.Status.COMPLETED,
+                ProjectRequirementStatus.Status.AWAITING_VERIFICATION,
+            ):
+                req_status.mark_awaiting_verification(user=request.user)
+        except ValueError as e:
+            # Sprint 4: dependency blocked — evidence saved but status not changed
+            # Delete the evidence we just created since upload failed
+            evidence.delete()
+            return Response({
+                "success": False,
+                "message": str(e),
+                "error_type": "dependency_blocked",
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         return Response({
             "success":      True,
             "message":      f"Bukti untuk '{req_status.requirement.name}' berhasil diunggah",
@@ -241,65 +256,48 @@ class RequirementEvidenceVerifyView(TenantScopedAPIView):
             evidence = RequirementEvidence.objects.get(id=ev_id, requirement_status=req_status)
         except RequirementEvidence.DoesNotExist:
             return Response({"success": False, "message": "Bukti tidak ditemukan"}, status=status.HTTP_404_NOT_FOUND)
+
         action = request.data.get("action", "").strip()
         notes  = request.data.get("notes", "").strip()
+
         if action not in ("approve", "reject"):
             return Response({"success": False, "message": "Action tidak valid. Pilihan: 'approve' atau 'reject'"}, status=status.HTTP_400_BAD_REQUEST)
         if evidence.verification_status == RequirementEvidence.VerificationStatus.APPROVED:
             return Response({"success": False, "message": "Bukti ini sudah disetujui sebelumnya"}, status=status.HTTP_400_BAD_REQUEST)
+
         project.snapshot_readiness()
-        if action == "approve":
-            evidence.approve(verifier_user=request.user, notes=notes)  # logs audit
-            message = f"Bukti disetujui — requirement '{req_status.requirement.name}' selesai"
-        else:
-            evidence.reject(verifier_user=request.user, notes=notes)  # logs audit
-            message = "Bukti ditolak — developer perlu mengunggah ulang"
+
+        try:
+            if action == "approve":
+                evidence.approve(verifier_user=request.user, notes=notes)
+                message = f"Bukti disetujui — requirement '{req_status.requirement.name}' selesai"
+            else:
+                evidence.reject(verifier_user=request.user, notes=notes)
+                message = "Bukti ditolak — developer perlu mengunggah ulang"
+        except ValueError as e:
+            return Response({
+                "success": False,
+                "message": str(e),
+                "error_type": "dependency_blocked",
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         return Response({"success": True, "message": message, "evidence": RequirementEvidenceSerializer(evidence).data, "intelligence": project.get_intelligence_summary()})
 
 
-# =============================================================================
-# Sprint 3: NEW VIEWS
-# =============================================================================
-
 class ProjectActivityView(TenantScopedAPIView):
-    """
-    GET /api/projects/<id>/activity/
-    Returns chronological audit trail for this project.
-    Query params:
-      ?limit=20  (default 20, max 100)
-    """
     model = Project
 
     def get(self, request, pk):
         project = self.get_object(pk)
         limit = min(int(request.query_params.get("limit", 20)), 100)
         activities = project.activity_timeline(limit=limit)
-        return Response({
-            "success":      True,
-            "project_id":   str(project.id),
-            "project_name": project.name,
-            "count":        len(activities),
-            "results":      activities,
-        })
+        return Response({"success": True, "project_id": str(project.id), "project_name": project.name, "count": len(activities), "results": activities})
 
 
 class ProjectFinancialView(TenantScopedAPIView):
-    """
-    GET /api/projects/<id>/financial/
-    Returns detailed financial snapshot:
-      - Total billed, lunas, menunggak, upcoming
-      - Collection efficiency %
-      - Overdue payments list with days overdue
-      - Upcoming payments (next 30 days)
-    """
     model = Project
 
     def get(self, request, pk):
         project = self.get_object(pk)
         snapshot = project.financial_snapshot()
-        return Response({
-            "success":      True,
-            "project_id":   str(project.id),
-            "project_name": project.name,
-            "financial":    snapshot,
-        })
+        return Response({"success": True, "project_id": str(project.id), "project_name": project.name, "financial": snapshot})

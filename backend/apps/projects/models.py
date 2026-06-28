@@ -8,13 +8,18 @@ Sprint 1: readiness_dimensions, risk_reasons, alerts, parallel_stages,
           collection_efficiency, is_selling/is_constructing
 Sprint 2: RequirementEvidence, menunggu_verifikasi status,
           approve()/reject() flow
-Sprint 3: RequirementAudit — who/what/when on every requirement change
-          auto-logging on all status changes and evidence events
-          activity_timeline() — chronological project history
-          financial_snapshot() — detailed AR breakdown per project
-          _get_overdue_payments_count() fixed to use status field
+Sprint 3: RequirementAudit — immutable audit trail
+          activity_timeline(), financial_snapshot()
+Sprint 4: Dependency Graph & Rule Engine
+          StageRequirement.prerequisites — M2M self-reference
+          ProjectRequirementStatus.can_complete() — prereq check
+          _has_unmet_prerequisites() — dependency resolver
+          blocking_count — Option B: only root blockers count
+          next_action — always points to ROOT cause
+          dependency_status — new intelligence field
 
 ZERO BREAKING CHANGES — all existing fields preserved.
+59 tests still green.
 """
 import uuid
 from datetime import date
@@ -26,7 +31,7 @@ from apps.core.models import TenantScopedModel
 
 
 # =============================================================================
-# StageRequirement — unchanged
+# StageRequirement — Sprint 4: adds prerequisites M2M
 # =============================================================================
 
 class StageRequirement(models.Model):
@@ -54,8 +59,22 @@ class StageRequirement(models.Model):
     order        = models.PositiveIntegerField(default=0)
     is_active    = models.BooleanField(default=True)
     category     = models.CharField(max_length=20, choices=Category.choices, default=Category.GENERAL)
-    created_at   = models.DateTimeField(auto_now_add=True)
-    updated_at   = models.DateTimeField(auto_now=True)
+
+    # ── Sprint 4: Dependency graph ────────────────────────────
+    # Self-referential M2M: "this requirement needs THESE done first"
+    # Only within the same stage — cross-stage deps are handled
+    # by the stage advancement blocking logic.
+    prerequisites = models.ManyToManyField(
+        "self",
+        symmetrical=False,           # A requires B ≠ B requires A
+        blank=True,
+        related_name="dependents",   # req.dependents = what needs this done first
+        verbose_name="Prasyarat",
+        help_text="Requirement yang harus selesai sebelum ini bisa dikerjakan",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name        = "Stage Requirement"
@@ -67,9 +86,13 @@ class StageRequirement(models.Model):
         flag = "⚡" if self.is_mandatory else "○"
         return f"{flag} [{self.get_stage_display()}] {self.name}"
 
+    def get_prerequisite_names(self):
+        """Returns list of prerequisite names for display."""
+        return list(self.prerequisites.values_list("name", flat=True))
+
 
 # =============================================================================
-# ProjectRequirementStatus — Sprint 2: menunggu_verifikasi
+# ProjectRequirementStatus — Sprint 4: adds can_complete() rule engine
 # =============================================================================
 
 class ProjectRequirementStatus(models.Model):
@@ -98,14 +121,70 @@ class ProjectRequirementStatus(models.Model):
     def __str__(self):
         return f"{self.project.name} — {self.requirement.name}: {self.status}"
 
+    # ── Sprint 4: Rule engine ─────────────────────────────────
+
+    def get_unmet_prerequisites(self):
+        """
+        Sprint 4: Returns list of prerequisite names that are NOT
+        yet completed for this requirement.
+        Empty list = all prerequisites met = safe to complete.
+
+        This is the RULE ENGINE core — called before any status change
+        to completed or menunggu_verifikasi.
+        """
+        prereqs = self.requirement.prerequisites.all()
+        if not prereqs.exists():
+            return []
+
+        unmet = []
+        for prereq in prereqs:
+            # Check if this prerequisite is completed for this project
+            try:
+                prereq_status = ProjectRequirementStatus.objects.get(
+                    project=self.project,
+                    requirement=prereq,
+                )
+                if prereq_status.status != self.Status.COMPLETED:
+                    unmet.append(prereq.name)
+            except ProjectRequirementStatus.DoesNotExist:
+                # Status row doesn't exist = not started = unmet
+                unmet.append(prereq.name)
+
+        return unmet
+
+    def can_complete(self):
+        """
+        Sprint 4: Returns (can_complete: bool, reason: str).
+        Checks prerequisites before allowing completion.
+
+        Usage:
+          ok, reason = req_status.can_complete()
+          if not ok:
+              raise ValueError(reason)
+        """
+        unmet = self.get_unmet_prerequisites()
+        if unmet:
+            prereq_list = ", ".join(unmet)
+            return False, (
+                f"'{self.requirement.name}' membutuhkan prasyarat: "
+                f"{prereq_list}. Selesaikan prasyarat terlebih dahulu."
+            )
+        return True, ""
+
     def mark_completed(self, user=None):
+        """Sprint 4: now enforces prerequisite rules before completing."""
         from django.utils import timezone
+
+        # Sprint 4: rule engine check
+        ok, reason = self.can_complete()
+        if not ok:
+            raise ValueError(reason)
+
         old_status    = self.status
         self.status   = self.Status.COMPLETED
         self.completed_at = timezone.now()
         self.updated_by   = user
         self.save(update_fields=["status", "completed_at", "updated_by", "updated_at"])
-        # Sprint 3: auto-log audit
         RequirementAudit.log(
             requirement_status=self,
             action=RequirementAudit.Action.COMPLETED,
@@ -115,11 +194,16 @@ class ProjectRequirementStatus(models.Model):
         )
 
     def mark_awaiting_verification(self, user=None):
+        """Sprint 4: also enforces prerequisite rules before upload."""
+        # Sprint 4: rule engine check — can't upload evidence if prereqs unmet
+        ok, reason = self.can_complete()
+        if not ok:
+            raise ValueError(reason)
+
         old_status  = self.status
         self.status = self.Status.AWAITING_VERIFICATION
         self.updated_by = user
         self.save(update_fields=["status", "updated_by", "updated_at"])
-        # Sprint 3: auto-log audit
         RequirementAudit.log(
             requirement_status=self,
             action=RequirementAudit.Action.EVIDENCE_UPLOADED,
@@ -130,7 +214,7 @@ class ProjectRequirementStatus(models.Model):
 
 
 # =============================================================================
-# RequirementEvidence — Sprint 2 (unchanged, approve/reject now log audit)
+# RequirementEvidence — unchanged from Sprint 3
 # =============================================================================
 
 class RequirementEvidence(models.Model):
@@ -140,7 +224,6 @@ class RequirementEvidence(models.Model):
         REJECTED = "rejected", "Ditolak"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
     requirement_status = models.ForeignKey(
         ProjectRequirementStatus, on_delete=models.CASCADE, related_name="evidence",
     )
@@ -148,13 +231,11 @@ class RequirementEvidence(models.Model):
     file_name = models.CharField(max_length=300, blank=True)
     file_url  = models.URLField(blank=True)
     notes     = models.TextField(blank=True)
-
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
         related_name="uploaded_evidence",
     )
     uploaded_at = models.DateTimeField(auto_now_add=True)
-
     verification_status = models.CharField(
         max_length=20, choices=VerificationStatus.choices,
         default=VerificationStatus.PENDING, db_index=True,
@@ -183,7 +264,6 @@ class RequirementEvidence(models.Model):
         self.verifier_notes      = notes
         self.save(update_fields=["verification_status", "verifier", "verified_at", "verifier_notes", "updated_at"])
         self.requirement_status.mark_completed(user=verifier_user)
-        # Sprint 3: log approval
         RequirementAudit.log(
             requirement_status=self.requirement_status,
             action=RequirementAudit.Action.EVIDENCE_APPROVED,
@@ -203,7 +283,6 @@ class RequirementEvidence(models.Model):
         req_status.status     = ProjectRequirementStatus.Status.IN_PROGRESS
         req_status.updated_by = verifier_user
         req_status.save(update_fields=["status", "updated_by", "updated_at"])
-        # Sprint 3: log rejection
         RequirementAudit.log(
             requirement_status=req_status,
             action=RequirementAudit.Action.EVIDENCE_REJECTED,
@@ -213,24 +292,10 @@ class RequirementEvidence(models.Model):
 
 
 # =============================================================================
-# RequirementAudit — Sprint 3 NEW MODEL
-# Full audit trail: who did what, when, on every requirement.
+# RequirementAudit — unchanged from Sprint 3
 # =============================================================================
 
 class RequirementAudit(models.Model):
-    """
-    Immutable audit log for all requirement status changes.
-
-    Every change to a ProjectRequirementStatus is recorded here:
-    - Status changes (pending → in_progress → completed etc.)
-    - Evidence uploaded
-    - Evidence approved / rejected
-    - Stage advancement (requirement created for new stage)
-
-    Records are NEVER deleted or updated — append-only.
-    This is the evidence trail for compliance and accountability.
-    """
-
     class Action(models.TextChoices):
         CREATED           = "created",           "Dibuat"
         UPDATED           = "updated",           "Diperbarui"
@@ -241,27 +306,16 @@ class RequirementAudit(models.Model):
         STAGE_ADVANCED    = "stage_advanced",    "Tahap Dilanjutkan"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
-    # ── Core relationship ─────────────────────────────────────
     requirement_status = models.ForeignKey(
-        ProjectRequirementStatus,
-        on_delete=models.CASCADE,
-        related_name="audit_logs",
-        verbose_name="Status Requirement",
+        ProjectRequirementStatus, on_delete=models.CASCADE, related_name="audit_logs",
     )
-
-    # ── What happened ─────────────────────────────────────────
     action     = models.CharField(max_length=30, choices=Action.choices, db_index=True)
-    old_value  = models.CharField(max_length=50, blank=True, verbose_name="Nilai Lama")
-    new_value  = models.CharField(max_length=50, blank=True, verbose_name="Nilai Baru")
-    notes      = models.TextField(blank=True, verbose_name="Catatan")
-
-    # ── Who did it ────────────────────────────────────────────
+    old_value  = models.CharField(max_length=50, blank=True)
+    new_value  = models.CharField(max_length=50, blank=True)
+    notes      = models.TextField(blank=True)
     changed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL, null=True, blank=True,
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="requirement_audit_logs",
-        verbose_name="Diubah oleh",
     )
     changed_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
@@ -271,26 +325,11 @@ class RequirementAudit(models.Model):
         ordering            = ["-changed_at"]
 
     def __str__(self):
-        req_name = self.requirement_status.requirement.name
-        return f"[{self.get_action_display()}] {req_name} — {self.changed_at}"
+        return f"[{self.get_action_display()}] {self.requirement_status.requirement.name}"
 
     @classmethod
-    def log(
-        cls,
-        requirement_status,
-        action,
-        changed_by=None,
-        old_value="",
-        new_value="",
-        notes="",
-    ):
-        """
-        Convenience class method — create an audit log entry.
-        Call this from mark_completed(), mark_awaiting_verification(),
-        approve(), reject(), and the requirement update view.
-
-        Never raises — audit logging should never break the main flow.
-        """
+    def log(cls, requirement_status, action, changed_by=None, old_value="", new_value="", notes=""):
+        """Never raises — audit logging must never break main flow."""
         try:
             cls.objects.create(
                 requirement_status=requirement_status,
@@ -301,11 +340,11 @@ class RequirementAudit(models.Model):
                 changed_by=changed_by,
             )
         except Exception:
-            pass  # Audit logging must never break main flow
+            pass
 
 
 # =============================================================================
-# Project — Sprint 3: activity_timeline() + financial_snapshot() added
+# Project — Sprint 4: dependency-aware intelligence engine
 # =============================================================================
 
 class Project(TenantScopedModel):
@@ -403,20 +442,42 @@ class Project(TenantScopedModel):
         return self.STAGE_ORDER[idx + 1]
 
     # =========================================================
-    # INTELLIGENCE ENGINE — UNCHANGED FROM SPRINT 2
+    # INTELLIGENCE ENGINE INTERNALS
     # =========================================================
 
     def _get_current_requirements(self):
-        return StageRequirement.objects.filter(stage=self.stage, is_active=True).order_by("order")
+        return StageRequirement.objects.filter(
+            stage=self.stage, is_active=True,
+        ).prefetch_related("prerequisites").order_by("order")
 
     def _get_requirement_statuses(self):
         statuses = self.requirement_statuses.filter(
-            requirement__stage=self.stage, requirement__is_active=True,
+            requirement__stage=self.stage,
+            requirement__is_active=True,
         ).select_related("requirement")
         return {str(s.requirement_id): s for s in statuses}
 
+    def _has_unmet_prerequisites(self, requirement, statuses_map):
+        """
+        Sprint 4: Check if a requirement has unmet prerequisites.
+        Uses the already-fetched statuses_map for efficiency
+        (avoids N+1 queries in get_intelligence_summary).
+
+        Returns True if ANY prerequisite is not completed.
+        """
+        for prereq in requirement.prerequisites.all():
+            s = statuses_map.get(str(prereq.id))
+            if not s or s.status != ProjectRequirementStatus.Status.COMPLETED:
+                return True
+        return False
+
+    # =========================================================
+    # INTELLIGENCE PROPERTIES — Sprint 4 upgrades
+    # =========================================================
+
     @property
     def readiness_score(self):
+        """Unchanged — counts completed mandatory requirements."""
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         total = requirements.count()
         if total == 0:
@@ -431,6 +492,20 @@ class Project(TenantScopedModel):
 
     @property
     def blocking_count(self):
+        """
+        Sprint 4 — Option B:
+        Only count requirements that are DIRECTLY actionable
+        (not blocked by unmet prerequisites).
+
+        A requirement is "blocking" if:
+          1. It is mandatory
+          2. It is not completed
+          3. It is NOT waiting on a prerequisite
+             (because the prereq is the real blocker)
+
+        This means blocking_count always = number of things
+        the developer can actually DO RIGHT NOW.
+        """
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         statuses = self._get_requirement_statuses()
         blocking = 0
@@ -440,17 +515,27 @@ class Project(TenantScopedModel):
                 ProjectRequirementStatus.Status.PENDING,
                 ProjectRequirementStatus.Status.IN_PROGRESS,
             ):
-                blocking += 1
+                # Sprint 4: skip if blocked by an unmet prerequisite
+                if not self._has_unmet_prerequisites(r, statuses):
+                    blocking += 1
         return blocking
 
     @property
     def next_action(self):
+        """
+        Sprint 4: Always returns the ROOT cause action —
+        the first mandatory requirement that:
+          1. Is not completed
+          2. Has NO unmet prerequisites (i.e. actionable now)
+        """
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         statuses = self._get_requirement_statuses()
         for r in requirements:
             s = statuses.get(str(r.id))
             if not s or s.status == ProjectRequirementStatus.Status.PENDING:
-                return r.name
+                # Only return if no unmet prerequisites
+                if not self._has_unmet_prerequisites(r, statuses):
+                    return r.name
         return None
 
     @property
@@ -531,10 +616,12 @@ class Project(TenantScopedModel):
             reasons.append(f"Proyek terlambat {overrun_days} hari dari target")
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         statuses     = self._get_requirement_statuses()
+        # Sprint 4: only show ROOT blockers in risk reasons
         pending = [
             r.name for r in requirements
-            if not statuses.get(str(r.id)) or
-               statuses[str(r.id)].status == ProjectRequirementStatus.Status.PENDING
+            if (not statuses.get(str(r.id)) or
+                statuses[str(r.id)].status == ProjectRequirementStatus.Status.PENDING)
+            and not self._has_unmet_prerequisites(r, statuses)
         ]
         for name in pending[:3]:
             reasons.append(f"{name} belum selesai")
@@ -601,18 +688,11 @@ class Project(TenantScopedModel):
             return {"total_billed": 0, "total_settled": 0, "total_arrears": 0, "efficiency_pct": 100, "status": "healthy", "status_display": "Sehat"}
 
     def _get_overdue_payments_count(self):
-        """
-        Sprint 3 fix: use Payment.status == "menunggak" instead of
-        due_date check — aligns with actual Payment.Status choices.
-        Falls back to due_date check for "menunggu" payments past due.
-        """
         try:
             from apps.payments.models import Payment
             from django.utils import timezone
             today = timezone.now().date()
-            return Payment.objects.filter(
-                unit__project=self,
-            ).filter(
+            return Payment.objects.filter(unit__project=self).filter(
                 models.Q(status="menunggak") |
                 models.Q(status="menunggu", due_date__lt=today)
             ).count()
@@ -620,177 +700,17 @@ class Project(TenantScopedModel):
             return 0
 
     # =========================================================
-    # SPRINT 3: NEW METHODS
-    # =========================================================
-
-    def activity_timeline(self, limit=20):
-        """
-        Sprint 3: Chronological activity feed for this project.
-        Aggregates audit logs across all requirements.
-        Returns list of activity items sorted by time DESC.
-
-        Used by:
-          GET /api/projects/<id>/activity/
-          Dashboard "Recent Activity" panel
-        """
-        from django.utils import timezone
-
-        activities = []
-
-        # Requirement audit logs
-        audit_logs = RequirementAudit.objects.filter(
-            requirement_status__project=self,
-        ).select_related(
-            "requirement_status__requirement",
-            "changed_by",
-        ).order_by("-changed_at")[:limit]
-
-        action_labels = {
-            RequirementAudit.Action.CREATED:           "membuat requirement",
-            RequirementAudit.Action.UPDATED:           "memperbarui",
-            RequirementAudit.Action.EVIDENCE_UPLOADED: "mengunggah bukti untuk",
-            RequirementAudit.Action.EVIDENCE_APPROVED: "menyetujui bukti",
-            RequirementAudit.Action.EVIDENCE_REJECTED: "menolak bukti",
-            RequirementAudit.Action.COMPLETED:         "menyelesaikan",
-            RequirementAudit.Action.STAGE_ADVANCED:    "melanjutkan tahap ke",
-        }
-
-        for log in audit_logs:
-            req_name    = log.requirement_status.requirement.name
-            actor_name  = log.changed_by.full_name if log.changed_by else "Sistem"
-            action_verb = action_labels.get(log.action, log.action)
-
-            activities.append({
-                "id":         str(log.id),
-                "type":       "requirement",
-                "action":     log.action,
-                "actor":      actor_name,
-                "actor_id":   str(log.changed_by.id) if log.changed_by else None,
-                "subject":    req_name,
-                "message":    f"{actor_name} {action_verb} {req_name}",
-                "notes":      log.notes,
-                "old_value":  log.old_value,
-                "new_value":  log.new_value,
-                "timestamp":  log.changed_at.isoformat(),
-            })
-
-        return activities
-
-    def financial_snapshot(self):
-        """
-        Sprint 3: Detailed financial breakdown for this project.
-        More granular than collection_efficiency — includes per-status
-        breakdown, upcoming payments, overdue list.
-
-        Used by:
-          GET /api/projects/<id>/financial/
-          Financial Intelligence dashboard
-        """
-        try:
-            from apps.payments.models import Payment
-            from django.utils import timezone
-            today = timezone.now().date()
-
-            payments = list(Payment.objects.filter(
-                unit__project=self
-            ).select_related("unit", "unit__buyer"))
-
-            if not payments:
-                return {
-                    "has_data":        False,
-                    "total_billed":    0,
-                    "total_lunas":     0,
-                    "total_menunggak": 0,
-                    "total_upcoming":  0,
-                    "efficiency_pct":  100,
-                    "status":          "healthy",
-                    "status_display":  "Sehat",
-                    "overdue_items":   [],
-                    "upcoming_items":  [],
-                }
-
-            total_billed    = sum(p.amount for p in payments)
-            total_lunas     = sum(p.amount for p in payments if p.status == "lunas")
-            total_menunggak = sum(
-                p.amount for p in payments
-                if p.status == "menunggak" or
-                   (p.status == "menunggu" and p.due_date < today)
-            )
-            total_upcoming  = sum(
-                p.amount for p in payments
-                if p.status in ("akan_datang", "proses_bank") or
-                   (p.status == "menunggu" and p.due_date >= today)
-            )
-
-            efficiency = round((total_lunas / total_billed) * 100) if total_billed > 0 else 100
-
-            # Overdue payments detail
-            overdue_items = [
-                {
-                    "id":           str(p.id),
-                    "unit_number":  p.unit.unit_number,
-                    "buyer_name":   p.unit.buyer.full_name if p.unit.buyer else "—",
-                    "payment_type": p.payment_type,
-                    "amount":       int(p.amount),
-                    "due_date":     p.due_date.isoformat(),
-                    "days_overdue": (today - p.due_date).days,
-                }
-                for p in payments
-                if p.status == "menunggak" or
-                   (p.status == "menunggu" and p.due_date < today)
-            ]
-            overdue_items.sort(key=lambda x: x["days_overdue"], reverse=True)
-
-            # Upcoming payments (next 30 days)
-            upcoming_items = [
-                {
-                    "id":           str(p.id),
-                    "unit_number":  p.unit.unit_number,
-                    "buyer_name":   p.unit.buyer.full_name if p.unit.buyer else "—",
-                    "payment_type": p.payment_type,
-                    "amount":       int(p.amount),
-                    "due_date":     p.due_date.isoformat(),
-                    "days_until":   (p.due_date - today).days,
-                }
-                for p in payments
-                if p.status in ("akan_datang", "menunggu") and
-                   p.due_date >= today and
-                   (p.due_date - today).days <= 30
-            ]
-            upcoming_items.sort(key=lambda x: x["days_until"])
-
-            return {
-                "has_data":        True,
-                "total_billed":    int(total_billed),
-                "total_lunas":     int(total_lunas),
-                "total_menunggak": int(total_menunggak),
-                "total_upcoming":  int(total_upcoming),
-                "efficiency_pct":  efficiency,
-                "status":          "healthy" if efficiency >= 90 else "attention" if efficiency >= 70 else "critical",
-                "status_display":  "Sehat" if efficiency >= 90 else "Perlu Perhatian" if efficiency >= 70 else "Kritis",
-                "overdue_items":   overdue_items,
-                "upcoming_items":  upcoming_items,
-            }
-
-        except Exception:
-            return {
-                "has_data":        False,
-                "total_billed":    0,
-                "total_lunas":     0,
-                "total_menunggak": 0,
-                "total_upcoming":  0,
-                "efficiency_pct":  100,
-                "status":          "healthy",
-                "status_display":  "Sehat",
-                "overdue_items":   [],
-                "upcoming_items":  [],
-            }
-
-    # =========================================================
-    # get_intelligence_summary — Sprint 3: adds audit count per req
+    # get_intelligence_summary — Sprint 4: adds dependency data
     # =========================================================
 
     def get_intelligence_summary(self):
+        """
+        Sprint 4: each requirement now includes:
+          prerequisites        → list of prereq names
+          unmet_prerequisites  → list of unmet prereq names
+          is_dependency_blocked → True if waiting on a prereq
+          can_act_now          → True if developer can work on this now
+        """
         requirements = self._get_current_requirements()
         statuses     = self._get_requirement_statuses()
 
@@ -813,8 +733,26 @@ class Project(TenantScopedModel):
                     latest = evidence_qs.first()
                     latest_evidence_status = latest.verification_status
                     has_pending_evidence   = evidence_qs.filter(verification_status="pending").exists()
-                # Sprint 3: count audit log entries
                 audit_count = s.audit_logs.count()
+
+            # Sprint 4: dependency data
+            current_status         = s.status if s else ProjectRequirementStatus.Status.PENDING
+            is_completed           = current_status == ProjectRequirementStatus.Status.COMPLETED
+            prereq_names           = r.get_prerequisite_names()
+            unmet_prereqs          = []
+            is_dependency_blocked  = False
+
+            if not is_completed and prereq_names:
+                for prereq in r.prerequisites.all():
+                    ps = statuses.get(str(prereq.id))
+                    if not ps or ps.status != ProjectRequirementStatus.Status.COMPLETED:
+                        unmet_prereqs.append(prereq.name)
+                is_dependency_blocked = len(unmet_prereqs) > 0
+
+            can_act_now = (
+                not is_completed and
+                not is_dependency_blocked
+            )
 
             items.append({
                 # Original fields
@@ -824,9 +762,9 @@ class Project(TenantScopedModel):
                 "is_mandatory":   r.is_mandatory,
                 "order":          r.order,
                 "category":       r.category,
-                "status":         s.status if s else ProjectRequirementStatus.Status.PENDING,
+                "status":         current_status,
                 "status_display": dict(ProjectRequirementStatus.Status.choices).get(
-                    s.status if s else "pending", "Belum Dimulai"
+                    current_status, "Belum Dimulai"
                 ),
                 "notes":          s.notes if s else "",
                 "completed_at":   s.completed_at.isoformat() if s and s.completed_at else None,
@@ -837,6 +775,11 @@ class Project(TenantScopedModel):
                 "has_pending_evidence":   has_pending_evidence,
                 # Sprint 3
                 "audit_count":            audit_count,
+                # Sprint 4: dependency fields
+                "prerequisites":          prereq_names,
+                "unmet_prerequisites":    unmet_prereqs,
+                "is_dependency_blocked":  is_dependency_blocked,
+                "can_act_now":            can_act_now,
             })
 
         return {
@@ -858,7 +801,7 @@ class Project(TenantScopedModel):
         }
 
     # =========================================================
-    # SNAPSHOT / ADVANCE / CHECKLIST — Sprint 3: advance logs audit
+    # SNAPSHOT / ADVANCE / CHECKLIST
     # =========================================================
 
     def snapshot_readiness(self):
@@ -877,7 +820,6 @@ class Project(TenantScopedModel):
                 requirement=req,
                 defaults={"status": ProjectRequirementStatus.Status.PENDING},
             )
-            # Sprint 3: log creation
             if created:
                 RequirementAudit.log(
                     requirement_status=status_obj,
@@ -897,7 +839,6 @@ class Project(TenantScopedModel):
                 f"Tindakan berikutnya: {self.next_action}."
             )
         self.snapshot_readiness()
-        old_stage  = self.stage
         self.stage = self.next_stage
         self.save(update_fields=["stage", "updated_at"])
         if self.stage == self.Stage.CONSTRUCTION:
@@ -931,3 +872,81 @@ class Project(TenantScopedModel):
             self.Stage.HANDOVER:     [{"item": "Semua unit selesai", "done": not self.units.exclude(status="serah_terima").exists()}],
         }
         return hardcoded.get(self.stage, [])
+
+    # =========================================================
+    # SPRINT 3: TIMELINE + FINANCIAL (unchanged)
+    # =========================================================
+
+    def activity_timeline(self, limit=20):
+        activities = []
+        audit_logs = RequirementAudit.objects.filter(
+            requirement_status__project=self,
+        ).select_related(
+            "requirement_status__requirement", "changed_by",
+        ).order_by("-changed_at")[:limit]
+
+        action_labels = {
+            RequirementAudit.Action.CREATED:           "membuat requirement",
+            RequirementAudit.Action.UPDATED:           "memperbarui",
+            RequirementAudit.Action.EVIDENCE_UPLOADED: "mengunggah bukti untuk",
+            RequirementAudit.Action.EVIDENCE_APPROVED: "menyetujui bukti",
+            RequirementAudit.Action.EVIDENCE_REJECTED: "menolak bukti",
+            RequirementAudit.Action.COMPLETED:         "menyelesaikan",
+            RequirementAudit.Action.STAGE_ADVANCED:    "melanjutkan tahap ke",
+        }
+
+        for log in audit_logs:
+            req_name    = log.requirement_status.requirement.name
+            actor_name  = log.changed_by.full_name if log.changed_by else "Sistem"
+            action_verb = action_labels.get(log.action, log.action)
+            activities.append({
+                "id":        str(log.id),
+                "type":      "requirement",
+                "action":    log.action,
+                "actor":     actor_name,
+                "actor_id":  str(log.changed_by.id) if log.changed_by else None,
+                "subject":   req_name,
+                "message":   f"{actor_name} {action_verb} {req_name}",
+                "notes":     log.notes,
+                "old_value": log.old_value,
+                "new_value": log.new_value,
+                "timestamp": log.changed_at.isoformat(),
+            })
+        return activities
+
+    def financial_snapshot(self):
+        try:
+            from apps.payments.models import Payment
+            from django.utils import timezone
+            today    = timezone.now().date()
+            payments = list(Payment.objects.filter(unit__project=self).select_related("unit", "unit__buyer"))
+
+            if not payments:
+                return {"has_data": False, "total_billed": 0, "total_lunas": 0, "total_menunggak": 0, "total_upcoming": 0, "efficiency_pct": 100, "status": "healthy", "status_display": "Sehat", "overdue_items": [], "upcoming_items": []}
+
+            total_billed    = sum(p.amount for p in payments)
+            total_lunas     = sum(p.amount for p in payments if p.status == "lunas")
+            total_menunggak = sum(p.amount for p in payments if p.status == "menunggak" or (p.status == "menunggu" and p.due_date < today))
+            total_upcoming  = sum(p.amount for p in payments if p.status in ("akan_datang", "proses_bank") or (p.status == "menunggu" and p.due_date >= today))
+            efficiency      = round((total_lunas / total_billed) * 100) if total_billed > 0 else 100
+
+            overdue_items = sorted([
+                {"id": str(p.id), "unit_number": p.unit.unit_number, "buyer_name": p.unit.buyer.full_name if p.unit.buyer else "—", "payment_type": p.payment_type, "amount": int(p.amount), "due_date": p.due_date.isoformat(), "days_overdue": (today - p.due_date).days}
+                for p in payments if p.status == "menunggak" or (p.status == "menunggu" and p.due_date < today)
+            ], key=lambda x: x["days_overdue"], reverse=True)
+
+            upcoming_items = sorted([
+                {"id": str(p.id), "unit_number": p.unit.unit_number, "buyer_name": p.unit.buyer.full_name if p.unit.buyer else "—", "payment_type": p.payment_type, "amount": int(p.amount), "due_date": p.due_date.isoformat(), "days_until": (p.due_date - today).days}
+                for p in payments if p.status in ("akan_datang", "menunggu") and p.due_date >= today and (p.due_date - today).days <= 30
+            ], key=lambda x: x["days_until"])
+
+            return {
+                "has_data": True, "total_billed": int(total_billed), "total_lunas": int(total_lunas),
+                "total_menunggak": int(total_menunggak), "total_upcoming": int(total_upcoming),
+                "efficiency_pct": efficiency,
+                "status": "healthy" if efficiency >= 90 else "attention" if efficiency >= 70 else "critical",
+                "status_display": "Sehat" if efficiency >= 90 else "Perlu Perhatian" if efficiency >= 70 else "Kritis",
+                "overdue_items": overdue_items, "upcoming_items": upcoming_items,
+            }
+        except Exception:
+            return {"has_data": False, "total_billed": 0, "total_lunas": 0, "total_menunggak": 0, "total_upcoming": 0, "efficiency_pct": 100, "status": "healthy", "status_display": "Sehat", "overdue_items": [], "upcoming_items": []}

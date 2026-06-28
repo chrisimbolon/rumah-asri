@@ -1,11 +1,15 @@
 # =============================================================================
 # === backend/apps/projects/management/commands/seed_stage_requirements.py ===
+# Sprint 4: seeds dependency chain after creating requirements
+# Rencana kerja → Kontraktor → Jadwal proyek (konstruksi)
+# Marketing plan → Price list (penjualan)
+# IPR disetujui → AMDAL disetujui → PBG diterbitkan (perizinan)
 # =============================================================================
 """
 DevelopIndo — Seed Stage Requirements
 
 Seeds the default Perumahan (Township) requirements for each lifecycle stage.
-Based on co-founder's visualization: "Stage Templates — Perumahan (Township)"
+Sprint 4: also seeds prerequisite dependency chains.
 
 Usage:
   python manage.py seed_stage_requirements
@@ -17,8 +21,6 @@ from apps.projects.models import StageRequirement
 
 
 # Default requirements per stage — Perumahan/Township template
-# is_mandatory=True  → blocks stage advancement
-# is_mandatory=False → shown as checklist but doesn't block
 REQUIREMENTS = {
     "draft": [
         {"name": "Nama proyek",    "description": "Nama resmi proyek properti",                     "is_mandatory": True,  "order": 1},
@@ -61,6 +63,31 @@ REQUIREMENTS = {
     ],
 }
 
+# =============================================================================
+# Sprint 4: Dependency chains
+# Format: {stage: [(dependent_name, prerequisite_name), ...]}
+# "dependent requires prerequisite to be completed first"
+# =============================================================================
+DEPENDENCIES = {
+    "perizinan": [
+        # AMDAL needs IPR first
+        ("AMDAL disetujui", "IPR disetujui"),
+        # PBG needs both IPR and AMDAL
+        ("PBG diterbitkan", "IPR disetujui"),
+        ("PBG diterbitkan", "AMDAL disetujui"),
+    ],
+    "konstruksi": [
+        # Kontraktor needs Rencana kerja first
+        ("Kontraktor",    "Rencana kerja"),
+        # Jadwal proyek needs Kontraktor first
+        ("Jadwal proyek", "Kontraktor"),
+    ],
+    "penjualan": [
+        # Price list needs Marketing plan first
+        ("Price list", "Marketing plan"),
+    ],
+}
+
 
 class Command(BaseCommand):
     help = "Seed default stage requirements (Perumahan/Township template)"
@@ -78,7 +105,7 @@ class Command(BaseCommand):
             self.stdout.write(f"🗑️  Cleared {count} existing requirements")
 
         self.stdout.write("🌱 Seeding stage requirements...")
-        total_created = 0
+        total_created  = 0
         total_existing = 0
 
         for stage, reqs in REQUIREMENTS.items():
@@ -93,7 +120,7 @@ class Command(BaseCommand):
                         "is_active":    True,
                     },
                 )
-                flag = "✅ Created" if created else "  → Exists"
+                flag      = "✅ Created" if created else "  → Exists"
                 mandatory = "⚡ wajib" if obj.is_mandatory else "○ opsional"
                 self.stdout.write(f"  {flag}: [{stage}] {obj.name} ({mandatory})")
                 if created:
@@ -105,10 +132,48 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             f"🎉 Done! {total_created} created, {total_existing} already existed"
         ))
+
+        # ── Sprint 4: Seed dependency chains ─────────────────
+        self.stdout.write("")
+        self.stdout.write("🔗 Seeding dependency chains...")
+        dep_created = 0
+        dep_skipped = 0
+
+        for stage, deps in DEPENDENCIES.items():
+            for dependent_name, prereq_name in deps:
+                try:
+                    dependent = StageRequirement.objects.get(stage=stage, name=dependent_name)
+                    prereq    = StageRequirement.objects.get(stage=stage, name=prereq_name)
+
+                    if prereq not in dependent.prerequisites.all():
+                        dependent.prerequisites.add(prereq)
+                        self.stdout.write(
+                            f"  ✅ [{stage}] {dependent_name} → requires → {prereq_name}"
+                        )
+                        dep_created += 1
+                    else:
+                        self.stdout.write(
+                            f"  → Exists: [{stage}] {dependent_name} → {prereq_name}"
+                        )
+                        dep_skipped += 1
+
+                except StageRequirement.DoesNotExist as e:
+                    self.stdout.write(
+                        self.style.WARNING(f"  ⚠ Skipped: {e}")
+                    )
+
+        self.stdout.write("")
+        self.stdout.write(self.style.SUCCESS(
+            f"🔗 Dependencies: {dep_created} created, {dep_skipped} already existed"
+        ))
         self.stdout.write("")
         self.stdout.write("📋 Stage requirement counts:")
         for stage, reqs in REQUIREMENTS.items():
             mandatory = sum(1 for r in reqs if r["is_mandatory"])
-            self.stdout.write(
-                f"  {stage}: {len(reqs)} total ({mandatory} mandatory)"
-            )
+            self.stdout.write(f"  {stage}: {len(reqs)} total ({mandatory} mandatory)")
+
+        self.stdout.write("")
+        self.stdout.write("🔗 Dependency chains:")
+        self.stdout.write("  perizinan:  IPR → AMDAL → PBG")
+        self.stdout.write("  konstruksi: Rencana kerja → Kontraktor → Jadwal proyek")
+        self.stdout.write("  penjualan:  Marketing plan → Price list")
