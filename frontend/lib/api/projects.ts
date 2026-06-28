@@ -131,6 +131,27 @@ export interface RequirementItem {
   contribution:          number;   // weight_pct if completed, else 0
 }
 
+// Sprint 6 risk factor type ───────────────────────────
+
+export interface RiskFactor {
+  key:         string;   // "pbg_rejected" | "mandatory_blockers" | etc
+  name:        string;   // "PBG ditolak"
+  description: string;   // full explanation
+  impact:      string;   // "Tinggi" | "Sedang" | "Rendah"
+  impact_key:  string;   // "high" | "medium" | "low"
+  points:      number;   // points this factor contributes
+  max_points:  number;   // max possible for this factor
+  action:      string;   // what to do
+  triggered:   boolean;  // always true (only triggered factors are returned)
+  days?:       number;   // only for timeline_overrun factor
+}
+
+export interface RiskTrendPoint {
+  date:  string;   // ISO date "2026-06-28"
+  score: number;   // 0-100
+  level: string;   // "low" | "medium" | "high"
+}
+
 // ── IntelligenceSummary — UNCHANGED ──────────────────────────
 
 export interface IntelligenceSummary {
@@ -149,6 +170,10 @@ export interface IntelligenceSummary {
   collection_efficiency: CollectionEfficiency;
   readiness_breakdown: ReadinessBreakdown;
   readiness_label:     string;
+  risk_score:       number;           // 0-100 numeric score
+  risk_factors:     RiskFactor[];     // structured factors
+  risk_since:       string | null;    // ISO date when level started
+  risk_trend_data:  RiskTrendPoint[]; // last 30 days
 }
 
 export interface StageChecklistItem {
@@ -216,6 +241,7 @@ export interface PortfolioRow {
   overall_progress:    number;
   total_units:         number;
   units_sold:          number;
+  risk_score:          number;   // Sprint 6: numeric risk score
 }
 
 export interface CreateProjectPayload {
@@ -314,6 +340,12 @@ export const RISK_META: Record<RiskLevel, { label: string; color: string; bg: st
   high:   { label: "Tinggi", color: "var(--color-danger)",  bg: "var(--color-danger-light)"  },
 };
 
+export const RISK_FACTOR_IMPACT_META: Record<string, { color: string; bg: string }> = {
+  "Tinggi": { color: "var(--color-danger)",  bg: "var(--color-danger-light)"  },
+  "Sedang": { color: "var(--color-warning)", bg: "var(--color-warning-light)" },
+  "Rendah": { color: "var(--color-info)",    bg: "var(--color-info-light)"    },
+};
+
 export const TREND_META: Record<Trend, { icon: string; color: string }> = {
   improving: { icon: "↗", color: "var(--color-success)" },
   stable:    { icon: "→", color: "var(--color-ink-3)"   },
@@ -349,6 +381,14 @@ export function deriveStats(projects: Project[]) {
     units_sold:      projects.reduce((s, p) => s + p.units_sold, 0),
     units_available: projects.reduce((s, p) => s + (p.total_units - p.units_sold), 0),
   };
+}
+
+// ── RISK SCORE META ───────────────────────────────────────────
+
+export function getRiskScoreMeta(score: number): { color: string; bg: string; label: string } {
+  if (score >= 60) return { color: "var(--color-danger)",  bg: "var(--color-danger-light)",  label: "Tinggi"  };
+  if (score >= 30) return { color: "var(--color-warning)", bg: "var(--color-warning-light)", label: "Sedang"  };
+  return              { color: "var(--color-success)", bg: "var(--color-success-light)", label: "Rendah"  };
 }
 
 // ── API calls — Sprint 2: adds evidenceApi ────────────────────
