@@ -14,17 +14,21 @@ Sprint 4: Dependency Graph & Rule Engine
           StageRequirement.prerequisites — M2M self-reference
           ProjectRequirementStatus.can_complete() — prereq check
 Sprint 5: Explainable Weighted Readiness Engine
-          StageRequirement.weight — per-requirement weight (0-100)
-          Project.readiness_score — now weighted, not equal-count
-          Project.readiness_breakdown — full explainable calculation
-          Project.readiness_dimensions — now weighted per dimension
-          readiness_label — Rendah/Sedang/Tinggi/Sangat Tinggi
+          StageRequirement.weight, readiness_breakdown, readiness_label
+Sprint 6: Risk Engine — Scored & Explained
+          RiskSnapshot model — daily risk score storage for trend
+          Project.risk_score (0-100) — numeric, not just label
+          Project.risk_factors — structured factors with impact level
+          Project.risk_since — when did current risk level start?
+          Project.risk_trend_data — last 30 days for sparkline
+          Project.risk_level_changed_at — tracks when level changed
+          Project.snapshot_risk() — stores daily snapshot
 
 ZERO BREAKING CHANGES — all existing fields preserved.
 59 tests still green.
 """
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
 from django.conf import settings
 from django.db import models
@@ -33,7 +37,7 @@ from apps.core.models import TenantScopedModel
 
 
 # =============================================================================
-# StageRequirement — Sprint 5: adds weight field
+# StageRequirement — Sprint 5: weight field (unchanged from Sprint 5)
 # =============================================================================
 
 class StageRequirement(models.Model):
@@ -61,29 +65,15 @@ class StageRequirement(models.Model):
     order        = models.PositiveIntegerField(default=0)
     is_active    = models.BooleanField(default=True)
     category     = models.CharField(max_length=20, choices=Category.choices, default=Category.GENERAL)
-
-    # ── Sprint 5: Weight field ────────────────────────────────
-    # Weight of this requirement in the readiness score calculation.
-    # Only applies to is_mandatory=True requirements.
-    # Non-mandatory requirements always have weight=0 in scoring.
-    # Total weight per stage should ideally sum to 100,
-    # but the engine normalises automatically so any values work.
-    # Default=10 so existing requirements all start equal-weighted.
-    weight = models.PositiveIntegerField(
+    weight       = models.PositiveIntegerField(
         default=10,
         verbose_name="Bobot",
         help_text="Bobot requirement dalam kalkulasi readiness (0-100). Hanya berlaku untuk requirement wajib.",
     )
-
-    # ── Sprint 4: Dependency graph ────────────────────────────
     prerequisites = models.ManyToManyField(
-        "self",
-        symmetrical=False,
-        blank=True,
-        related_name="dependents",
-        verbose_name="Prasyarat",
+        "self", symmetrical=False, blank=True,
+        related_name="dependents", verbose_name="Prasyarat",
     )
-
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -102,7 +92,7 @@ class StageRequirement(models.Model):
 
 
 # =============================================================================
-# ProjectRequirementStatus — Sprint 4: can_complete() rule engine
+# ProjectRequirementStatus — unchanged from Sprint 5
 # =============================================================================
 
 class ProjectRequirementStatus(models.Model):
@@ -322,7 +312,46 @@ class RequirementAudit(models.Model):
 
 
 # =============================================================================
-# Project — Sprint 5: weighted explainable readiness engine
+# RiskSnapshot — Sprint 6 NEW MODEL
+# Daily risk score snapshot for trend analysis.
+# =============================================================================
+
+class RiskSnapshot(models.Model):
+    """
+    Sprint 6: Immutable daily risk score record per project.
+
+    Stored whenever snapshot_risk() is called — at minimum
+    whenever a requirement changes or evidence is approved.
+    A management command can also call it daily for all projects.
+
+    One record per project per day (upsert logic in snapshot_risk()).
+    Never deleted — forms the historical risk trend.
+
+    Used by:
+      Project.risk_trend_data  → last 30 days sparkline
+      Project.risk_since       → when current level first appeared
+    """
+
+    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project    = models.ForeignKey(
+        "Project", on_delete=models.CASCADE, related_name="risk_snapshots",
+    )
+    score      = models.IntegerField()                       # 0-100
+    level      = models.CharField(max_length=10)             # low/medium/high
+    snapped_at = models.DateField(default=date.today, db_index=True)
+
+    class Meta:
+        verbose_name        = "Risk Snapshot"
+        verbose_name_plural = "Risk Snapshots"
+        ordering            = ["-snapped_at"]
+        unique_together     = [["project", "snapped_at"]]   # one per day
+
+    def __str__(self):
+        return f"{self.project.name} — {self.snapped_at}: score={self.score} ({self.level})"
+
+
+# =============================================================================
+# Project — Sprint 6: risk engine scored & explained
 # =============================================================================
 
 class Project(TenantScopedModel):
@@ -343,6 +372,7 @@ class Project(TenantScopedModel):
         Stage.HANDOVER, Stage.COMPLETED,
     ]
 
+    # ── Core fields ───────────────────────────────────────────
     name        = models.CharField(max_length=200)
     location    = models.CharField(max_length=300)
     description = models.TextField(blank=True)
@@ -368,8 +398,18 @@ class Project(TenantScopedModel):
     amdal_date   = models.DateField(null=True, blank=True)
     pbg_status   = models.CharField(max_length=20, choices=PermitStatus.choices, default=PermitStatus.NOT_STARTED)
     pbg_date     = models.DateField(null=True, blank=True)
+
+    # ── Intelligence snapshot ─────────────────────────────────
     readiness_score_last       = models.IntegerField(default=0)
     readiness_score_updated_at = models.DateTimeField(null=True, blank=True)
+
+    # ── Sprint 6: Risk tracking fields (Option B) ─────────────
+    # Tracks when the current risk_level first started.
+    # Updated by snapshot_risk() when level changes.
+    # Enables "Risk since: 22 Mei 2026" display.
+    risk_level_last        = models.CharField(max_length=10, blank=True, default="")
+    risk_level_changed_at  = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -382,7 +422,7 @@ class Project(TenantScopedModel):
         return f"{self.name} — {self.location}"
 
     # =========================================================
-    # BASIC COMPUTED PROPERTIES
+    # BASIC COMPUTED PROPERTIES — unchanged
     # =========================================================
 
     @property
@@ -410,7 +450,7 @@ class Project(TenantScopedModel):
         return self.STAGE_ORDER[idx + 1]
 
     # =========================================================
-    # INTELLIGENCE ENGINE INTERNALS
+    # INTELLIGENCE ENGINE INTERNALS — unchanged
     # =========================================================
 
     def _get_current_requirements(self):
@@ -433,131 +473,49 @@ class Project(TenantScopedModel):
         return False
 
     # =========================================================
-    # SPRINT 5: WEIGHTED READINESS ENGINE
+    # SPRINT 5: WEIGHTED READINESS ENGINE — unchanged
     # =========================================================
 
     def _get_readiness_data(self):
-        """
-        Sprint 5: Core weighted readiness calculation.
-        Returns a dict used by readiness_score, readiness_breakdown,
-        and readiness_dimensions — computed ONCE, shared across all.
-
-        Formula:
-          readiness_score = (completed_weight / total_weight) × 100
-
-        Where:
-          total_weight    = sum of weights of all mandatory requirements
-          completed_weight = sum of weights of completed mandatory requirements
-
-        If total_weight = 0 (no mandatory requirements), returns 100.
-
-        Each requirement item in the breakdown includes:
-          name, weight, weight_pct, status, is_completed,
-          is_dependency_blocked, category, contribution
-        """
         requirements = self._get_current_requirements().filter(is_mandatory=True)
         statuses     = self._get_requirement_statuses()
-
         total_weight     = 0
         completed_weight = 0
         items            = []
-
         for r in requirements:
-            w = r.weight if r.weight > 0 else 1  # guard against zero weight
+            w = r.weight if r.weight > 0 else 1
             s = statuses.get(str(r.id))
-            is_completed = (
-                s is not None and
-                s.status == ProjectRequirementStatus.Status.COMPLETED
-            )
-            is_dep_blocked = (
-                not is_completed and
-                self._has_unmet_prerequisites(r, statuses)
-            )
-
+            is_completed = (s is not None and s.status == ProjectRequirementStatus.Status.COMPLETED)
+            is_dep_blocked = (not is_completed and self._has_unmet_prerequisites(r, statuses))
             total_weight += w
             if is_completed:
                 completed_weight += w
-
             items.append({
-                "id":                   str(r.id),
-                "name":                 r.name,
-                "category":             r.category,
-                "weight":               w,
-                "status":               s.status if s else ProjectRequirementStatus.Status.PENDING,
-                "is_completed":         is_completed,
-                "is_dependency_blocked": is_dep_blocked,
-                # contribution filled after total_weight is known
-                "contribution":         0,
+                "id": str(r.id), "name": r.name, "category": r.category,
+                "weight": w, "status": s.status if s else ProjectRequirementStatus.Status.PENDING,
+                "is_completed": is_completed, "is_dependency_blocked": is_dep_blocked,
+                "contribution": 0,
             })
-
-        # Now compute weight_pct and contribution per item
         for item in items:
             item["weight_pct"]   = round((item["weight"] / total_weight) * 100) if total_weight > 0 else 0
             item["contribution"] = item["weight_pct"] if item["is_completed"] else 0
-
         score = round((completed_weight / total_weight) * 100) if total_weight > 0 else 100
-
-        return {
-            "score":            score,
-            "total_weight":     total_weight,
-            "completed_weight": completed_weight,
-            "items":            items,
-        }
+        return {"score": score, "total_weight": total_weight, "completed_weight": completed_weight, "items": items}
 
     @property
     def readiness_score(self):
-        """
-        Sprint 5: Weighted readiness score.
-        Replaces equal-count method from Sprint 1.
-
-        Formula: sum(completed weights) / sum(all weights) × 100
-        """
         return self._get_readiness_data()["score"]
 
     @property
     def readiness_label(self):
-        """
-        Sprint 5: Human-readable readiness label.
-        Used alongside the numeric score for quick comprehension.
-        """
         score = self.readiness_score
-        if score >= 80:
-            return "Sangat Siap"
-        if score >= 60:
-            return "Cukup Siap"
-        if score >= 30:
-            return "Sedang"
+        if score >= 80: return "Sangat Siap"
+        if score >= 60: return "Cukup Siap"
+        if score >= 30: return "Sedang"
         return "Belum Siap"
 
     @property
     def readiness_breakdown(self):
-        """
-        Sprint 5: Full explainable readiness breakdown.
-        This is the "show your working" panel the co-founders asked for.
-
-        Returns:
-          score:            int (0-100)
-          label:            str (Sangat Siap / Cukup Siap / Sedang / Belum Siap)
-          total_weight:     int (sum of all mandatory weights)
-          completed_weight: int (sum of completed mandatory weights)
-          formula:          str (human-readable formula)
-          items: [
-            {
-              name:                  str
-              category:              str
-              weight:                int  (raw weight value)
-              weight_pct:            int  (% of total weight)
-              status:                str
-              is_completed:          bool
-              is_dependency_blocked: bool
-              contribution:          int  (weight_pct if completed, else 0)
-            }
-          ]
-
-        Used by:
-          GET /api/projects/<id>/intelligence/
-          Project detail page — "Bagaimana kalkulasinya?" panel
-        """
         data  = self._get_readiness_data()
         score = data["score"]
         return {
@@ -565,19 +523,12 @@ class Project(TenantScopedModel):
             "label":            self.readiness_label,
             "total_weight":     data["total_weight"],
             "completed_weight": data["completed_weight"],
-            "formula":          (
-                f"Readiness = ({data['completed_weight']} / {data['total_weight']}) × 100 = {score}%"
-            ),
+            "formula":          f"Readiness = ({data['completed_weight']} / {data['total_weight']}) × 100 = {score}%",
             "items":            data["items"],
         }
 
     @property
     def readiness_dimensions(self):
-        """
-        Sprint 5: Weighted readiness per dimension.
-        Each dimension score = sum(completed weights in dim) / sum(all weights in dim) × 100
-        Dimensions with no mandatory requirements return 100 (nothing to do = done).
-        """
         data = self._get_readiness_data()
         dims = {
             "inventory":   {"total": 0, "completed": 0},
@@ -588,21 +539,276 @@ class Project(TenantScopedModel):
         }
         for item in data["items"]:
             cat = item["category"] if item["category"] in dims else "general"
-            dims[cat]["total"]     += item["weight"]
+            dims[cat]["total"] += item["weight"]
             if item["is_completed"]:
                 dims[cat]["completed"] += item["weight"]
-
         return {
-            dim: (
-                100 if d["total"] == 0
-                else round((d["completed"] / d["total"]) * 100)
-            )
+            dim: (100 if d["total"] == 0 else round((d["completed"] / d["total"]) * 100))
             for dim, d in dims.items()
         }
 
     # =========================================================
-    # INTELLIGENCE PROPERTIES — unchanged logic, score now weighted
+    # SPRINT 6: RISK ENGINE — scored & explained
     # =========================================================
+
+    def _get_risk_data(self):
+        """
+        Sprint 6: Core risk calculation engine.
+        Returns structured risk data used by risk_score,
+        risk_factors, risk_level, and risk_since.
+        Computed ONCE, shared across all risk properties.
+
+        Risk Factor Table:
+        ─────────────────────────────────────────────────────
+        Factor                  Max Pts  Impact
+        ─────────────────────────────────────────────────────
+        PBG rejected               30    Tinggi
+        Mandatory blockers         25    Tinggi (scaled by count)
+        Timeline overrun           20    Tinggi (scaled by days)
+        AMDAL rejected             15    Tinggi
+        Payment overdue            10    Sedang (scaled by count)
+        ─────────────────────────────────────────────────────
+        Total possible:           100
+
+        risk_score = sum of triggered factor points
+        risk_level:
+          0-29  → low    (Rendah)
+          30-59 → medium (Sedang)
+          60+   → high   (Tinggi)
+        """
+        today   = date.today()
+        factors = []
+        score   = 0
+
+        # ── Factor 1: PBG rejected (30 pts, Tinggi) ──────────
+        if self.pbg_status == self.PermitStatus.REJECTED:
+            pts = 30
+            score += pts
+            factors.append({
+                "key":         "pbg_rejected",
+                "name":        "PBG ditolak",
+                "description": "Persetujuan Bangunan Gedung ditolak — konstruksi tidak dapat dilanjutkan",
+                "impact":      "Tinggi",
+                "impact_key":  "high",
+                "points":      pts,
+                "max_points":  30,
+                "action":      "Ajukan ulang PBG ke instansi terkait segera",
+                "triggered":   True,
+            })
+
+        # ── Factor 2: AMDAL rejected (15 pts, Tinggi) ────────
+        if self.amdal_status == self.PermitStatus.REJECTED:
+            pts = 15
+            score += pts
+            factors.append({
+                "key":         "amdal_rejected",
+                "name":        "AMDAL ditolak",
+                "description": "Analisis Dampak Lingkungan ditolak — perizinan tidak dapat diselesaikan",
+                "impact":      "Tinggi",
+                "impact_key":  "high",
+                "points":      pts,
+                "max_points":  15,
+                "action":      "Revisi dokumen AMDAL dan ajukan ulang",
+                "triggered":   True,
+            })
+
+        # ── Factor 3: Mandatory blockers (25 pts, scaled) ────
+        blocking = self.blocking_count
+        if blocking > 0:
+            # Scale: 1 blocker=10pts, 2=17pts, 3+=25pts
+            pts = min(10 * blocking, 25) if blocking <= 2 else 25
+            score += pts
+            impact = "Tinggi" if blocking >= 2 else "Sedang"
+            factors.append({
+                "key":         "mandatory_blockers",
+                "name":        f"{blocking} requirement wajib memblokir",
+                "description": f"Tahap {self.stage_display} tidak dapat dilanjutkan — {blocking} requirement wajib belum selesai",
+                "impact":      impact,
+                "impact_key":  "high" if blocking >= 2 else "medium",
+                "points":      pts,
+                "max_points":  25,
+                "action":      f"Mulai dengan: {self.next_action}" if self.next_action else "Selesaikan semua requirement wajib",
+                "triggered":   True,
+            })
+
+        # ── Factor 4: Timeline overrun (20 pts, scaled) ──────
+        if (self.end_date and today > self.end_date
+                and self.stage not in (self.Stage.COMPLETED, self.Stage.HANDOVER)):
+            overrun_days = (today - self.end_date).days
+            # Scale: 1-7d=8pts, 8-30d=14pts, 31-90d=18pts, 90+d=20pts
+            if overrun_days <= 7:
+                pts = 8
+            elif overrun_days <= 30:
+                pts = 14
+            elif overrun_days <= 90:
+                pts = 18
+            else:
+                pts = 20
+            score += pts
+            impact = "Tinggi" if overrun_days > 30 else "Sedang"
+            factors.append({
+                "key":         "timeline_overrun",
+                "name":        f"Terlambat {overrun_days} hari",
+                "description": f"Proyek melewati target selesai {overrun_days} hari — dampak: {self._overrun_impact_text(overrun_days)}",
+                "impact":      impact,
+                "impact_key":  "high" if overrun_days > 30 else "medium",
+                "points":      pts,
+                "max_points":  20,
+                "action":      "Perbarui target selesai atau percepat konstruksi",
+                "triggered":   True,
+                "days":        overrun_days,
+            })
+
+        # ── Factor 5: Payment overdue (10 pts, scaled) ───────
+        overdue_count = self._get_overdue_payments_count()
+        if overdue_count > 0:
+            pts = min(5 * overdue_count, 10)
+            score += pts
+            factors.append({
+                "key":         "payment_overdue",
+                "name":        f"{overdue_count} pembayaran tertunggak",
+                "description": f"{overdue_count} invoice pembayaran melewati jatuh tempo — collection efficiency menurun",
+                "impact":      "Sedang",
+                "impact_key":  "medium",
+                "points":      pts,
+                "max_points":  10,
+                "action":      "Tindak lanjuti pembayaran yang tertunggak segera",
+                "triggered":   True,
+            })
+
+        # ── Clamp score to 0-100 ──────────────────────────────
+        score = min(score, 100)
+
+        # ── Derive level from score ───────────────────────────
+        if score >= 60:
+            level = "high"
+        elif score >= 30:
+            level = "medium"
+        else:
+            level = "low"
+
+        return {
+            "score":   score,
+            "level":   level,
+            "factors": factors,
+        }
+
+    def _overrun_impact_text(self, days):
+        if days <= 7:
+            return "perlu perhatian"
+        if days <= 30:
+            return "pembayaran dan progres terhambat"
+        if days <= 90:
+            return "risiko pembatalan kontrak"
+        return "dampak signifikan pada reputasi dan kontrak"
+
+    @property
+    def risk_score(self):
+        """
+        Sprint 6: Numeric risk score (0-100).
+        Higher = more risky.
+        Replaces binary low/medium/high with a continuous scale.
+        """
+        return self._get_risk_data()["score"]
+
+    @property
+    def risk_level(self):
+        """
+        Sprint 6: Now derived from risk_score, not ad-hoc logic.
+        score 0-29  → low
+        score 30-59 → medium
+        score 60+   → high
+        Backward compatible — same return values as before.
+        """
+        return self._get_risk_data()["level"]
+
+    @property
+    def risk_level_display(self):
+        return {"low": "Rendah", "medium": "Sedang", "high": "Tinggi"}.get(self.risk_level, self.risk_level)
+
+    @property
+    def risk_factors(self):
+        """
+        Sprint 6: Structured risk factors with impact levels.
+        Replaces plain-string risk_reasons with rich structured data.
+        Each factor includes: key, name, description, impact,
+        points, max_points, action, triggered.
+        """
+        return self._get_risk_data()["factors"]
+
+    @property
+    def risk_reasons(self):
+        """
+        Sprint 6: Backward compatible — derives from risk_factors.
+        Kept so existing code using risk_reasons still works.
+        """
+        return [f["description"] for f in self.risk_factors]
+
+    @property
+    def risk_since(self):
+        """
+        Sprint 6 — Option B + C:
+        Returns when the current risk level first started.
+
+        Priority:
+        1. risk_level_changed_at field (Option B) — set by snapshot_risk()
+        2. Earliest RiskSnapshot with current level (Option C)
+        3. None if no history exists
+        """
+        current_level = self.risk_level
+
+        # Option B: use field if level matches
+        if self.risk_level_last == current_level and self.risk_level_changed_at:
+            return self.risk_level_changed_at.date()
+
+        # Option C: scan snapshots for earliest consecutive run
+        snapshots = list(
+            self.risk_snapshots.filter(level=current_level)
+            .order_by("snapped_at")
+            .values("snapped_at", "level")
+        )
+        if snapshots:
+            return snapshots[0]["snapped_at"]
+
+        return None
+
+    @property
+    def risk_trend_data(self):
+        """
+        Sprint 6: Last 30 days of risk scores for sparkline chart.
+        Returns list of {date, score, level} dicts ordered by date ASC.
+        Days without snapshots are omitted (frontend handles gaps).
+        If no snapshots exist, returns empty list.
+        """
+        cutoff = date.today() - timedelta(days=30)
+        snapshots = list(
+            self.risk_snapshots
+            .filter(snapped_at__gte=cutoff)
+            .order_by("snapped_at")
+            .values("snapped_at", "score", "level")
+        )
+        return [
+            {
+                "date":  s["snapped_at"].isoformat(),
+                "score": s["score"],
+                "level": s["level"],
+            }
+            for s in snapshots
+        ]
+
+    # =========================================================
+    # INTELLIGENCE PROPERTIES — trend uses readiness (unchanged)
+    # =========================================================
+
+    @property
+    def trend(self):
+        current  = self.readiness_score
+        previous = self.readiness_score_last
+        if current > previous:
+            return "improving"
+        if current < previous:
+            return "declining"
+        return "stable"
 
     @property
     def blocking_count(self):
@@ -631,35 +837,6 @@ class Project(TenantScopedModel):
         return None
 
     @property
-    def risk_level(self):
-        count = self.blocking_count
-        if self.pbg_status == self.PermitStatus.REJECTED:
-            return "high"
-        if (self.end_date and date.today() > self.end_date
-                and self.stage not in (self.Stage.COMPLETED, self.Stage.HANDOVER)
-                and self.blocking_count > 0):
-            return "high"
-        if count == 0:
-            return "low"
-        if count <= 3:
-            return "medium"
-        return "high"
-
-    @property
-    def risk_level_display(self):
-        return {"low": "Rendah", "medium": "Sedang", "high": "Tinggi"}.get(self.risk_level, self.risk_level)
-
-    @property
-    def trend(self):
-        current  = self.readiness_score
-        previous = self.readiness_score_last
-        if current > previous:
-            return "improving"
-        if current < previous:
-            return "declining"
-        return "stable"
-
-    @property
     def can_advance(self):
         if self.stage == self.Stage.COMPLETED:
             return False
@@ -668,35 +845,6 @@ class Project(TenantScopedModel):
         if self.blocking_count > 0:
             return False
         return True
-
-    @property
-    def risk_reasons(self):
-        reasons = []
-        if self.pbg_status == self.PermitStatus.REJECTED:
-            reasons.append("PBG ditolak — perlu pengajuan ulang")
-        elif (self.pbg_status == self.PermitStatus.NOT_STARTED
-              and self.stage in (self.Stage.PERMITS, self.Stage.CONSTRUCTION, self.Stage.SALES, self.Stage.HANDOVER)):
-            reasons.append("PBG belum dimulai")
-        if self.amdal_status == self.PermitStatus.REJECTED:
-            reasons.append("AMDAL ditolak")
-        if (self.end_date and date.today() > self.end_date
-                and self.stage not in (self.Stage.COMPLETED, self.Stage.HANDOVER)
-                and self.blocking_count > 0):
-            overrun_days = (date.today() - self.end_date).days
-            reasons.append(f"Proyek terlambat {overrun_days} hari dari target")
-        requirements = self._get_current_requirements().filter(is_mandatory=True)
-        statuses     = self._get_requirement_statuses()
-        pending = [
-            r.name for r in requirements
-            if (not statuses.get(str(r.id)) or
-                statuses[str(r.id)].status == ProjectRequirementStatus.Status.PENDING)
-            and not self._has_unmet_prerequisites(r, statuses)
-        ]
-        for name in pending[:3]:
-            reasons.append(f"{name} belum selesai")
-        if len(pending) > 3:
-            reasons.append(f"...dan {len(pending) - 3} item wajib lainnya")
-        return reasons
 
     @property
     def alerts(self):
@@ -769,22 +917,24 @@ class Project(TenantScopedModel):
             return 0
 
     # =========================================================
-    # get_intelligence_summary — Sprint 5: adds breakdown + weight
+    # get_intelligence_summary — Sprint 6: adds risk engine data
     # =========================================================
 
     def get_intelligence_summary(self):
         """
-        Sprint 5: intelligence summary now includes:
-          readiness_breakdown — full explainable calculation
-          readiness_label     — Sangat Siap / Cukup Siap / Sedang / Belum Siap
-          Each requirement item now includes weight, weight_pct, contribution
+        Sprint 6: intelligence summary now includes:
+          risk_score       — numeric 0-100
+          risk_factors     — structured factors with impact
+          risk_since       — date when current level started
+          risk_trend_data  — last 30 days [{date, score, level}]
         """
-        requirements = self._get_current_requirements()
-        statuses     = self._get_requirement_statuses()
-
-        # Sprint 5: get full breakdown data (computed once, shared)
+        requirements   = self._get_current_requirements()
+        statuses       = self._get_requirement_statuses()
         breakdown_data = self._get_readiness_data()
         breakdown_map  = {item["id"]: item for item in breakdown_data["items"]}
+
+        # Sprint 6: compute risk data once
+        risk_data = self._get_risk_data()
 
         items = []
         for r in requirements:
@@ -818,12 +968,9 @@ class Project(TenantScopedModel):
                 is_dependency_blocked = len(unmet_prereqs) > 0
 
             can_act_now = not is_completed and not is_dependency_blocked
-
-            # Sprint 5: weight data from breakdown_map
             bd = breakdown_map.get(str(r.id), {})
 
             items.append({
-                # Original fields
                 "id":             str(r.id),
                 "name":           r.name,
                 "description":    r.description,
@@ -835,46 +982,45 @@ class Project(TenantScopedModel):
                 "notes":          s.notes if s else "",
                 "completed_at":   s.completed_at.isoformat() if s and s.completed_at else None,
                 "status_id":      str(s.id) if s else None,
-                # Sprint 2
                 "evidence_count":         evidence_count,
                 "latest_evidence_status": latest_evidence_status,
                 "has_pending_evidence":   has_pending_evidence,
-                # Sprint 3
                 "audit_count":            audit_count,
-                # Sprint 4
                 "prerequisites":          prereq_names,
                 "unmet_prerequisites":    unmet_prereqs,
                 "is_dependency_blocked":  is_dependency_blocked,
                 "can_act_now":            can_act_now,
-                # Sprint 5: weight fields
                 "weight":                 r.weight if r.is_mandatory else 0,
                 "weight_pct":             bd.get("weight_pct", 0),
                 "contribution":           bd.get("contribution", 0),
             })
 
+        risk_since = self.risk_since
         return {
-            # Original
             "readiness_score":    self.readiness_score,
             "blocking_count":     self.blocking_count,
             "next_action":        self.next_action,
-            "risk_level":         self.risk_level,
-            "risk_level_display": self.risk_level_display,
+            "risk_level":         risk_data["level"],
+            "risk_level_display": {"low": "Rendah", "medium": "Sedang", "high": "Tinggi"}.get(risk_data["level"], ""),
             "trend":              self.trend,
             "can_advance":        self.can_advance,
             "requirements":       items,
-            # Sprint 1
             "readiness_dimensions":  self.readiness_dimensions,
             "risk_reasons":          self.risk_reasons,
             "alerts":                self.alerts,
             "parallel_stages":       self.parallel_stage_status,
             "collection_efficiency": self.collection_efficiency,
-            # Sprint 5: explainable readiness
             "readiness_breakdown":   self.readiness_breakdown,
             "readiness_label":       self.readiness_label,
+            # Sprint 6: risk engine
+            "risk_score":            risk_data["score"],
+            "risk_factors":          risk_data["factors"],
+            "risk_since":            risk_since.isoformat() if risk_since else None,
+            "risk_trend_data":       self.risk_trend_data,
         }
 
     # =========================================================
-    # SNAPSHOT / ADVANCE / CHECKLIST
+    # SNAPSHOT — Sprint 6: adds snapshot_risk()
     # =========================================================
 
     def snapshot_readiness(self):
@@ -884,6 +1030,36 @@ class Project(TenantScopedModel):
             self.readiness_score_last       = current
             self.readiness_score_updated_at = timezone.now()
             self.save(update_fields=["readiness_score_last", "readiness_score_updated_at", "updated_at"])
+
+    def snapshot_risk(self):
+        """
+        Sprint 6: Store today's risk score in RiskSnapshot.
+        Also updates risk_level_changed_at when level changes.
+        Call this whenever risk might have changed:
+          - After requirement status change
+          - After evidence approval/rejection
+          - Via daily management command
+
+        Uses upsert logic — safe to call multiple times per day.
+        """
+        from django.utils import timezone
+        risk_data     = self._get_risk_data()
+        current_score = risk_data["score"]
+        current_level = risk_data["level"]
+        today         = date.today()
+
+        # Upsert: update today's snapshot or create new one
+        RiskSnapshot.objects.update_or_create(
+            project=self,
+            snapped_at=today,
+            defaults={"score": current_score, "level": current_level},
+        )
+
+        # Option B: update risk_level_changed_at when level changes
+        if self.risk_level_last != current_level:
+            self.risk_level_last       = current_level
+            self.risk_level_changed_at = timezone.now()
+            self.save(update_fields=["risk_level_last", "risk_level_changed_at", "updated_at"])
 
     def _create_stage_requirements(self):
         requirements = StageRequirement.objects.filter(stage=self.stage, is_active=True)
@@ -946,17 +1122,14 @@ class Project(TenantScopedModel):
         return hardcoded.get(self.stage, [])
 
     # =========================================================
-    # SPRINT 3: TIMELINE + FINANCIAL (unchanged)
+    # SPRINT 3: TIMELINE + FINANCIAL — unchanged
     # =========================================================
 
     def activity_timeline(self, limit=20):
         activities = []
         audit_logs = RequirementAudit.objects.filter(
             requirement_status__project=self,
-        ).select_related(
-            "requirement_status__requirement", "changed_by",
-        ).order_by("-changed_at")[:limit]
-
+        ).select_related("requirement_status__requirement", "changed_by").order_by("-changed_at")[:limit]
         action_labels = {
             RequirementAudit.Action.CREATED:           "membuat requirement",
             RequirementAudit.Action.UPDATED:           "memperbarui",
@@ -966,22 +1139,15 @@ class Project(TenantScopedModel):
             RequirementAudit.Action.COMPLETED:         "menyelesaikan",
             RequirementAudit.Action.STAGE_ADVANCED:    "melanjutkan tahap ke",
         }
-
         for log in audit_logs:
             req_name    = log.requirement_status.requirement.name
             actor_name  = log.changed_by.full_name if log.changed_by else "Sistem"
             action_verb = action_labels.get(log.action, log.action)
             activities.append({
-                "id":        str(log.id),
-                "type":      "requirement",
-                "action":    log.action,
-                "actor":     actor_name,
-                "actor_id":  str(log.changed_by.id) if log.changed_by else None,
-                "subject":   req_name,
-                "message":   f"{actor_name} {action_verb} {req_name}",
-                "notes":     log.notes,
-                "old_value": log.old_value,
-                "new_value": log.new_value,
+                "id": str(log.id), "type": "requirement", "action": log.action,
+                "actor": actor_name, "actor_id": str(log.changed_by.id) if log.changed_by else None,
+                "subject": req_name, "message": f"{actor_name} {action_verb} {req_name}",
+                "notes": log.notes, "old_value": log.old_value, "new_value": log.new_value,
                 "timestamp": log.changed_at.isoformat(),
             })
         return activities
@@ -992,26 +1158,21 @@ class Project(TenantScopedModel):
             from django.utils import timezone
             today    = timezone.now().date()
             payments = list(Payment.objects.filter(unit__project=self).select_related("unit", "unit__buyer"))
-
             if not payments:
                 return {"has_data": False, "total_billed": 0, "total_lunas": 0, "total_menunggak": 0, "total_upcoming": 0, "efficiency_pct": 100, "status": "healthy", "status_display": "Sehat", "overdue_items": [], "upcoming_items": []}
-
             total_billed    = sum(p.amount for p in payments)
             total_lunas     = sum(p.amount for p in payments if p.status == "lunas")
             total_menunggak = sum(p.amount for p in payments if p.status == "menunggak" or (p.status == "menunggu" and p.due_date < today))
             total_upcoming  = sum(p.amount for p in payments if p.status in ("akan_datang", "proses_bank") or (p.status == "menunggu" and p.due_date >= today))
             efficiency      = round((total_lunas / total_billed) * 100) if total_billed > 0 else 100
-
             overdue_items = sorted([
                 {"id": str(p.id), "unit_number": p.unit.unit_number, "buyer_name": p.unit.buyer.full_name if p.unit.buyer else "—", "payment_type": p.payment_type, "amount": int(p.amount), "due_date": p.due_date.isoformat(), "days_overdue": (today - p.due_date).days}
                 for p in payments if p.status == "menunggak" or (p.status == "menunggu" and p.due_date < today)
             ], key=lambda x: x["days_overdue"], reverse=True)
-
             upcoming_items = sorted([
                 {"id": str(p.id), "unit_number": p.unit.unit_number, "buyer_name": p.unit.buyer.full_name if p.unit.buyer else "—", "payment_type": p.payment_type, "amount": int(p.amount), "due_date": p.due_date.isoformat(), "days_until": (p.due_date - today).days}
                 for p in payments if p.status in ("akan_datang", "menunggu") and p.due_date >= today and (p.due_date - today).days <= 30
             ], key=lambda x: x["days_until"])
-
             return {
                 "has_data": True, "total_billed": int(total_billed), "total_lunas": int(total_lunas),
                 "total_menunggak": int(total_menunggak), "total_upcoming": int(total_upcoming),
