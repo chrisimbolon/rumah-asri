@@ -66,7 +66,7 @@ export interface RequirementEvidence {
   id:                   string;
   file_name:            string;
   file_url:             string;
-  file_url_display:     string;   // resolved download URL
+  file_url_display:     string;
   notes:                string;
   uploaded_by:          string;
   uploaded_by_name:     string;
