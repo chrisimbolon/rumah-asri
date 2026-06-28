@@ -18,6 +18,7 @@ import {
   Project,
   projectsApi,
   ProjectStage,
+  READINESS_LABEL_META,
   RequirementEvidence,
   RequirementItem,
   RISK_META,
@@ -582,6 +583,108 @@ function ReadinessDimensions({ dims }: { dims: IntelligenceSummary["readiness_di
   );
 }
 
+// ── Sprint 5: Readiness breakdown panel ──────────────────────
+function ReadinessBreakdownPanel({
+  breakdown,
+}: {
+  breakdown: IntelligenceSummary["readiness_breakdown"];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (!breakdown) return null;
+
+  const labelMeta = READINESS_LABEL_META[breakdown.label] ?? {
+    color: "var(--color-ink-3)",
+    bg:    "var(--color-paper-2)",
+  };
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(14,13,11,0.06)" }}>
+      {/* Header row */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            Bagaimana kalkulasinya?
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, color: labelMeta.color, backgroundColor: labelMeta.bg }}>
+            {breakdown.label}
+          </span>
+        </div>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          style={{ fontSize: 11, color: "var(--color-accent)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+          {expanded ? "Sembunyikan ↑" : "Lihat detail ↓"}
+        </button>
+      </div>
+
+      {/* Formula bar — always visible */}
+      <div style={{ padding: "8px 12px", backgroundColor: "var(--color-paper-2)", borderRadius: 8, marginBottom: expanded ? 10 : 0 }}>
+        <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginBottom: 4 }}>Formula</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-ink)", fontFamily: "monospace" }}>
+          {breakdown.formula}
+        </div>
+        {/* Mini progress bar */}
+        <div style={{ marginTop: 8, height: 6, backgroundColor: "rgba(14,13,11,0.08)", borderRadius: 3, overflow: "hidden" }}>
+          <div style={{
+            width: `${breakdown.score}%`, height: "100%", borderRadius: 3,
+            backgroundColor: breakdown.score >= 80 ? "var(--color-success)" : breakdown.score >= 60 ? "var(--color-info)" : breakdown.score >= 30 ? "var(--color-warning)" : "var(--color-danger)",
+            transition: "width 0.5s",
+          }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+          <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
+            Bobot selesai: {breakdown.completed_weight} / {breakdown.total_weight}
+          </span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: labelMeta.color }}>
+            {breakdown.score}%
+          </span>
+        </div>
+      </div>
+
+      {/* Expanded: per-requirement breakdown */}
+      {expanded && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {breakdown.items.map((item) => {
+            const isDone    = item.is_completed;
+            const isBlocked = item.is_dependency_blocked;
+            const barColor  = isDone ? "var(--color-success)" : isBlocked ? "rgba(14,13,11,0.12)" : "var(--color-danger)";
+            const icon      = isDone ? "✅" : isBlocked ? "🔒" : "○";
+            return (
+              <div key={item.id} style={{
+                padding: "8px 10px", borderRadius: 6,
+                backgroundColor: isDone ? "var(--color-success-light)" : isBlocked ? "rgba(14,13,11,0.03)" : "rgba(220,38,38,0.04)",
+                border: `1px solid ${isDone ? "rgba(34,197,94,0.15)" : isBlocked ? "rgba(14,13,11,0.06)" : "rgba(220,38,38,0.1)"}`,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                  <span style={{ fontSize: 12 }}>{icon}</span>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: isDone ? "var(--color-ink-3)" : "var(--color-ink)", flex: 1, textDecoration: isDone ? "line-through" : "none" }}>
+                    {item.name}
+                  </span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: isDone ? "var(--color-success)" : "var(--color-ink-3)" }}>
+                    +{item.contribution}%
+                  </span>
+                </div>
+                {/* Weight bar */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ flex: 1, height: 4, backgroundColor: "rgba(14,13,11,0.08)", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ width: `${item.weight_pct}%`, height: "100%", borderRadius: 2, backgroundColor: barColor }} />
+                  </div>
+                  <span style={{ fontSize: 10, color: "var(--color-ink-3)", minWidth: 60, textAlign: "right" }}>
+                    bobot {item.weight_pct}%
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{ fontSize: 10, color: "var(--color-ink-3)", textAlign: "center", marginTop: 4, fontStyle: "italic" }}>
+            Bobot dapat dikonfigurasi oleh admin
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Sprint 1: Parallel stage toggles ─────────────────────────
 function ParallelStageToggles({ project, onUpdated }: { project: Project; onUpdated: (p: Project) => void }) {
   const [loading5A, setLoading5A] = useState(false);
@@ -789,6 +892,10 @@ export default function ProjectDetailPage() {
             </button>
           </div>
         </div>
+        {/* Sprint 5: Explainable readiness breakdown */}
+        {intel.readiness_breakdown && (
+          <ReadinessBreakdownPanel breakdown={intel.readiness_breakdown} />
+        )}
       </div>
 
       {/* ── Alerts + Dimensions row ── */}
