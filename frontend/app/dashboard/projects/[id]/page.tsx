@@ -1,12 +1,13 @@
 "use client";
 // =============================================================================
 // === frontend/app/dashboard/projects/[id]/page.tsx ===
-// Sprint 2: adds evidence upload UI to RequirementRow
-//   + menunggu_verifikasi status badge
-//   + Upload Bukti button
-//   + Evidence upload modal (file or URL)
-//   + Evidence list with approve/reject
-// All Sprint 1 sections preserved — additive only.
+// Sprint 4: dependency-aware RequirementRow
+//   + 🔒 Dependency blocked state (grey, locked icon)
+//   + "Selesaikan X dulu" tooltip on blocked rows
+//   + Prerequisite chain shown inline
+//   + handleStatusChange catches dependency_blocked errors
+//   + projects.ts: RequirementItem gets Sprint 4 fields
+// All Sprint 1/2/3 sections preserved — additive only.
 // =============================================================================
 
 import {
@@ -36,6 +37,7 @@ import {
   FileText,
   Home,
   Loader2,
+  Lock,
   MapPin,
   Paperclip,
   Save,
@@ -47,7 +49,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-// ── Circular readiness gauge — UNCHANGED ─────────────────────
+// ── Circular readiness gauge ──────────────────────────────────
 function ReadinessGauge({ score }: { score: number }) {
   const radius        = 36;
   const circumference = 2 * Math.PI * radius;
@@ -72,7 +74,7 @@ function ReadinessGauge({ score }: { score: number }) {
   );
 }
 
-// ── Stage pipeline — UNCHANGED ────────────────────────────────
+// ── Stage pipeline ────────────────────────────────────────────
 function StagePipeline({ stage }: { stage: ProjectStage }) {
   const stages: { key: ProjectStage; label: string }[] = [
     { key: "draft",        label: "Draft"        },
@@ -109,65 +111,40 @@ function StagePipeline({ stage }: { stage: ProjectStage }) {
   );
 }
 
-// ── Sprint 2: Evidence upload modal ──────────────────────────
+// ── Evidence upload modal ─────────────────────────────────────
 function EvidenceUploadModal({
-  req,
-  projectId,
-  onUploaded,
-  onClose,
+  req, projectId, onUploaded, onClose,
 }: {
-  req:        RequirementItem;
-  projectId:  string;
-  onUploaded: (intel: IntelligenceSummary) => void;
-  onClose:    () => void;
+  req: RequirementItem; projectId: string;
+  onUploaded: (intel: IntelligenceSummary) => void; onClose: () => void;
 }) {
-  const [mode,     setMode]     = useState<"file" | "url">("url");
-  const [fileUrl,  setFileUrl]  = useState("");
-  const [notes,    setNotes]    = useState("");
-  const [saving,   setSaving]   = useState(false);
-  const [error,    setError]    = useState<string | null>(null);
+  const [mode,   setMode]   = useState<"file" | "url">("url");
+  const [fileUrl, setFileUrl] = useState("");
+  const [notes,  setNotes]  = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async () => {
-    if (mode === "url" && !fileUrl.trim()) {
-      setError("Masukkan URL bukti"); return;
-    }
-    if (mode === "file" && !fileRef.current?.files?.[0]) {
-      setError("Pilih file untuk diunggah"); return;
-    }
-    setSaving(true);
-    setError(null);
+    if (mode === "url" && !fileUrl.trim()) { setError("Masukkan URL bukti"); return; }
+    if (mode === "file" && !fileRef.current?.files?.[0]) { setError("Pilih file untuk diunggah"); return; }
+    setSaving(true); setError(null);
     try {
-      const result = await evidenceApi.upload(
-        projectId,
-        req.status_id ?? req.id,
-        {
-          file:     mode === "file" ? fileRef.current?.files?.[0] : undefined,
-          file_url: mode === "url"  ? fileUrl.trim() : undefined,
-          notes:    notes.trim(),
-        }
-      );
+      const result = await evidenceApi.upload(projectId, req.status_id ?? req.id, {
+        file:     mode === "file" ? fileRef.current?.files?.[0] : undefined,
+        file_url: mode === "url"  ? fileUrl.trim() : undefined,
+        notes:    notes.trim(),
+      });
       onUploaded(result.intelligence);
-    } catch {
-      setError("Gagal mengunggah bukti");
-    } finally {
-      setSaving(false);
-    }
+    } catch { setError("Gagal mengunggah bukti"); }
+    finally { setSaving(false); }
   };
 
-  const inputStyle: React.CSSProperties = {
-    width: "100%", padding: "8px 10px",
-    border: "1px solid rgba(14,13,11,0.15)",
-    borderRadius: 6, fontSize: 13,
-    color: "var(--color-ink)", outline: "none",
-    boxSizing: "border-box",
-  };
+  const inputStyle: React.CSSProperties = { width: "100%", padding: "8px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 13, color: "var(--color-ink)", outline: "none", boxSizing: "border-box" };
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 200, backgroundColor: "rgba(14,13,11,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div style={{ backgroundColor: "white", borderRadius: 12, width: "100%", maxWidth: 460, boxShadow: "0 20px 60px rgba(14,13,11,0.2)", overflow: "hidden" }}>
-
-        {/* Header */}
         <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid rgba(14,13,11,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
@@ -180,15 +157,8 @@ function EvidenceUploadModal({
             <X size={16} />
           </button>
         </div>
-
         <div style={{ padding: "16px 20px 20px" }}>
-          {error && (
-            <div style={{ marginBottom: 12, padding: "8px 12px", backgroundColor: "var(--color-danger-light)", borderRadius: 6, fontSize: 12, color: "var(--color-danger)" }}>
-              {error}
-            </div>
-          )}
-
-          {/* Mode toggle */}
+          {error && <div style={{ marginBottom: 12, padding: "8px 12px", backgroundColor: "var(--color-danger-light)", borderRadius: 6, fontSize: 12, color: "var(--color-danger)" }}>{error}</div>}
           <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
             {(["url", "file"] as const).map((m) => (
               <button key={m} onClick={() => setMode(m)}
@@ -197,55 +167,27 @@ function EvidenceUploadModal({
               </button>
             ))}
           </div>
-
-          {/* URL input */}
           {mode === "url" && (
             <div style={{ marginBottom: 12 }}>
-              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--color-ink-3)", marginBottom: 5 }}>
-                URL Bukti <span style={{ color: "var(--color-danger)" }}>*</span>
-              </label>
-              <input type="url" placeholder="https://drive.google.com/... atau URL lainnya"
-                value={fileUrl} onChange={(e) => setFileUrl(e.target.value)}
-                style={inputStyle} />
-              <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 3 }}>
-                Google Drive, Dropbox, OneDrive, atau URL dokumen lainnya
-              </div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--color-ink-3)", marginBottom: 5 }}>URL Bukti <span style={{ color: "var(--color-danger)" }}>*</span></label>
+              <input type="url" placeholder="https://drive.google.com/..." value={fileUrl} onChange={(e) => setFileUrl(e.target.value)} style={inputStyle} />
+              <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 3 }}>Google Drive, Dropbox, OneDrive, atau URL dokumen lainnya</div>
             </div>
           )}
-
-          {/* File input */}
           {mode === "file" && (
             <div style={{ marginBottom: 12 }}>
-              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--color-ink-3)", marginBottom: 5 }}>
-                File Bukti <span style={{ color: "var(--color-danger)" }}>*</span>
-              </label>
-              <input ref={fileRef} type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
-                style={{ ...inputStyle, padding: "6px 10px" }} />
-              <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 3 }}>
-                PDF, gambar, atau dokumen Word/Excel
-              </div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--color-ink-3)", marginBottom: 5 }}>File Bukti <span style={{ color: "var(--color-danger)" }}>*</span></label>
+              <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" style={{ ...inputStyle, padding: "6px 10px" }} />
             </div>
           )}
-
-          {/* Notes */}
           <div style={{ marginBottom: 18 }}>
-            <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--color-ink-3)", marginBottom: 5 }}>
-              Deskripsi Bukti <span style={{ fontSize: 10, color: "var(--color-ink-3)", fontWeight: 400 }}>(opsional)</span>
-            </label>
-            <textarea rows={2} placeholder="Jelaskan bukti yang diunggah..."
-              value={notes} onChange={(e) => setNotes(e.target.value)}
-              style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
+            <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--color-ink-3)", marginBottom: 5 }}>Deskripsi Bukti <span style={{ fontSize: 10, color: "var(--color-ink-3)", fontWeight: 400 }}>(opsional)</span></label>
+            <textarea rows={2} placeholder="Jelaskan bukti yang diunggah..." value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
           </div>
-
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={onClose} className="btn-ghost" style={{ flex: 1 }} disabled={saving}>Batal</button>
-            <button onClick={handleSubmit} className="btn-accent" disabled={saving}
-              style={{ flex: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-              {saving
-                ? <><Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> Mengunggah…</>
-                : <><Paperclip size={13} /> Upload Bukti</>
-              }
+            <button onClick={handleSubmit} className="btn-accent" disabled={saving} style={{ flex: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              {saving ? <><Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> Mengunggah…</> : <><Paperclip size={13} /> Upload Bukti</>}
             </button>
           </div>
         </div>
@@ -254,23 +196,15 @@ function EvidenceUploadModal({
   );
 }
 
-// ── Sprint 2: Evidence list item ──────────────────────────────
-function EvidenceItem({
-  ev,
-  projectId,
-  reqStatusId,
-  onVerified,
-}: {
-  ev:          RequirementEvidence;
-  projectId:   string;
-  reqStatusId: string;
-  onVerified:  (intel: IntelligenceSummary) => void;
+// ── Evidence list item ────────────────────────────────────────
+function EvidenceItem({ ev, projectId, reqStatusId, onVerified }: {
+  ev: RequirementEvidence; projectId: string; reqStatusId: string;
+  onVerified: (intel: IntelligenceSummary) => void;
 }) {
   const [verifying, setVerifying] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [notes,     setNotes]     = useState("");
   const [action,    setAction]    = useState<"approve" | "reject" | null>(null);
-
   const meta = EVIDENCE_META[ev.verification_status];
 
   const handleVerify = async (act: "approve" | "reject") => {
@@ -278,80 +212,47 @@ function EvidenceItem({
     try {
       const result = await evidenceApi.verify(projectId, reqStatusId, ev.id, act, notes);
       onVerified(result.intelligence);
-    } catch {
-      console.error("Verify failed");
-    } finally {
-      setVerifying(false);
-      setShowNotes(false);
-      setAction(null);
-    }
+    } catch { console.error("Verify failed"); }
+    finally { setVerifying(false); setShowNotes(false); setAction(null); }
   };
 
   return (
     <div style={{ padding: "8px 10px", backgroundColor: meta.bg, border: `1px solid rgba(14,13,11,0.06)`, borderRadius: 6, marginBottom: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {/* File icon + name */}
         <Paperclip size={11} style={{ color: meta.color, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {ev.file_name || (ev.file_url ? "Link eksternal" : "Bukti")}
           </div>
           {ev.file_url_display && (
-            <a href={ev.file_url_display} target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 10, color: "var(--color-accent)", textDecoration: "none" }}>
-              Lihat bukti →
-            </a>
+            <a href={ev.file_url_display} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "var(--color-accent)", textDecoration: "none" }}>Lihat bukti →</a>
           )}
-          {ev.notes && (
-            <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 1 }}>{ev.notes}</div>
-          )}
+          {ev.notes && <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 1 }}>{ev.notes}</div>}
           <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 1 }}>
             {ev.uploaded_by_name} · {new Date(ev.uploaded_at).toLocaleDateString("id-ID")}
           </div>
         </div>
-        {/* Status badge */}
-        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999, color: meta.color, backgroundColor: "white", flexShrink: 0 }}>
-          {meta.label}
-        </span>
+        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999, color: meta.color, backgroundColor: "white", flexShrink: 0 }}>{meta.label}</span>
       </div>
-
-      {/* Verifier notes if rejected */}
       {ev.verification_status === "rejected" && ev.verifier_notes && (
         <div style={{ marginTop: 6, fontSize: 11, color: "var(--color-danger)", padding: "4px 8px", backgroundColor: "var(--color-danger-light)", borderRadius: 4 }}>
           Alasan penolakan: {ev.verifier_notes}
         </div>
       )}
-
-      {/* Approve/reject buttons — only if pending */}
       {ev.verification_status === "pending" && (
         <div style={{ marginTop: 8 }}>
           {!showNotes ? (
             <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={() => { setAction("approve"); setShowNotes(true); }} disabled={verifying}
-                style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-success)", color: "white", opacity: verifying ? 0.5 : 1 }}>
-                ✓ Setujui
-              </button>
-              <button onClick={() => { setAction("reject"); setShowNotes(true); }} disabled={verifying}
-                style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(220,38,38,0.3)", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "white", color: "var(--color-danger)", opacity: verifying ? 0.5 : 1 }}>
-                ✕ Tolak
-              </button>
+              <button onClick={() => { setAction("approve"); setShowNotes(true); }} disabled={verifying} style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-success)", color: "white", opacity: verifying ? 0.5 : 1 }}>✓ Setujui</button>
+              <button onClick={() => { setAction("reject"); setShowNotes(true); }} disabled={verifying} style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(220,38,38,0.3)", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "white", color: "var(--color-danger)", opacity: verifying ? 0.5 : 1 }}>✕ Tolak</button>
             </div>
           ) : (
             <div>
-              <textarea rows={2} placeholder={action === "reject" ? "Alasan penolakan..." : "Catatan (opsional)..."}
-                value={notes} onChange={(e) => setNotes(e.target.value)}
-                style={{ width: "100%", padding: "6px 8px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 4, fontSize: 11, resize: "none", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 6 }} />
+              <textarea rows={2} placeholder={action === "reject" ? "Alasan penolakan..." : "Catatan (opsional)..."} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ width: "100%", padding: "6px 8px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 4, fontSize: 11, resize: "none", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 6 }} />
               <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={() => setShowNotes(false)} disabled={verifying}
-                  style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", fontSize: 10, cursor: "pointer", backgroundColor: "white", color: "var(--color-ink-3)" }}>
-                  Batal
-                </button>
-                <button onClick={() => handleVerify(action!)} disabled={verifying}
-                  style={{ flex: 2, padding: "4px 8px", borderRadius: 4, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: action === "approve" ? "var(--color-success)" : "var(--color-danger)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-                  {verifying
-                    ? <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} />
-                    : action === "approve" ? "✓ Konfirmasi Setujui" : "✕ Konfirmasi Tolak"
-                  }
+                <button onClick={() => setShowNotes(false)} disabled={verifying} style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", fontSize: 10, cursor: "pointer", backgroundColor: "white", color: "var(--color-ink-3)" }}>Batal</button>
+                <button onClick={() => handleVerify(action!)} disabled={verifying} style={{ flex: 2, padding: "4px 8px", borderRadius: 4, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: action === "approve" ? "var(--color-success)" : "var(--color-danger)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                  {verifying ? <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} /> : action === "approve" ? "✓ Konfirmasi Setujui" : "✕ Konfirmasi Tolak"}
                 </button>
               </div>
             </div>
@@ -362,7 +263,7 @@ function EvidenceItem({
   );
 }
 
-// ── Requirement row — Sprint 2: adds evidence section ────────
+// ── Requirement row — Sprint 4: dependency-aware ──────────────
 type ReqStatus = "pending" | "in_progress" | "menunggu_verifikasi" | "completed" | "not_applicable";
 
 function RequirementRow({
@@ -373,6 +274,7 @@ function RequirementRow({
   onUpdated: (intel: IntelligenceSummary) => void;
 }) {
   const [saving,          setSaving]          = useState(false);
+  const [depError,        setDepError]        = useState<string | null>(null);
   const [notes]                               = useState(req.notes);
   const [showEvidence,    setShowEvidence]    = useState(false);
   const [evidenceList,    setEvidenceList]    = useState<RequirementEvidence[]>([]);
@@ -382,13 +284,19 @@ function RequirementRow({
   const handleStatusChange = async (newStatus: ReqStatus) => {
     if (newStatus === req.status) return;
     setSaving(true);
+    setDepError(null);
     try {
       const intel = await projectsApi.updateRequirement(
         projectId, req.status_id ?? req.id, { status: newStatus, notes }
       );
       onUpdated(intel);
-    } catch (e) { console.error(e); }
-    finally { setSaving(false); }
+    } catch (e: unknown) {
+      // Sprint 4: catch dependency_blocked errors from API
+      const err = e as { response?: { data?: { message?: string; error_type?: string } } };
+      if (err?.response?.data?.error_type === "dependency_blocked") {
+        setDepError(err.response.data.message ?? "Prasyarat belum selesai");
+      }
+    } finally { setSaving(false); }
   };
 
   const loadEvidence = async () => {
@@ -417,71 +325,105 @@ function RequirementRow({
     onUpdated(intel);
   };
 
-  // Sprint 2: menunggu_verifikasi added to statusConfig
   const statusConfig: Record<ReqStatus, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-    pending:               { label: "Belum Dimulai",      color: "var(--color-ink-3)",   bg: "var(--color-paper-2)",       icon: <Circle size={14} />       },
-    in_progress:           { label: "Sedang Diproses",    color: "var(--color-warning)", bg: "var(--color-warning-light)", icon: <Clock size={14} />        },
-    menunggu_verifikasi:   { label: "Menunggu Verifikasi",color: "var(--color-accent)",  bg: "var(--color-accent-light)",  icon: <Paperclip size={14} />    }, // Sprint 2
-    completed:             { label: "Selesai",            color: "var(--color-success)", bg: "var(--color-success-light)", icon: <CheckCircle2 size={14} /> },
-    not_applicable:        { label: "Tidak Berlaku",      color: "var(--color-ink-3)",   bg: "var(--color-paper-2)",       icon: <Circle size={14} />       },
+    pending:             { label: "Belum Dimulai",      color: "var(--color-ink-3)",   bg: "var(--color-paper-2)",       icon: <Circle size={14} />       },
+    in_progress:         { label: "Sedang Diproses",    color: "var(--color-warning)", bg: "var(--color-warning-light)", icon: <Clock size={14} />        },
+    menunggu_verifikasi: { label: "Menunggu Verifikasi",color: "var(--color-accent)",  bg: "var(--color-accent-light)",  icon: <Paperclip size={14} />    },
+    completed:           { label: "Selesai",            color: "var(--color-success)", bg: "var(--color-success-light)", icon: <CheckCircle2 size={14} /> },
+    not_applicable:      { label: "Tidak Berlaku",      color: "var(--color-ink-3)",   bg: "var(--color-paper-2)",       icon: <Circle size={14} />       },
   };
 
   const current    = statusConfig[req.status as ReqStatus] ?? statusConfig.pending;
-  const isBlocking = req.is_mandatory && !["completed", "menunggu_verifikasi"].includes(req.status);
+  const isCompleted = req.status === "completed";
+
+  // Sprint 4: dependency state drives the entire row appearance
+  const isDepBlocked = req.is_dependency_blocked === true;
+  const isBlocking   = req.is_mandatory && !["completed", "menunggu_verifikasi"].includes(req.status) && !isDepBlocked;
+
+  // Sprint 4: row background logic
+  const rowBg =
+    isCompleted   ? "var(--color-success-light)" :
+    isDepBlocked  ? "rgba(14,13,11,0.03)"        :  // ← muted grey for blocked
+    isBlocking    ? "rgba(220,38,38,0.04)"       :
+                    "var(--color-paper-2)";
+
+  const rowBorder =
+    isCompleted   ? "1px solid transparent"              :
+    isDepBlocked  ? "1px solid rgba(14,13,11,0.08)"     :  // ← subtle border
+    isBlocking    ? "1px solid rgba(220,38,38,0.15)"    :
+                    "1px solid transparent";
 
   return (
     <>
-      {/* Evidence upload modal */}
       {showUploadModal && req.status_id && (
-        <EvidenceUploadModal
-          req={req}
-          projectId={projectId}
-          onUploaded={handleEvidenceUploaded}
-          onClose={() => setShowUploadModal(false)}
-        />
+        <EvidenceUploadModal req={req} projectId={projectId} onUploaded={handleEvidenceUploaded} onClose={() => setShowUploadModal(false)} />
       )}
 
-      <div style={{
-        padding: "12px 14px", borderRadius: 8, marginBottom: 8,
-        backgroundColor: req.status === "completed" ? "var(--color-success-light)" : isBlocking ? "rgba(220,38,38,0.04)" : "var(--color-paper-2)",
-        border: isBlocking ? "1px solid rgba(220,38,38,0.15)" : "1px solid transparent",
-        transition: "all 0.2s",
-      }}>
+      <div style={{ padding: "12px 14px", borderRadius: 8, marginBottom: 8, backgroundColor: rowBg, border: rowBorder, transition: "all 0.2s", opacity: isDepBlocked ? 0.7 : 1 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {/* Status icon */}
-          <div style={{ color: current.color, flexShrink: 0 }}>
-            {saving ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : current.icon}
+
+          {/* Status icon — Sprint 4: lock icon for dep-blocked */}
+          <div style={{ color: isDepBlocked ? "var(--color-ink-3)" : current.color, flexShrink: 0 }}>
+            {saving
+              ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+              : isDepBlocked
+              ? <Lock size={14} />
+              : current.icon
+            }
           </div>
 
           {/* Name + badges */}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: req.status === "completed" ? "var(--color-ink-3)" : "var(--color-ink)", textDecoration: req.status === "completed" ? "line-through" : "none" }}>
+              <span style={{
+                fontSize: 13, fontWeight: 500,
+                color: isCompleted ? "var(--color-ink-3)" : isDepBlocked ? "var(--color-ink-3)" : "var(--color-ink)",
+                textDecoration: isCompleted ? "line-through" : "none",
+              }}>
                 {req.name}
               </span>
-              {req.is_mandatory && !["completed", "menunggu_verifikasi"].includes(req.status) && (
+
+              {/* Sprint 4: dependency blocked badge */}
+              {isDepBlocked && (
+                <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 4, backgroundColor: "rgba(14,13,11,0.08)", color: "var(--color-ink-3)", display: "flex", alignItems: "center", gap: 3 }}>
+                  <Lock size={9} /> Menunggu prasyarat
+                </span>
+              )}
+
+              {/* Mandatory badge — only if blocking AND not dep-blocked */}
+              {req.is_mandatory && !isCompleted && !isDepBlocked && req.status !== "menunggu_verifikasi" && (
                 <span style={{ fontSize: 10, color: "var(--color-danger)", fontWeight: 600 }}>⚡ Wajib</span>
               )}
               {!req.is_mandatory && (
                 <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>opsional</span>
               )}
-              {/* Sprint 2: evidence count badge */}
+
+              {/* Evidence count badge */}
               {req.evidence_count > 0 && (
-                <button onClick={toggleEvidence}
-                  style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 999, backgroundColor: "var(--color-accent-light)", color: "var(--color-accent)", border: "none", cursor: "pointer" }}>
+                <button onClick={toggleEvidence} style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 999, backgroundColor: "var(--color-accent-light)", color: "var(--color-accent)", border: "none", cursor: "pointer" }}>
                   📎 {req.evidence_count} bukti
                 </button>
               )}
-              {/* Sprint 2: pending evidence indicator */}
               {req.has_pending_evidence && (
-                <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-warning)" }}>
-                  ⏳ Menunggu review
-                </span>
+                <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-warning)" }}>⏳ Menunggu review</span>
               )}
             </div>
-            {req.description && (
+
+            {req.description && !isDepBlocked && (
               <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>{req.description}</div>
             )}
+
+            {/* Sprint 4: show prerequisite chain for blocked rows */}
+            {isDepBlocked && req.unmet_prerequisites && req.unmet_prerequisites.length > 0 && (
+              <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                <Lock size={10} />
+                Selesaikan dulu:{" "}
+                <span style={{ fontWeight: 600, color: "var(--color-ink)" }}>
+                  {req.unmet_prerequisites.join(" → ")}
+                </span>
+              </div>
+            )}
+
             {req.completed_at && (
               <div style={{ fontSize: 10, color: "var(--color-success)", marginTop: 2 }}>
                 ✓ Selesai {new Date(req.completed_at).toLocaleDateString("id-ID")}
@@ -489,19 +431,22 @@ function RequirementRow({
             )}
           </div>
 
-          {/* Action buttons */}
+          {/* Action buttons — Sprint 4: hidden when dep-blocked */}
           <div style={{ display: "flex", gap: 4, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
-            {req.status === "completed" ? (
+            {isCompleted ? (
               <button onClick={() => handleStatusChange("pending")} disabled={saving}
                 style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", fontSize: 10, cursor: "pointer", backgroundColor: "white", color: "var(--color-ink-3)", opacity: saving ? 0.5 : 1 }}>
                 Batalkan
               </button>
             ) : req.status === "menunggu_verifikasi" ? (
-              // Sprint 2: show evidence toggle when awaiting verification
-              <button onClick={toggleEvidence}
-                style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-accent-light)", color: "var(--color-accent)" }}>
+              <button onClick={toggleEvidence} style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-accent-light)", color: "var(--color-accent)" }}>
                 {showEvidence ? "Tutup" : "Lihat Bukti"}
               </button>
+            ) : isDepBlocked ? (
+              // Sprint 4: dep-blocked rows show ONLY the prerequisite info, no action buttons
+              <span style={{ fontSize: 10, color: "var(--color-ink-3)", fontStyle: "italic", padding: "4px 8px" }}>
+                🔒 Terkunci
+              </span>
             ) : (
               <>
                 {req.status !== "in_progress" && (
@@ -510,7 +455,6 @@ function RequirementRow({
                     Diproses
                   </button>
                 )}
-                {/* Sprint 2: Upload Bukti button */}
                 {req.status_id && (
                   <button onClick={() => setShowUploadModal(true)} disabled={saving}
                     style={{ padding: "4px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-accent-light)", color: "var(--color-accent)", border: "1px solid rgba(14,13,11,0.08)", display: "flex", alignItems: "center", gap: 3 }}>
@@ -526,16 +470,23 @@ function RequirementRow({
           </div>
         </div>
 
-        {/* Sprint 2: Evidence list (expandable) */}
+        {/* Sprint 4: dependency error message */}
+        {depError && (
+          <div style={{ marginTop: 8, padding: "6px 10px", backgroundColor: "var(--color-warning-light)", borderRadius: 6, fontSize: 11, color: "var(--color-warning)", display: "flex", alignItems: "center", gap: 6 }}>
+            <Lock size={11} /> {depError}
+            <button onClick={() => setDepError(null)} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: "var(--color-warning)", fontSize: 12 }}>✕</button>
+          </div>
+        )}
+
+        {/* Evidence list panel */}
         {showEvidence && (
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(14,13,11,0.06)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                 Bukti ({evidenceList.length})
               </span>
-              {req.status_id && req.status !== "completed" && (
-                <button onClick={() => setShowUploadModal(true)}
-                  style={{ fontSize: 10, fontWeight: 600, color: "var(--color-accent)", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>
+              {req.status_id && !isCompleted && !isDepBlocked && (
+                <button onClick={() => setShowUploadModal(true)} style={{ fontSize: 10, fontWeight: 600, color: "var(--color-accent)", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>
                   <Paperclip size={10} /> + Tambah Bukti
                 </button>
               )}
@@ -550,13 +501,7 @@ function RequirementRow({
               </div>
             ) : (
               evidenceList.map((ev) => (
-                <EvidenceItem
-                  key={ev.id}
-                  ev={ev}
-                  projectId={projectId}
-                  reqStatusId={req.status_id ?? req.id}
-                  onVerified={handleEvidenceVerified}
-                />
+                <EvidenceItem key={ev.id} ev={ev} projectId={projectId} reqStatusId={req.status_id ?? req.id} onVerified={handleEvidenceVerified} />
               ))
             )}
           </div>
@@ -566,7 +511,7 @@ function RequirementRow({
   );
 }
 
-// ── Permit badge — UNCHANGED ──────────────────────────────────
+// ── Permit badge ──────────────────────────────────────────────
 function PermitBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; color: string; bg: string }> = {
     belum:    { label: "Belum Dimulai", color: "var(--color-ink-3)",   bg: "var(--color-paper-2)"       },
@@ -575,14 +520,10 @@ function PermitBadge({ status }: { status: string }) {
     rejected: { label: "Ditolak",       color: "var(--color-danger)",  bg: "var(--color-danger-light)"  },
   };
   const s = map[status] ?? map.belum;
-  return (
-    <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 999, color: s.color, backgroundColor: s.bg }}>
-      {s.label}
-    </span>
-  );
+  return <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 999, color: s.color, backgroundColor: s.bg }}>{s.label}</span>;
 }
 
-// ── Sprint 1 components — UNCHANGED ──────────────────────────
+// ── Sprint 1: Alerts panel ────────────────────────────────────
 function AlertsPanel({ alerts }: { alerts: IntelligenceSummary["alerts"] }) {
   if (!alerts || alerts.length === 0) {
     return (
@@ -611,6 +552,7 @@ function AlertsPanel({ alerts }: { alerts: IntelligenceSummary["alerts"] }) {
   );
 }
 
+// ── Sprint 1: Readiness dimensions ───────────────────────────
 function ReadinessDimensions({ dims }: { dims: IntelligenceSummary["readiness_dimensions"] }) {
   if (!dims) return null;
   const items = [
@@ -640,19 +582,12 @@ function ReadinessDimensions({ dims }: { dims: IntelligenceSummary["readiness_di
   );
 }
 
+// ── Sprint 1: Parallel stage toggles ─────────────────────────
 function ParallelStageToggles({ project, onUpdated }: { project: Project; onUpdated: (p: Project) => void }) {
   const [loading5A, setLoading5A] = useState(false);
   const [loading5B, setLoading5B] = useState(false);
-  const toggle5A = async () => {
-    setLoading5A(true);
-    try { const u = await projectsApi.toggleSelling(project.id, !project.is_selling); onUpdated(u); }
-    catch (e) { console.error(e); } finally { setLoading5A(false); }
-  };
-  const toggle5B = async () => {
-    setLoading5B(true);
-    try { const u = await projectsApi.toggleConstructing(project.id, !project.is_constructing); onUpdated(u); }
-    catch (e) { console.error(e); } finally { setLoading5B(false); }
-  };
+  const toggle5A = async () => { setLoading5A(true); try { const u = await projectsApi.toggleSelling(project.id, !project.is_selling); onUpdated(u); } catch (e) { console.error(e); } finally { setLoading5A(false); } };
+  const toggle5B = async () => { setLoading5B(true); try { const u = await projectsApi.toggleConstructing(project.id, !project.is_constructing); onUpdated(u); } catch (e) { console.error(e); } finally { setLoading5B(false); } };
   return (
     <div style={{ display: "flex", gap: 8 }}>
       <button onClick={toggle5A} disabled={loading5A || !project.parallel_stages?.can_sell_now}
@@ -683,18 +618,10 @@ export default function ProjectDetailPage() {
 
   const loadProject = async () => {
     try {
-      const [p, i] = await Promise.all([
-        projectsApi.get(id),
-        projectsApi.getIntelligence(id),
-      ]);
-      setProject(p);
-      setIntel(i);
-      setForm(buildForm(p));
-    } catch {
-      setError("Gagal memuat proyek");
-    } finally {
-      setLoading(false);
-    }
+      const [p, i] = await Promise.all([projectsApi.get(id), projectsApi.getIntelligence(id)]);
+      setProject(p); setIntel(i); setForm(buildForm(p));
+    } catch { setError("Gagal memuat proyek"); }
+    finally { setLoading(false); }
   };
 
   useEffect(() => { loadProject(); }, [id]);
@@ -712,23 +639,19 @@ export default function ProjectDetailPage() {
 
   const handleSave = async () => {
     if (!project) return;
-    setSaving(true);
-    setError(null);
+    setSaving(true); setError(null);
     try {
       const updated = await projectsApi.update(project.id, form);
-      setProject(updated);
-      setForm(buildForm(updated));
+      setProject(updated); setForm(buildForm(updated));
       const i = await projectsApi.getIntelligence(project.id);
-      setIntel(i);
-      setEditMode(false);
+      setIntel(i); setEditMode(false);
     } catch { setError("Gagal menyimpan perubahan"); }
     finally { setSaving(false); }
   };
 
   const handleAdvance = async () => {
     if (!project) return;
-    setAdvancing(true);
-    setError(null);
+    setAdvancing(true); setError(null);
     try {
       const updated = await projectsApi.advance(project.id);
       setProject(updated);
@@ -765,6 +688,9 @@ export default function ProjectDetailPage() {
   const mandatory = intel.requirements.filter((r) => r.is_mandatory);
   const optional  = intel.requirements.filter((r) => !r.is_mandatory);
 
+  // Sprint 4: count dependency-blocked requirements
+  const depBlockedCount = intel.requirements.filter((r) => r.is_dependency_blocked).length;
+
   return (
     <div style={{ maxWidth: 960, margin: "0 auto" }}>
 
@@ -784,6 +710,12 @@ export default function ProjectDetailPage() {
             )}
             {project.is_constructing && (
               <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999, backgroundColor: "var(--color-accent-light)", color: "var(--color-accent)" }}>5B Aktif Bangun</span>
+            )}
+            {/* Sprint 4: show dep-blocked count in header */}
+            {depBlockedCount > 0 && (
+              <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999, backgroundColor: "rgba(14,13,11,0.06)", color: "var(--color-ink-3)", display: "flex", alignItems: "center", gap: 3 }}>
+                <Lock size={9} /> {depBlockedCount} terkunci
+              </span>
             )}
           </div>
           <h1 style={{ fontSize: 26, fontWeight: 700, color: "var(--color-ink)", margin: 0, marginBottom: 4 }}>{project.name}</h1>
@@ -821,6 +753,12 @@ export default function ProjectDetailPage() {
             <div style={{ textAlign: "center", padding: "12px", backgroundColor: intel.blocking_count > 0 ? "var(--color-danger-light)" : "var(--color-success-light)", borderRadius: 8 }}>
               <div style={{ fontSize: 24, fontWeight: 800, color: intel.blocking_count > 0 ? "var(--color-danger)" : "var(--color-success)" }}>{intel.blocking_count}</div>
               <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>Item Blokir</div>
+              {/* Sprint 4: show dep-blocked count */}
+              {depBlockedCount > 0 && (
+                <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
+                  <Lock size={9} /> {depBlockedCount} terkunci
+                </div>
+              )}
             </div>
             <div style={{ textAlign: "center", padding: "12px", backgroundColor: riskMeta.bg, borderRadius: 8 }}>
               <div style={{ fontSize: 18, fontWeight: 800, color: riskMeta.color }}>{riskMeta.label}</div>
@@ -853,7 +791,7 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* ── Sprint 1: Alerts + Dimensions ── */}
+      {/* ── Alerts + Dimensions row ── */}
       {((intel.alerts && intel.alerts.length > 0) || intel.readiness_dimensions) && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
           <div className="card">
@@ -900,11 +838,20 @@ export default function ProjectDetailPage() {
 
         {/* ── Requirements ── */}
         <div className="card">
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 4 }}>
             Checklist Tahap {meta.label}
-            <span style={{ fontSize: 11, fontWeight: 400, color: "var(--color-ink-3)", marginLeft: 8 }}>
-              {intel.requirements.filter(r => r.status === "completed").length}/{intel.requirements.length} selesai
-            </span>
+          </div>
+          {/* Sprint 4: dependency legend */}
+          {depBlockedCount > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12, padding: "6px 10px", backgroundColor: "rgba(14,13,11,0.04)", borderRadius: 6 }}>
+              <Lock size={11} style={{ color: "var(--color-ink-3)" }} />
+              <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>
+                {depBlockedCount} requirement terkunci — selesaikan prasyarat terlebih dahulu
+              </span>
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginBottom: 12 }}>
+            {intel.requirements.filter(r => r.status === "completed").length}/{intel.requirements.length} selesai
           </div>
 
           {intel.requirements.length === 0 ? (
@@ -989,9 +936,7 @@ export default function ProjectDetailPage() {
                       </span>
                     </div>
                     {project.collection_efficiency.total_arrears > 0 && (
-                      <div style={{ fontSize: 11, color: "var(--color-danger)" }}>
-                        Menunggak: Rp {project.collection_efficiency.total_arrears.toLocaleString("id-ID")}
-                      </div>
+                      <div style={{ fontSize: 11, color: "var(--color-danger)" }}>Menunggak: Rp {project.collection_efficiency.total_arrears.toLocaleString("id-ID")}</div>
                     )}
                   </div>
                 )}
@@ -1023,9 +968,7 @@ export default function ProjectDetailPage() {
                         <option value="approved">Disetujui</option>
                         <option value="rejected">Ditolak</option>
                       </select>
-                    ) : (
-                      <PermitBadge status={permit.status} />
-                    )}
+                    ) : <PermitBadge status={permit.status} />}
                   </div>
                 ))}
               </div>
