@@ -19,7 +19,7 @@ export type Trend        = "improving" | "stable" | "declining";
 export type ReqStatus =
   | "pending"
   | "in_progress"
-  | "menunggu_verifikasi"   // ← Sprint 2
+  | "menunggu_verifikasi" 
   | "completed"
   | "not_applicable";
 
