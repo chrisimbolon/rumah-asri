@@ -137,7 +137,7 @@ export interface RequirementItem {
   has_pending_evidence:   boolean;
   // Sprint 3
   audit_count: number;
-  // Sprint 4: dependency fields  ← ADD THESE
+  // Sprint 4: dependency fields 
   prerequisites:         string[];   // prereq names
   unmet_prerequisites:   string[];   // which prereqs are not done yet
   is_dependency_blocked: boolean;    // true if any prereq is unmet
