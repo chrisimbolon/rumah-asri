@@ -170,7 +170,7 @@ export interface RiskFactor {
 }
 
 export interface RiskTrendPoint {
-  date:  string;   // ISO date "2026-06-28"
+  date:  string;   // ISO date "2026-06-28" - this should be indonesian format
   score: number;   // 0-100
   level: string;   // "low" | "medium" | "high"
 }
