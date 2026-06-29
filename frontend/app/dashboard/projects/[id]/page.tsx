@@ -15,6 +15,7 @@ import {
   ALERT_META,
   commentApi,
   EVIDENCE_META,
+  EVIDENCE_VERSION_META,
   evidenceApi,
   getRiskScoreMeta,
   IntelligenceSummary,
@@ -30,7 +31,7 @@ import {
   RISK_META,
   STAGE_META,
   TREND_META,
-  UpdateProjectPayload,
+  UpdateProjectPayload
 } from "@/lib/api/projects";
 import {
   AlertTriangle,
@@ -203,15 +204,19 @@ function EvidenceUploadModal({
   );
 }
 
-// ── Evidence list item ────────────────────────────────────────
-function EvidenceItem({ ev, projectId, reqStatusId, onVerified }: {
-  ev: RequirementEvidence; projectId: string; reqStatusId: string;
-  onVerified: (intel: IntelligenceSummary) => void;
+// ── Sprint 8: Evidence item with version tracking ─────────────
+function EvidenceItem({ ev, projectId, reqStatusId, onVerified, onResubmit }: {
+  ev:           RequirementEvidence;
+  projectId:    string;
+  reqStatusId:  string;
+  onVerified:   (intel: IntelligenceSummary) => void;
+  onResubmit:   () => void;   // Sprint 8: triggers re-upload modal
 }) {
-  const [verifying, setVerifying] = useState(false);
-  const [showNotes, setShowNotes] = useState(false);
-  const [notes,     setNotes]     = useState("");
-  const [action,    setAction]    = useState<"approve" | "reject" | null>(null);
+  const [verifying,    setVerifying]    = useState(false);
+  const [showNotes,    setShowNotes]    = useState(false);
+  const [notes,        setNotes]        = useState("");
+  const [action,       setAction]       = useState<"approve" | "reject" | null>(null);
+  const [showHistory,  setShowHistory]  = useState(false);
   const meta = EVIDENCE_META[ev.verification_status];
 
   const handleVerify = async (act: "approve" | "reject") => {
@@ -219,49 +224,200 @@ function EvidenceItem({ ev, projectId, reqStatusId, onVerified }: {
     try {
       const result = await evidenceApi.verify(projectId, reqStatusId, ev.id, act, notes);
       onVerified(result.intelligence);
-    } catch { console.error("Verify failed"); }
-    finally { setVerifying(false); setShowNotes(false); setAction(null); }
+    } catch (e: unknown) {
+      console.error("Verify failed", e);
+    } finally { setVerifying(false); setShowNotes(false); setAction(null); }
   };
 
+  const hasHistory    = ev.version_chain && ev.version_chain.length > 1;
+  const isRejected    = ev.verification_status === "rejected";
+  const isApproved    = ev.verification_status === "approved";
+  const isPending     = ev.verification_status === "pending";
+
   return (
-    <div style={{ padding: "8px 10px", backgroundColor: meta.bg, border: `1px solid rgba(14,13,11,0.06)`, borderRadius: 6, marginBottom: 6 }}>
+    <div style={{
+      padding: "10px 12px",
+      backgroundColor: meta.bg,
+      border: `1px solid rgba(14,13,11,0.06)`,
+      borderRadius: 8,
+      marginBottom: 8,
+    }}>
+      {/* ── Header row ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <Paperclip size={11} style={{ color: meta.color, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {ev.file_name || (ev.file_url ? "Link eksternal" : "Bukti")}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, fontWeight: 500, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {ev.file_name || (ev.file_url ? "Link eksternal" : "Bukti")}
+            </span>
+            {/* Sprint 8: version badge */}
+            <span style={{
+              fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 999,
+              backgroundColor: "white", color: meta.color, border: `1px solid ${meta.color}33`,
+            }}>
+              {ev.version_label}
+            </span>
+            {!ev.is_latest && (
+              <span style={{ fontSize: 10, color: "var(--color-ink-3)", fontStyle: "italic" }}>
+                (digantikan)
+              </span>
+            )}
           </div>
           {ev.file_url_display && (
-            <a href={ev.file_url_display} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "var(--color-accent)", textDecoration: "none" }}>Lihat bukti →</a>
+            <a href={ev.file_url_display} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 10, color: "var(--color-accent)", textDecoration: "none" }}>
+              Lihat bukti →
+            </a>
           )}
-          {ev.notes && <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 1 }}>{ev.notes}</div>}
+          {ev.notes && (
+            <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 1 }}>{ev.notes}</div>
+          )}
           <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 1 }}>
             {ev.uploaded_by_name} · {new Date(ev.uploaded_at).toLocaleDateString("id-ID")}
           </div>
         </div>
-        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999, color: meta.color, backgroundColor: "white", flexShrink: 0 }}>{meta.label}</span>
+        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999, color: meta.color, backgroundColor: "white", flexShrink: 0 }}>
+          {meta.label}
+        </span>
       </div>
-      {ev.verification_status === "rejected" && ev.verifier_notes && (
-        <div style={{ marginTop: 6, fontSize: 11, color: "var(--color-danger)", padding: "4px 8px", backgroundColor: "var(--color-danger-light)", borderRadius: 4 }}>
-          Alasan penolakan: {ev.verifier_notes}
+
+      {/* ── Sprint 8: Rejection reason + resubmit ── */}
+      {isRejected && ev.is_latest && (
+        <div style={{ marginTop: 8, padding: "8px 10px", backgroundColor: "var(--color-danger-light)", borderRadius: 6, border: "1px solid rgba(220,38,38,0.15)" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-danger)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+            Alasan Penolakan
+          </div>
+          {ev.verifier_notes && (
+            <div style={{ fontSize: 11, color: "var(--color-danger)", marginBottom: 8, lineHeight: 1.4 }}>
+              {ev.verifier_notes}
+            </div>
+          )}
+          <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginBottom: 6 }}>
+            Diverifikasi oleh: {ev.verifier_name} · {ev.verified_at ? new Date(ev.verified_at).toLocaleDateString("id-ID") : "—"}
+          </div>
+          {/* Sprint 8: Re-upload button */}
+          <button
+            onClick={onResubmit}
+            style={{
+              width: "100%", padding: "6px 10px", borderRadius: 6,
+              border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer",
+              backgroundColor: "var(--color-danger)", color: "white",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+            }}>
+            <Paperclip size={11} /> Upload Ulang Bukti
+          </button>
         </div>
       )}
-      {ev.verification_status === "pending" && (
+
+      {/* ── Sprint 8: Approved info ── */}
+      {isApproved && (
+        <div style={{ marginTop: 6, fontSize: 10, color: "var(--color-success)", display: "flex", alignItems: "center", gap: 4 }}>
+          <CheckCircle2 size={10} />
+          Diverifikasi oleh {ev.verifier_name} · {ev.verified_at ? new Date(ev.verified_at).toLocaleDateString("id-ID") : ""}
+        </div>
+      )}
+
+      {/* ── Sprint 8: Eligible verifiers (pending only) ── */}
+      {isPending && ev.is_latest && ev.eligible_verifiers && ev.eligible_verifiers.length > 0 && (
+        <div style={{ marginTop: 6, fontSize: 10, color: "var(--color-ink-3)" }}>
+          Dapat diverifikasi oleh:{" "}
+          <span style={{ fontWeight: 600, color: "var(--color-ink)" }}>
+            {ev.eligible_verifiers.map(v => v.full_name).join(", ")}
+          </span>
+        </div>
+      )}
+
+      {/* ── Sprint 8: Self-upload warning ── */}
+      {isPending && ev.is_latest && !ev.can_verify && ev.cannot_verify_reason && (
+        <div style={{ marginTop: 6, fontSize: 10, color: "var(--color-warning)", display: "flex", alignItems: "center", gap: 4 }}>
+          <Lock size={10} /> {ev.cannot_verify_reason}
+        </div>
+      )}
+
+      {/* ── Verify buttons (pending + is_latest + can_verify) ── */}
+      {isPending && ev.is_latest && ev.can_verify && (
         <div style={{ marginTop: 8 }}>
           {!showNotes ? (
             <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={() => { setAction("approve"); setShowNotes(true); }} disabled={verifying} style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-success)", color: "white", opacity: verifying ? 0.5 : 1 }}>✓ Setujui</button>
-              <button onClick={() => { setAction("reject"); setShowNotes(true); }} disabled={verifying} style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(220,38,38,0.3)", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "white", color: "var(--color-danger)", opacity: verifying ? 0.5 : 1 }}>✕ Tolak</button>
+              <button
+                onClick={() => { setAction("approve"); setShowNotes(true); }}
+                disabled={verifying}
+                style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-success)", color: "white", opacity: verifying ? 0.5 : 1 }}>
+                ✓ Setujui
+              </button>
+              <button
+                onClick={() => { setAction("reject"); setShowNotes(true); }}
+                disabled={verifying}
+                style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(220,38,38,0.3)", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: "white", color: "var(--color-danger)", opacity: verifying ? 0.5 : 1 }}>
+                ✕ Tolak
+              </button>
             </div>
           ) : (
             <div>
-              <textarea rows={2} placeholder={action === "reject" ? "Alasan penolakan..." : "Catatan (opsional)..."} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ width: "100%", padding: "6px 8px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 4, fontSize: 11, resize: "none", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 6 }} />
+              <textarea
+                rows={2}
+                placeholder={action === "reject" ? "Alasan penolakan (wajib)..." : "Catatan (opsional)..."}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                style={{ width: "100%", padding: "6px 8px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 4, fontSize: 11, resize: "none", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 6 }} />
               <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={() => setShowNotes(false)} disabled={verifying} style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", fontSize: 10, cursor: "pointer", backgroundColor: "white", color: "var(--color-ink-3)" }}>Batal</button>
-                <button onClick={() => handleVerify(action!)} disabled={verifying} style={{ flex: 2, padding: "4px 8px", borderRadius: 4, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: action === "approve" ? "var(--color-success)" : "var(--color-danger)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-                  {verifying ? <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} /> : action === "approve" ? "✓ Konfirmasi Setujui" : "✕ Konfirmasi Tolak"}
+                <button
+                  onClick={() => { setShowNotes(false); setNotes(""); setAction(null); }}
+                  disabled={verifying}
+                  style={{ flex: 1, padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", fontSize: 10, cursor: "pointer", backgroundColor: "white", color: "var(--color-ink-3)" }}>
+                  Batal
+                </button>
+                <button
+                  onClick={() => handleVerify(action!)}
+                  disabled={verifying || (action === "reject" && !notes.trim())}
+                  style={{ flex: 2, padding: "4px 8px", borderRadius: 4, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", backgroundColor: action === "approve" ? "var(--color-success)" : "var(--color-danger)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", gap: 4, opacity: (verifying || (action === "reject" && !notes.trim())) ? 0.5 : 1 }}>
+                  {verifying
+                    ? <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} />
+                    : action === "approve" ? "✓ Konfirmasi Setujui" : "✕ Konfirmasi Tolak"
+                  }
                 </button>
               </div>
+              {action === "reject" && !notes.trim() && (
+                <div style={{ fontSize: 10, color: "var(--color-danger)", marginTop: 4 }}>
+                  Alasan penolakan wajib diisi
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Sprint 8: Version history toggle ── */}
+      {hasHistory && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(14,13,11,0.06)" }}>
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            style={{ fontSize: 10, color: "var(--color-ink-3)", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+            🕐 {showHistory ? "Sembunyikan" : "Lihat"} riwayat versi ({ev.version_chain.length} versi)
+          </button>
+          {showHistory && (
+            <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+              {ev.version_chain.map((v) => {
+                const vMeta = EVIDENCE_VERSION_META[v.verification_status] ?? EVIDENCE_VERSION_META["pending"];
+                return (
+                  <div key={v.id} style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "4px 8px", borderRadius: 4,
+                    backgroundColor: v.is_latest ? vMeta.bg : "rgba(14,13,11,0.03)",
+                    opacity: v.is_latest ? 1 : 0.6,
+                  }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: vMeta.color, minWidth: 20 }}>{v.label}</span>
+                    <span style={{ fontSize: 10 }}>{vMeta.icon}</span>
+                    <span style={{ fontSize: 10, color: "var(--color-ink-3)", flex: 1 }}>
+                      {new Date(v.uploaded_at).toLocaleDateString("id-ID")}
+                    </span>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: vMeta.color }}>{vMeta.label}</span>
+                    {v.is_latest && (
+                      <span style={{ fontSize: 9, color: "var(--color-ink-3)", fontStyle: "italic" }}>aktif</span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -601,7 +757,11 @@ function RequirementRow({
               </div>
             ) : (
               evidenceList.map((ev) => (
-                <EvidenceItem key={ev.id} ev={ev} projectId={projectId} reqStatusId={req.status_id ?? req.id} onVerified={handleEvidenceVerified} />
+                <EvidenceItem key={ev.id} ev={ev} projectId={projectId}
+                  reqStatusId={req.status_id ?? req.id}
+                  onVerified={handleEvidenceVerified}
+                  onResubmit={() => setShowUploadModal(true)}
+                />
               ))
             )}
           </div>
