@@ -264,7 +264,7 @@ export interface PortfolioRow {
   overall_progress:    number;
   total_units:         number;
   units_sold:          number;
-  risk_score:          number;   // Sprint 6: numeric risk score
+  risk_score:          number;   
 }
 
 export interface CreateProjectPayload {
