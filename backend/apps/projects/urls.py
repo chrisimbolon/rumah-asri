@@ -16,6 +16,9 @@ from .views import (
     ProjectRequirementUpdateView,
     RequirementEvidenceVerifyView,
     RequirementEvidenceView,
+    ProjectOrgMembersView,
+    RequirementCommentView,
+    AssignRequirementView,
 )
 
 urlpatterns = [
@@ -68,4 +71,17 @@ urlpatterns = [
     path("<uuid:pk>/financial/",
          ProjectFinancialView.as_view(),
          name="project-financial"),
+
+    path("<uuid:pk>/requirements/<uuid:req_status_id>/assign/", 
+         AssignRequirementView.as_view(),
+         name="requirement-assign"),
+
+     path("<uuid:pk>/requirements/<uuid:req_status_id>/comments/",
+         RequirementCommentView.as_view(),
+         name="requirement-comments"),
+
+     path("<uuid:pk>/members/",
+         ProjectOrgMembersView.as_view(),
+         name="project-members"),
+
 ]

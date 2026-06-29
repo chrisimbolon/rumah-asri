@@ -7,9 +7,26 @@ from datetime import date
 
 from rest_framework import serializers
 
-from .models import Project, ProjectRequirementStatus, RequirementEvidence, StageRequirement
+from .models import Project, ProjectRequirementStatus, RequirementComment, RequirementEvidence, StageRequirement
 
+class RequirementCommentSerializer(serializers.ModelSerializer):
+    author_name  = serializers.SerializerMethodField()
+    author_email = serializers.SerializerMethodField()
 
+    class Meta:
+        model  = RequirementComment
+        fields = [
+            "id", "body",
+            "author", "author_name", "author_email",
+            "created_at",
+        ]
+        read_only_fields = ["id", "author", "author_name", "author_email", "created_at"]
+
+    def get_author_name(self, obj):
+        return obj.author.full_name if obj.author else "?"
+
+    def get_author_email(self, obj):
+        return obj.author.email if obj.author else ""
 # =============================================================================
 # Sprint 2: NEW serializer
 # =============================================================================
