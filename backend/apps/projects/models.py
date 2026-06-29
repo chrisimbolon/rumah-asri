@@ -232,7 +232,7 @@ class ProjectRequirementStatus(models.Model):
 
 
 # =============================================================================
-# RequirementEvidence — unchanged from Sprint 3
+# RequirementEvidence — Updated on Sprint 8
 # =============================================================================
 
 class RequirementEvidence(models.Model):
@@ -266,13 +266,129 @@ class RequirementEvidence(models.Model):
     verifier_notes = models.TextField(blank=True)
     updated_at     = models.DateTimeField(auto_now=True)
 
+    # ── Sprint 8: Version tracking fields ─────────────────────
+    # version_number: auto-incremented per requirement_status
+    # Starts at 1 for the first upload, increments on re-upload.
+    # Used for display: "v1 (Ditolak) → v2 (Aktif)"
+    version_number = models.PositiveIntegerField(
+        default=1,
+        verbose_name="Versi",
+        help_text="Nomor versi bukti untuk requirement ini",
+    )
+
+    # is_latest: True only on the most recent upload per requirement.
+    # Auto-managed by the upload view — old versions set to False
+    # when a new upload supersedes them.
+    is_latest = models.BooleanField(
+        default=True,
+        db_index=True,
+        verbose_name="Versi Terbaru",
+        help_text="True jika ini adalah versi bukti terbaru",
+    )
+
+    # superseded_by: FK to the NEXT version (the one that replaced this).
+    # Chain reads: ev1.superseded_by = ev2, ev2.superseded_by = ev3
+    # Latest version has superseded_by = None.
+    # on_delete=SET_NULL: deleting a newer version doesn't cascade.
+    superseded_by = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="previous_version",
+        verbose_name="Digantikan oleh",
+        help_text="Versi berikutnya yang menggantikan bukti ini",
+    )
+
     class Meta:
         verbose_name        = "Bukti Requirement"
         verbose_name_plural = "Bukti Requirement"
-        ordering            = ["-uploaded_at"]
+        ordering            = ["-version_number", "-uploaded_at"]
 
     def __str__(self):
-        return f"Bukti: {self.requirement_status.requirement.name} — {self.get_verification_status_display()}"
+        latest_tag = " [LATEST]" if self.is_latest else ""
+        return (
+            f"Bukti v{self.version_number}{latest_tag}: "
+            f"{self.requirement_status.requirement.name} — "
+            f"{self.get_verification_status_display()}"
+        )
+
+    # ── Sprint 8: Self-verify guard ───────────────────────────
+
+    def can_verify(self, user):
+        """
+        Sprint 8: Returns (bool, reason_string).
+        Enforces:
+          1. Only org members can verify (same org as project)
+          2. Uploader cannot verify their own evidence
+          3. Only PENDING evidence can be verified
+          4. Only is_latest evidence can be verified
+
+        Used by:
+          - View: raises 400 if can_verify returns False
+          - Serializer: sets can_verify field per evidence item
+          - Frontend: shows/hides verify buttons
+        """
+        if self.verification_status != self.VerificationStatus.PENDING:
+            return False, f"Bukti ini sudah {self.get_verification_status_display().lower()}"
+
+        if not self.is_latest:
+            return False, "Hanya versi terbaru yang dapat diverifikasi"
+
+        if self.uploaded_by and user.id == self.uploaded_by.id:
+            return False, "Anda tidak dapat memverifikasi bukti yang Anda upload sendiri"
+
+        # Check org membership
+        project = self.requirement_status.project
+        org_member_ids = set(
+            project.get_org_members().values_list("id", flat=True)
+        )
+        if user.id not in org_member_ids:
+            return False, "Hanya anggota organisasi yang dapat memverifikasi bukti"
+
+        return True, ""
+
+    def get_eligible_verifiers(self):
+        """
+        Sprint 8: Returns queryset of org members who CAN verify this evidence.
+        Excludes the uploader (separation of duties).
+        Used by serializer to populate "Can be verified by: ..." list.
+        """
+        project = self.requirement_status.project
+        org_members = project.get_org_members()
+        if self.uploaded_by:
+            org_members = org_members.exclude(id=self.uploaded_by.id)
+        return org_members
+
+    def get_version_chain(self):
+        """
+        Sprint 8: Returns all versions for this requirement, oldest → newest.
+        Used for version history display.
+        Returns list of dicts for serialization.
+        """
+        # Walk up the superseded_by chain to find all versions
+        all_versions = list(
+            RequirementEvidence.objects.filter(
+                requirement_status=self.requirement_status,
+            ).order_by("version_number").values(
+                "id", "version_number", "verification_status",
+                "uploaded_at", "is_latest", "verifier_notes",
+            )
+        )
+        return [
+            {
+                "id":                  str(v["id"]),
+                "version_number":      v["version_number"],
+                "verification_status": v["verification_status"],
+                "is_latest":           v["is_latest"],
+                "uploaded_at":         v["uploaded_at"].isoformat(),
+                "verifier_notes":      v["verifier_notes"] or "",
+                "label":               f"v{v['version_number']}",
+            }
+            for v in all_versions
+        ]
+
+    # ── approve() — unchanged in signature, same logic ────────
 
     def approve(self, verifier_user, notes=""):
         from django.utils import timezone
@@ -280,15 +396,20 @@ class RequirementEvidence(models.Model):
         self.verifier            = verifier_user
         self.verified_at         = timezone.now()
         self.verifier_notes      = notes
-        self.save(update_fields=["verification_status", "verifier", "verified_at", "verifier_notes", "updated_at"])
+        self.save(update_fields=[
+            "verification_status", "verifier", "verified_at",
+            "verifier_notes", "updated_at",
+        ])
         self.requirement_status.mark_completed(user=verifier_user)
         RequirementAudit.log(
             requirement_status=self.requirement_status,
             action=RequirementAudit.Action.EVIDENCE_APPROVED,
             changed_by=verifier_user,
-            notes=notes or "Bukti disetujui",
+            notes=notes or f"Bukti v{self.version_number} disetujui",
         )
         self.requirement_status.project.snapshot_readiness()
+
+    # ── reject() — unchanged in signature, logs version ───────
 
     def reject(self, verifier_user, notes=""):
         from django.utils import timezone
@@ -296,7 +417,10 @@ class RequirementEvidence(models.Model):
         self.verifier            = verifier_user
         self.verified_at         = timezone.now()
         self.verifier_notes      = notes
-        self.save(update_fields=["verification_status", "verifier", "verified_at", "verifier_notes", "updated_at"])
+        self.save(update_fields=[
+            "verification_status", "verifier", "verified_at",
+            "verifier_notes", "updated_at",
+        ])
         req_status            = self.requirement_status
         req_status.status     = ProjectRequirementStatus.Status.IN_PROGRESS
         req_status.updated_by = verifier_user
@@ -305,9 +429,8 @@ class RequirementEvidence(models.Model):
             requirement_status=req_status,
             action=RequirementAudit.Action.EVIDENCE_REJECTED,
             changed_by=verifier_user,
-            notes=notes or "Bukti ditolak",
+            notes=notes or f"Bukti v{self.version_number} ditolak",
         )
-
 
 # =============================================================================
 # RequirementAudit — Sprint 7: adds ASSIGNED + DUE_DATE_SET actions
@@ -952,6 +1075,18 @@ class Project(TenantScopedModel):
             "risk_factors":          risk_data["factors"],
             "risk_since":            risk_since.isoformat() if risk_since else None,
             "risk_trend_data":       self.risk_trend_data,
+             "pending_evidence_count": self.requirement_statuses.filter(
+                requirement__stage=self.stage,
+                requirement__is_active=True,
+                evidence__verification_status="pending",
+                evidence__is_latest=True,
+            ).distinct().count(),
+            "rejected_evidence_count": self.requirement_statuses.filter(
+                requirement__stage=self.stage,
+                requirement__is_active=True,
+                evidence__verification_status="rejected",
+                evidence__is_latest=True,
+            ).distinct().count(),
         }
 
     # =========================================================

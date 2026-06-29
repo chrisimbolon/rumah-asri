@@ -6,6 +6,7 @@
 from django.urls import path
 
 from .views import (
+    EvidenceEligibleVerifiersView,
     ProjectActivityView,
     ProjectAdvanceView,
     ProjectDetailView,
@@ -83,5 +84,10 @@ urlpatterns = [
      path("<uuid:pk>/members/",
          ProjectOrgMembersView.as_view(),
          name="project-members"),
+         
+     path("<uuid:pk>/requirements/<uuid:req_status_id>/evidence/<uuid:ev_id>/verifiers/",
+          EvidenceEligibleVerifiersView.as_view(),
+          name="evidence-eligible-verifiers",
+          ),
 
 ]
