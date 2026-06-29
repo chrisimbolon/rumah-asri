@@ -1,6 +1,6 @@
 "use client";
 // ================================================
-// === frontend/app/dashboard/payments/page.tsx ===
+// frontend/app/dashboard/payments/page.tsx 
 // ================================================
 /**
  * Payments tracker — wired to real payments API. - Payment has data on DB, but not via CRUD
