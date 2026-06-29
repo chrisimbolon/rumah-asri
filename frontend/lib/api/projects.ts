@@ -79,6 +79,22 @@ export interface RequirementEvidence {
   verifier_notes:       string;
 }
 
+export interface RequirementComment {
+  id:           string;
+  body:         string;
+  author:       string;
+  author_name:  string;
+  author_email: string;
+  created_at:   string;
+}
+
+export interface OrgMember {
+  id:        string;
+  full_name: string;
+  email:     string;
+  role:      string;
+}
+
 export interface ReadinessBreakdownItem {
   id:                    string;
   name:                  string;
@@ -129,6 +145,13 @@ export interface RequirementItem {
   weight:                number;   // raw weight value (0 if optional)
   weight_pct:            number;   // % of total mandatory weight
   contribution:          number;   // weight_pct if completed, else 0
+  // Sprint 7: ownership
+  assigned_to_id:   string | null;
+  assigned_to_name: string | null;
+  due_date:         string | null;
+  is_overdue:       boolean;
+  days_until_due:   number | null;
+  comment_count:    number;
 }
 
 // Sprint 6 risk factor type ───────────────────────────
@@ -467,6 +490,23 @@ export const projectsApi = {
   const { data } = await api.get(`/api/projects/${id}/financial/`);
   return data.financial;
   },
+
+  async assignRequirement(
+    projectId:   string,
+    reqStatusId: string,
+    payload: { assigned_to?: string | null; due_date?: string | null }
+  ): Promise<IntelligenceSummary> {
+    const { data } = await api.put(
+      `/api/projects/${projectId}/requirements/${reqStatusId}/assign/`,
+      payload
+    );
+    return data.intelligence;
+  },
+
+  async getOrgMembers(projectId: string): Promise<OrgMember[]> {
+    const { data } = await api.get(`/api/projects/${projectId}/members/`);
+    return data.results;
+  },
 };
 
 // Sprint 2: evidence API calls
@@ -511,5 +551,29 @@ export const evidenceApi = {
       { action, notes: notes ?? "" }
     );
     return { evidence: data.evidence, intelligence: data.intelligence };
+  },
+};
+
+export const commentApi = {
+  async list(
+    projectId:   string,
+    reqStatusId: string
+  ): Promise<{ count: number; results: RequirementComment[] }> {
+    const { data } = await api.get(
+      `/api/projects/${projectId}/requirements/${reqStatusId}/comments/`
+    );
+    return { count: data.count, results: data.results };
+  },
+
+  async post(
+    projectId:   string,
+    reqStatusId: string,
+    body:        string
+  ): Promise<RequirementComment> {
+    const { data } = await api.post(
+      `/api/projects/${projectId}/requirements/${reqStatusId}/comments/`,
+      { body }
+    );
+    return data.comment;
   },
 };
