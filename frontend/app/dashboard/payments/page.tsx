@@ -12,7 +12,6 @@
  *   jatuh_tempo  → due_date (YYYY-MM-DD, formatted for display)
  *   jumlah       → amount
  *   bank         → bank
- *
  * Buyer summary cards at bottom are derived from grouped payment data 
  * since there is no dedicated /api/buyers/ endpoint yet (Sprint 2).
  */
