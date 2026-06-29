@@ -11,7 +11,7 @@
  *   jenis        → payment_type
  *   jatuh_tempo  → due_date (YYYY-MM-DD, formatted for display) - this has to be Indonesian format
  *   jumlah       → amount
- *   bank         → bank
+ *   bank         → bank (should be very strick on this)
  * Buyer summary cards at bottom are derived from grouped payment data 
  * since there is no dedicated /api/buyers/ endpoint yet (Sprint 2).
  */
