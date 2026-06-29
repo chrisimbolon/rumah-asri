@@ -417,13 +417,13 @@ function RequirementRow({
   // Sprint 4: row background logic
   const rowBg =
     isCompleted   ? "var(--color-success-light)" :
-    isDepBlocked  ? "rgba(14,13,11,0.03)"        :  // ← muted grey for blocked
+    isDepBlocked  ? "rgba(14,13,11,0.03)"        :  
     isBlocking    ? "rgba(220,38,38,0.04)"       :
                     "var(--color-paper-2)";
 
   const rowBorder =
     isCompleted   ? "1px solid transparent"              :
-    isDepBlocked  ? "1px solid rgba(14,13,11,0.08)"     :  // ← subtle border
+    isDepBlocked  ? "1px solid rgba(14,13,11,0.08)"     :  
     isBlocking    ? "1px solid rgba(220,38,38,0.15)"    :
                     "1px solid transparent";
 
