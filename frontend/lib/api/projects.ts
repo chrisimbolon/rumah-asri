@@ -111,7 +111,7 @@ export interface ReadinessBreakdown {
   score:            number;   
   label:            string;
   total_weight:     number;
-  completed_weight: number;   // sum of completed mandatory weights
+  completed_weight: number;
   formula:          string;   // human-readable e.g. "Readiness = (40 / 100) × 100 = 40%"
   items:            ReadinessBreakdownItem[];
 }
