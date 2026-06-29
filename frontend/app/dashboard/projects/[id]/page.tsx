@@ -8,18 +8,22 @@
 //   + handleStatusChange catches dependency_blocked errors
 //   + projects.ts: RequirementItem gets Sprint 4 fields
 // All Sprint 1/2/3 sections preserved — additive only.
+//  Sprint7 :requirement ownership and accountability - implemented here
 // ============================================================
 
 import {
   ALERT_META,
+  commentApi,
   EVIDENCE_META,
   evidenceApi,
   getRiskScoreMeta,
   IntelligenceSummary,
+  OrgMember,
   Project,
   projectsApi,
   ProjectStage,
   READINESS_LABEL_META,
+  RequirementComment,
   RequirementEvidence,
   RequirementItem,
   RISK_FACTOR_IMPACT_META,
@@ -283,6 +287,15 @@ function RequirementRow({
   const [evidenceList,    setEvidenceList]    = useState<RequirementEvidence[]>([]);
   const [loadingEvidence, setLoadingEvidence] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  // Sprint 7: ownership + comments state
+  const [showOwnership,  setShowOwnership]  = useState(false);
+  const [showComments,   setShowComments]   = useState(false);
+  const [comments,       setComments]       = useState<RequirementComment[]>([]);
+  const [loadingComments,setLoadingComments] = useState(false);
+  const [commentBody,    setCommentBody]    = useState("");
+  const [postingComment, setPostingComment] = useState(false);
+  const [orgMembers,     setOrgMembers]     = useState<OrgMember[]>([]);
+  const [savingAssign,   setSavingAssign]   = useState(false);
 
   const handleStatusChange = async (newStatus: ReqStatus) => {
     if (newStatus === req.status) return;
@@ -326,6 +339,64 @@ function RequirementRow({
   const handleEvidenceVerified = (intel: IntelligenceSummary) => {
     loadEvidence();
     onUpdated(intel);
+  };
+
+  const loadComments = async () => {
+    if (!req.status_id) return;
+    setLoadingComments(true);
+    try {
+      const { results } = await commentApi.list(projectId, req.status_id);
+      setComments(results);
+    } catch { setComments([]); }
+    finally { setLoadingComments(false); }
+  };
+
+  const toggleComments = () => {
+    if (!showComments && comments.length === 0) loadComments();
+    setShowComments(!showComments);
+  };
+
+  const handlePostComment = async () => {
+    if (!commentBody.trim() || !req.status_id) return;
+    setPostingComment(true);
+    try {
+      await commentApi.post(projectId, req.status_id, commentBody.trim());
+      setCommentBody("");
+      await loadComments();
+    } catch { /* silent */ }
+    finally { setPostingComment(false); }
+  };
+
+  const loadOrgMembers = async () => {
+    if (orgMembers.length > 0) return;
+    try {
+      const members = await projectsApi.getOrgMembers(projectId);
+      setOrgMembers(members);
+    } catch { /* silent */ }
+  };
+
+  const handleAssign = async (assignedToId: string | null) => {
+    if (!req.status_id) return;
+    setSavingAssign(true);
+    try {
+      const intel = await projectsApi.assignRequirement(
+        projectId, req.status_id, { assigned_to: assignedToId }
+      );
+      onUpdated(intel);
+    } catch { /* silent */ }
+    finally { setSavingAssign(false); }
+  };
+
+  const handleSetDueDate = async (dueDate: string | null) => {
+    if (!req.status_id) return;
+    setSavingAssign(true);
+    try {
+      const intel = await projectsApi.assignRequirement(
+        projectId, req.status_id, { due_date: dueDate }
+      );
+      onUpdated(intel);
+    } catch { /* silent */ }
+    finally { setSavingAssign(false); }
   };
 
   const statusConfig: Record<ReqStatus, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
@@ -409,6 +480,32 @@ function RequirementRow({
               )}
               {req.has_pending_evidence && (
                 <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-warning)" }}>⏳ Menunggu review</span>
+              )}
+
+              {/* Sprint 7: assigned_to badge */}
+              {req.assigned_to_name && (
+                <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 999, backgroundColor: "var(--color-info-light)", color: "var(--color-info)", display: "flex", alignItems: "center", gap: 3 }}>
+                  👤 {req.assigned_to_name}
+                </span>
+              )}
+
+              {/* Sprint 7: due_date badge */}
+              {req.due_date && !isCompleted && (
+                <span style={{
+                  fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 999,
+                  backgroundColor: req.is_overdue ? "var(--color-danger-light)" : "var(--color-paper-2)",
+                  color: req.is_overdue ? "var(--color-danger)" : "var(--color-ink-3)",
+                  display: "flex", alignItems: "center", gap: 3,
+                }}>
+                  📅 {req.is_overdue ? `Terlambat ${Math.abs(req.days_until_due ?? 0)} hari` : `${req.days_until_due} hari lagi`}
+                </span>
+              )}
+
+              {/* Sprint 7: comment count badge */}
+              {req.comment_count > 0 && (
+                <button onClick={toggleComments} style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 999, backgroundColor: "rgba(14,13,11,0.06)", color: "var(--color-ink-3)", border: "none", cursor: "pointer" }}>
+                  💬 {req.comment_count}
+                </button>
               )}
             </div>
 
@@ -509,6 +606,121 @@ function RequirementRow({
             )}
           </div>
         )}
+
+        {/* Sprint 7: Ownership panel */}
+        {!isDepBlocked && !isCompleted && (
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(14,13,11,0.06)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {/* Assign button */}
+              <button
+                onClick={() => { setShowOwnership(!showOwnership); loadOrgMembers(); }}
+                style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", backgroundColor: "white", color: "var(--color-ink-3)", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>
+                👤 {req.assigned_to_name ? req.assigned_to_name : "Tugaskan"}
+              </button>
+
+              {/* Due date button */}
+              <button
+                onClick={() => setShowOwnership(!showOwnership)}
+                style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", backgroundColor: "white", color: req.is_overdue ? "var(--color-danger)" : "var(--color-ink-3)", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>
+                📅 {req.due_date ? new Date(req.due_date).toLocaleDateString("id-ID", { day: "numeric", month: "short" }) : "Set tenggat"}
+              </button>
+
+              {/* Comment toggle */}
+              {req.status_id && (
+                <button onClick={toggleComments}
+                  style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.1)", backgroundColor: "white", color: "var(--color-ink-3)", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>
+                  💬 {req.comment_count > 0 ? `${req.comment_count} komentar` : "Komentar"}
+                </button>
+              )}
+            </div>
+
+            {/* Ownership edit panel */}
+            {showOwnership && (
+              <div style={{ marginTop: 8, padding: "10px 12px", backgroundColor: "var(--color-paper-2)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                {/* Assignee dropdown */}
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Ditugaskan ke</div>
+                  <select
+                    value={req.assigned_to_id ?? ""}
+                    onChange={(e) => handleAssign(e.target.value || null)}
+                    disabled={savingAssign}
+                    style={{ width: "100%", padding: "6px 8px", border: "1px solid rgba(14,13,11,0.12)", borderRadius: 6, fontSize: 12, backgroundColor: "white", color: "var(--color-ink)" }}>
+                    <option value="">— Belum ditugaskan —</option>
+                    {orgMembers.map((m) => (
+                      <option key={m.id} value={m.id}>{m.full_name}</option>
+                    ))}
+                  </select>
+                </div>
+                {/* Due date picker */}
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Tenggat Waktu</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      type="date"
+                      value={req.due_date ?? ""}
+                      onChange={(e) => handleSetDueDate(e.target.value || null)}
+                      disabled={savingAssign}
+                      style={{ flex: 1, padding: "6px 8px", border: "1px solid rgba(14,13,11,0.12)", borderRadius: 6, fontSize: 12, backgroundColor: "white", color: "var(--color-ink)" }} />
+                    {req.due_date && (
+                      <button onClick={() => handleSetDueDate(null)} disabled={savingAssign}
+                        style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(14,13,11,0.1)", fontSize: 11, cursor: "pointer", backgroundColor: "white", color: "var(--color-danger)" }}>
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {savingAssign && <div style={{ fontSize: 10, color: "var(--color-ink-3)", textAlign: "center" }}>Menyimpan...</div>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Sprint 7: Comments panel */}
+        {showComments && req.status_id && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(14,13,11,0.06)" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+              Komentar ({comments.length})
+            </div>
+            {loadingComments ? (
+              <div style={{ textAlign: "center", padding: 8 }}>
+                <Loader2 size={13} style={{ animation: "spin 1s linear infinite", color: "var(--color-ink-3)" }} />
+              </div>
+            ) : (
+              <>
+                {comments.length === 0 && (
+                  <div style={{ fontSize: 11, color: "var(--color-ink-3)", fontStyle: "italic", marginBottom: 8 }}>Belum ada komentar</div>
+                )}
+                {comments.map((c) => (
+                  <div key={c.id} style={{ marginBottom: 8, padding: "8px 10px", backgroundColor: "var(--color-paper-2)", borderRadius: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-ink)" }}>{c.author_name}</span>
+                      <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
+                        {new Date(c.created_at).toLocaleDateString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--color-ink)", lineHeight: 1.4 }}>{c.body}</div>
+                  </div>
+                ))}
+                {/* Post comment */}
+                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                  <input
+                    type="text"
+                    placeholder="Tulis komentar..."
+                    value={commentBody}
+                    onChange={(e) => setCommentBody(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handlePostComment(); }}}
+                    disabled={postingComment}
+                    style={{ flex: 1, padding: "6px 10px", border: "1px solid rgba(14,13,11,0.12)", borderRadius: 6, fontSize: 12, outline: "none" }} />
+                  <button onClick={handlePostComment} disabled={postingComment || !commentBody.trim()}
+                    style={{ padding: "6px 12px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", backgroundColor: "var(--color-accent)", color: "white", opacity: (!commentBody.trim() || postingComment) ? 0.5 : 1 }}>
+                    {postingComment ? "..." : "Kirim"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
       </div>
     </>
   );
