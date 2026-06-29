@@ -60,7 +60,7 @@ export interface CollectionEfficiency {
   status_display: string;
 }
 
-// ── Sprint 2: NEW types ───────────────────────────────────────
+// ── Sprint 8: NEW types ───────────────────────────────────────
 
 export interface RequirementEvidence {
   id:                   string;
@@ -77,6 +77,15 @@ export interface RequirementEvidence {
   verifier_name:        string;
   verified_at:          string | null;
   verifier_notes:       string;
+  // Sprint 8: version tracking
+  version_number:       number;
+  version_label:        string;
+  is_latest:            boolean;
+  superseded_by_id:     string | null;
+  version_chain:        EvidenceVersion[];
+  can_verify:           boolean;
+  cannot_verify_reason: string;
+  eligible_verifiers:   EvidenceVerifier[];
 }
 
 export interface RequirementComment {
@@ -197,12 +206,32 @@ export interface IntelligenceSummary {
   risk_factors:     RiskFactor[];     // structured factors
   risk_since:       string | null;    // ISO date when level started
   risk_trend_data:  RiskTrendPoint[]; // last 30 days
+  // Sprint 8: evidence workflow
+  pending_evidence_count:  number;
+  rejected_evidence_count: number;
 }
 
 export interface StageChecklistItem {
   item:      string;
   done:      boolean;
   blocking?: boolean;
+}
+
+// Sprint 8 new types
+
+export interface EvidenceVersion {
+  id:                  string;
+  version_number:      number;
+  label:               string;
+  verification_status: EvidenceVerifStatus;
+  is_latest:           boolean;
+  uploaded_at:         string;
+  verifier_notes:      string;
+}
+
+export interface EvidenceVerifier {
+  id:        string;
+  full_name: string;
 }
 
 // ── Project — UNCHANGED ───────────────────────────────────────
@@ -388,6 +417,14 @@ export const EVIDENCE_META: Record<EvidenceVerifStatus, { label: string; color: 
   rejected: { label: "Ditolak",        color: "var(--color-danger)",  bg: "var(--color-danger-light)"  },
 };
 
+export const EVIDENCE_VERSION_META: Record<EvidenceVerifStatus, {
+  label: string; color: string; bg: string; icon: string;
+}> = {
+  pending:  { label: "Menunggu",  color: "var(--color-warning)", bg: "var(--color-warning-light)", icon: "⏳" },
+  approved: { label: "Disetujui", color: "var(--color-success)", bg: "var(--color-success-light)", icon: "✅" },
+  rejected: { label: "Ditolak",   color: "var(--color-danger)",  bg: "var(--color-danger-light)",  icon: "❌" },
+};
+
 export const READINESS_LABEL_META: Record<string, { color: string; bg: string }> = {
   "Sangat Siap": { color: "var(--color-success)", bg: "var(--color-success-light)" },
   "Cukup Siap":  { color: "var(--color-info)",    bg: "var(--color-info-light)"    },
@@ -551,6 +588,22 @@ export const evidenceApi = {
       { action, notes: notes ?? "" }
     );
     return { evidence: data.evidence, intelligence: data.intelligence };
+  },
+
+  async getEligibleVerifiers(
+    projectId:   string,
+    reqStatusId: string,
+    evidenceId:  string
+  ): Promise<{
+    eligible_verifiers:         EvidenceVerifier[];
+    eligible_count:             number;
+    can_verify_as_current_user: boolean;
+    reason:                     string;
+  }> {
+    const { data } = await api.get(
+      `/api/projects/${projectId}/requirements/${reqStatusId}/evidence/${evidenceId}/verifiers/`
+    );
+    return data;
   },
 };
 
