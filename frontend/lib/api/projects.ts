@@ -109,7 +109,7 @@ export interface ReadinessBreakdownItem {
 
 export interface ReadinessBreakdown {
   score:            number;   
-  label:            string;   // "Sangat Siap" | "Cukup Siap" | "Sedang" | "Belum Siap"
+  label:            string;   
   total_weight:     number;   // sum of all mandatory weights
   completed_weight: number;   // sum of completed mandatory weights
   formula:          string;   // human-readable e.g. "Readiness = (40 / 100) × 100 = 40%"
