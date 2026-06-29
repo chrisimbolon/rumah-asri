@@ -9,7 +9,7 @@
  *   pembeli      → buyer_name
  *   unit         → unit_number
  *   jenis        → payment_type
- *   jatuh_tempo  → due_date (YYYY-MM-DD, formatted for display)
+ *   jatuh_tempo  → due_date (YYYY-MM-DD, formatted for display) - this has to be Indonesian format
  *   jumlah       → amount
  *   bank         → bank
  * Buyer summary cards at bottom are derived from grouped payment data 
