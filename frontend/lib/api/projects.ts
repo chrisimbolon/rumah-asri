@@ -362,7 +362,7 @@ export interface UpdateProjectPayload {
   is_constructing?: boolean;
 }
 
-// Sprint 3 types — add to projects.ts
+// Sprint 3 types
 
 export interface ActivityItem {
   id:        string;
