@@ -51,7 +51,7 @@ export const tokenStorage = {
     localStorage.setItem("access_token",  access);
     localStorage.setItem("refresh_token", refresh);
     localStorage.setItem("user",          JSON.stringify(user));
-    // Also set cookie so proxy.ts can read it
+    // set cookie so proxy.ts can read it
     document.cookie = `access_token=${access}; path=/; max-age=3600; SameSite=Lax`;
     // Also store role in cookie so proxy.ts can enforce role-based guards
     document.cookie = `user_role=${user.role}; path=/; max-age=3600; SameSite=Lax`;
