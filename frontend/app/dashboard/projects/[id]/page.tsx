@@ -9,6 +9,7 @@
 //   + projects.ts: RequirementItem gets Sprint 4 fields
 // All Sprint 1/2/3 sections preserved — additive only.
 //  Sprint7 :requirement ownership and accountability - implemented here
+//  Sprint 9 : next actions assistant dashboard widget - is NOT implemented at this stage
 // ============================================================
 
 import {
