@@ -234,6 +234,45 @@ export interface EvidenceVerifier {
   full_name: string;
 }
 
+// Sprint 9 types ───────────────────────────────────────
+
+export type ActionType =
+  | "overdue"
+  | "blocked_others"
+  | "high_impact"
+  | "high_risk"
+  | "resubmit_needed"
+  | "standard";
+
+export interface ActionItem {
+  project_id:             string;
+  project_name:           string;
+  project_stage:          ProjectStage;
+  project_stage_display:  string;
+  requirement_id:         string;
+  requirement_name:       string;
+  status_id:              string;
+  status:                 ReqStatus;
+  status_display:         string;
+  due_date:               string | null;
+  is_overdue:             boolean;
+  days_until_due:         number | null;
+  weight_pct:             number;
+  is_assigned_to_me:      boolean;
+  priority_score:         number;
+  action_type:            ActionType;
+  reasons:                string[];
+  primary_reason:         string;
+}
+
+export interface MyActionsResponse {
+  my_tasks:          ActionItem[];
+  my_tasks_count:    number;
+  unassigned:        ActionItem[];
+  unassigned_count:  number;
+  total_actionable:  number;
+}
+
 // ── Project — UNCHANGED ───────────────────────────────────────
 
 export interface Project {
@@ -432,6 +471,17 @@ export const READINESS_LABEL_META: Record<string, { color: string; bg: string }>
   "Belum Siap":  { color: "var(--color-danger)",  bg: "var(--color-danger-light)"  },
 };
 
+export const ACTION_TYPE_META: Record<ActionType, {
+  label: string; color: string; bg: string; icon: string;
+}> = {
+  overdue:         { label: "Terlambat",        color: "var(--color-danger)",  bg: "var(--color-danger-light)",  icon: "⏰" },
+  blocked_others:  { label: "Memblokir Lainnya", color: "var(--color-warning)", bg: "var(--color-warning-light)", icon: "🔓" },
+  high_impact:     { label: "Dampak Besar",      color: "var(--color-accent)",  bg: "var(--color-accent-light)",  icon: "⭐" },
+  high_risk:       { label: "Risiko Tinggi",     color: "var(--color-danger)",  bg: "var(--color-danger-light)",  icon: "⚠️" },
+  resubmit_needed: { label: "Perlu Diunggah Ulang", color: "var(--color-warning)", bg: "var(--color-warning-light)", icon: "🔁" },
+  standard:        { label: "Tindakan Diperlukan", color: "var(--color-ink-3)", bg: "var(--color-paper-2)",       icon: "📋" },
+};
+
 
 // ── Derived stats — UNCHANGED ─────────────────────────────────
 
@@ -543,6 +593,11 @@ export const projectsApi = {
   async getOrgMembers(projectId: string): Promise<OrgMember[]> {
     const { data } = await api.get(`/api/projects/${projectId}/members/`);
     return data.results;
+  },
+
+  async getMyActions(): Promise<MyActionsResponse> {
+    const { data } = await api.get("/api/projects/my-actions/");
+    return data;
   },
 };
 
