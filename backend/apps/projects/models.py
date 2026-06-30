@@ -23,6 +23,9 @@ Sprint 7: Requirement Ownership & Accountability
           RequirementComment                   — team discussion
           Project.get_org_members()            — assignable users
           overdue_requirements_count           — new alert trigger
+Sprint 9 : my_tasks    — requirements assigned to the user
+          unassigned  — actionable items nobody owns yet
+          (items assigned to OTHER users are excluded — not noise)
 
 ZERO BREAKING CHANGES — all existing fields preserved.
 59 tests still green.
