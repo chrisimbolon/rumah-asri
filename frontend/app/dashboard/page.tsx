@@ -157,7 +157,7 @@ function AlertsLedger({ projects }: { projects: Project[] }) {
   );
 }
 
-// ── Sprint 1: Collection efficiency panel ─────────────────────
+// ── Sprint 1: Collection efficiency panel 
 function CollectionPanel({ projects }: { projects: Project[] }) {
   // Aggregate across all projects
   let totalBilled  = 0;
