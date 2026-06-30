@@ -1,6 +1,7 @@
 "use client";
 // ================================================
 // === frontend/app/dashboard/projects/page.tsx 
+// Sprint 9: Next Actions Assistant
 // ================================================
 
 import {
