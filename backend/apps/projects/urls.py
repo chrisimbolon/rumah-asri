@@ -1,7 +1,8 @@
-# =============================================================================
-# === backend/apps/projects/urls.py ===
+# ==============================================
+# backend/apps/projects/urls.py
 # All original URLs preserved — additive only.
-# =============================================================================
+# Sprint 1 to 9 implemented
+# ==============================================
 from django.urls import path
 
 from .views import (
