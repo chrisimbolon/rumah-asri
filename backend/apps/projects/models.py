@@ -448,7 +448,6 @@ class RequirementAudit(models.Model):
         EVIDENCE_REJECTED = "evidence_rejected", "Bukti Ditolak"
         COMPLETED         = "completed",         "Diselesaikan"
         STAGE_ADVANCED    = "stage_advanced",    "Tahap Dilanjutkan"
-        # Sprint 7: new audit actions
         ASSIGNED          = "assigned",          "Ditugaskan"
         DUE_DATE_SET      = "due_date_set",      "Tenggat Waktu Ditetapkan"
         COMMENT_ADDED     = "comment_added",     "Komentar Ditambahkan"
