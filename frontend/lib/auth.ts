@@ -103,7 +103,7 @@ export const authApi = {
     try {
       await api.post("/api/auth/logout/", { refresh: refreshToken });
     } catch {
-      // Even if logout API fails, clear local storage
+      // if logout API fails, clear local storage
     } finally {
       tokenStorage.clear();
     }
