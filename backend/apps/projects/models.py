@@ -662,6 +662,118 @@ class Project(TenantScopedModel):
             is_active=True,
         ).distinct().order_by("full_name")
 
+    @classmethod
+    def get_my_actions(cls, user):
+        """
+        Sprint 9: Returns personalized, prioritized next actions for `user`.
+        See module docstring above for full scoring logic.
+        """
+        projects = cls.objects.for_user(user).exclude(
+            stage__in=[cls.Stage.COMPLETED, cls.Stage.ON_HOLD]
+        )
+
+        my_tasks   = []
+        unassigned = []
+
+        for project in projects:
+            intel = project.get_intelligence_summary()
+            risk_level = intel["risk_level"]
+
+            for req in intel["requirements"]:
+                # Only mandatory, not-completed, not dependency-blocked
+                # requirements are "actionable" — locked items are noise.
+                if req["status"] == "completed":
+                    continue
+                if req["is_dependency_blocked"]:
+                    continue
+                if not req["is_mandatory"]:
+                    continue
+                if not req["status_id"]:
+                    continue
+
+                assigned_to_id = req.get("assigned_to_id")
+                is_mine        = assigned_to_id == str(user.id)
+                is_unassigned  = assigned_to_id is None
+
+                if not is_mine and not is_unassigned:
+                    # Assigned to someone else in the org — not shown to me
+                    continue
+
+                # ── Compute priority score + reason ───────────
+                score       = 0
+                reasons     = []
+                action_type = "standard"
+
+                if req.get("is_overdue"):
+                    score += 40
+                    days_over = abs(req.get("days_until_due") or 0)
+                    reasons.append(f"Terlambat {days_over} hari dari tenggat")
+                    action_type = "overdue"
+
+                score += 25  # baseline: genuinely actionable right now
+                if action_type == "standard":
+                    action_type = "blocked_others" if req.get("weight_pct", 0) >= 40 else "standard"
+
+                if req.get("weight_pct", 0) >= 30:
+                    score += 20
+                    reasons.append(f"Berdampak besar pada kesiapan ({req['weight_pct']}% bobot)")
+                    if action_type == "standard":
+                        action_type = "high_impact"
+
+                if risk_level == "high":
+                    score += 15
+                    reasons.append("Proyek berisiko tinggi")
+                    if action_type == "standard":
+                        action_type = "high_risk"
+
+                if req.get("latest_evidence_status") == "rejected":
+                    score += 10
+                    reasons.append("Bukti sebelumnya ditolak — perlu diunggah ulang")
+                    action_type = "resubmit_needed"
+                elif risk_level == "medium":
+                    score += 5
+
+                if not reasons:
+                    reasons.append("Requirement wajib menunggu tindakan")
+
+                action_item = {
+                    "project_id":             str(project.id),
+                    "project_name":           project.name,
+                    "project_stage":          project.stage,
+                    "project_stage_display":  project.stage_display,
+                    "requirement_id":         req["id"],
+                    "requirement_name":       req["name"],
+                    "status_id":              req["status_id"],
+                    "status":                 req["status"],
+                    "status_display":         req["status_display"],
+                    "due_date":               req.get("due_date"),
+                    "is_overdue":             req.get("is_overdue", False),
+                    "days_until_due":         req.get("days_until_due"),
+                    "weight_pct":             req.get("weight_pct", 0),
+                    "is_assigned_to_me":      is_mine,
+                    "priority_score":         score,
+                    "action_type":            action_type,
+                    "reasons":                reasons,
+                    "primary_reason":         reasons[0],
+                }
+
+                if is_mine:
+                    my_tasks.append(action_item)
+                else:
+                    unassigned.append(action_item)
+
+        # Sort each section by priority score, descending
+        my_tasks.sort(key=lambda x: x["priority_score"], reverse=True)
+        unassigned.sort(key=lambda x: x["priority_score"], reverse=True)
+
+        return {
+            "my_tasks":         my_tasks,
+            "my_tasks_count":   len(my_tasks),
+            "unassigned":       unassigned,
+            "unassigned_count": len(unassigned),
+            "total_actionable": len(my_tasks) + len(unassigned),
+        }
+
     # =========================================================
     # INTELLIGENCE ENGINE INTERNALS — unchanged
     # =========================================================

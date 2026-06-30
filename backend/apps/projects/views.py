@@ -150,6 +150,38 @@ class ProjectPortfolioView(TenantScopedAPIView):
         return Response({"success": True, "count": len(rows), "results": rows})
 
 
+class MyActionsView(TenantScopedAPIView):
+    """
+    Sprint 9: Personalized, prioritized next-actions feed for the
+    logged-in user across ALL their organization's projects.
+
+    GET /api/projects/my-actions/
+
+    Returns:
+      my_tasks:         [...] — requirements assigned to me, sorted by priority
+      my_tasks_count:    int
+      unassigned:        [...] — actionable + unassigned, sorted by priority
+      unassigned_count:  int
+      total_actionable:  int
+
+    Each item includes project context, requirement details,
+    priority_score, action_type, and human-readable reasons —
+    everything needed to render an actionable card without
+    additional API calls.
+
+    No model field — pure computed intelligence reusing
+    Sprint 4 (dependency), Sprint 5 (weight), Sprint 6 (risk),
+    Sprint 7 (ownership), Sprint 8 (evidence status) data.
+    """
+    model = Project
+
+    def get(self, request):
+        actions = Project.get_my_actions(request.user)
+        return Response({
+            "success": True,
+            **actions,
+        })
+
 # =============================================================================
 # Sprint 7: Assign requirement + set due_date
 # =============================================================================

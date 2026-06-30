@@ -1,6 +1,5 @@
 # =============================================================================
 # === backend/apps/projects/urls.py ===
-# Sprint 3: adds activity timeline + financial snapshot endpoints
 # All original URLs preserved — additive only.
 # =============================================================================
 from django.urls import path
@@ -20,6 +19,7 @@ from .views import (
     ProjectOrgMembersView,
     RequirementCommentView,
     AssignRequirementView,
+    MyActionsView,
 )
 
 urlpatterns = [
@@ -27,6 +27,11 @@ urlpatterns = [
     path("portfolio/",
          ProjectPortfolioView.as_view(),
          name="project-portfolio"),
+     
+    path("my-actions/",
+         MyActionsView.as_view(),
+         name="project-my-actions"),
+
 
     # ── List + create ──────────────────────────────────────────
     path("",
