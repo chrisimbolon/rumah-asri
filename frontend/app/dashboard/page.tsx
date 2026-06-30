@@ -7,6 +7,7 @@
 //   + Collection efficiency financial snapshot
 //   + Parallel stage (5A/5B) indicators on portfolio table + this has to be solved on with REAL DATA
 //   All original sections preserved — additive only.
+//  Sprint9: next actions assistant dashboard widget - is implemented at this stage
 // =============================================================================
 
 import { useAuth } from "@/context/AuthContext";
