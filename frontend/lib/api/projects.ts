@@ -329,7 +329,7 @@ export interface DependencyGraph {
   edges:         DependencyEdge[];
 }
 
-// Sprint 12: Action chain ──────────────────────────────────────
+// Sprint 12: Action chain ──────────────
 export type ActivityFilterType =
   | "all"
   | "evidence"
