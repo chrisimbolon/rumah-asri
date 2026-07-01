@@ -1,7 +1,7 @@
 # =============================================================================
 # backend/apps/projects/urls.py
-# Sprint 11: adds dependency-graph/ endpoint.
-# All Sprint 1-10 URLs preserved — additive only.
+# Sprint 13: adds /decision/ endpoint.
+# All Sprint 1-12 URLs preserved — additive only.
 # =============================================================================
 from django.urls import path
 
@@ -11,7 +11,8 @@ from .views import (
     MyActionsView,
     ProjectActivityView,
     ProjectAdvanceView,
-    ProjectDependencyGraphView,         # Sprint 11
+    ProjectDecisionEngineView,          # Sprint 13
+    ProjectDependencyGraphView,
     ProjectDetailView,
     ProjectFinancialView,
     ProjectIntelligenceView,
@@ -64,6 +65,11 @@ urlpatterns = [
     path("<uuid:pk>/dependency-graph/",
          ProjectDependencyGraphView.as_view(),
          name="project-dependency-graph"),
+
+    # ── Sprint 13: Decision Engine ────────────────────────────
+    path("<uuid:pk>/decision/",
+         ProjectDecisionEngineView.as_view(),
+         name="project-decision-engine"),
 
     # ── Update single requirement status ──────────────────────
     path("<uuid:pk>/requirements/<uuid:req_status_id>/",

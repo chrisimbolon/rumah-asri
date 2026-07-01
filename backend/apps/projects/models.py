@@ -1333,6 +1333,171 @@ class Project(TenantScopedModel):
             "action_chain": action_chain,    # Sprint 12
         }
 
+#  Sprint 13 - Decision Engine
+    def get_decision_engine(self):
+        """
+        Sprint 13: Ranked recommendations — single best action with
+        quantified projected readiness impact.
+
+        Design principles:
+        - Deterministic, not ML. Every number is auditable arithmetic.
+        - readiness_impact_pct = weight_pct of the requirement.
+          Completing it adds exactly that many points to readiness.
+        - priority_score = composite of weight, urgency signals, blocking
+          chain depth. Never randomised, never estimated.
+        - Reuses get_intelligence_summary() as single source of truth.
+          No extra DB queries beyond what intelligence already runs.
+        - Returns None primary (all_clear=True) if nothing is blocking.
+
+        Called by: ProjectDecisionEngineView (Sprint 13)
+        """
+        intel = self.get_intelligence_summary()
+        items = intel["requirements"]
+
+        # ── Build scored candidate list ───────────────────────────
+        # Candidates: mandatory, not completed/awaiting, not dep-blocked
+        candidates = []
+        for req in items:
+            if not req["is_mandatory"]:
+                continue
+            if req["status"] in ("completed", "menunggu_verifikasi"):
+                continue
+            if req["is_dependency_blocked"]:
+                continue
+
+            # ── Priority score (deterministic) ────────────────────
+            # Base: how much readiness does completing this add?
+            score = req["weight_pct"]
+
+            # Boost: no assignee (unowned = higher urgency)
+            if not req["assigned_to_id"]:
+                score += 10
+
+            # Boost: no evidence at all (nothing started yet)
+            if req["evidence_count"] == 0:
+                score += 5
+
+            # Boost: overdue (deadline already passed)
+            if req["is_overdue"]:
+                score += 15
+
+            # Boost: this requirement blocks others downstream
+            blocking_others = [
+                r["name"] for r in items
+                if req["name"] in r["prerequisites"]
+            ]
+            if blocking_others:
+                score += len(blocking_others) * 5
+
+            # ── Reasons (max 3, human-readable Bahasa Indonesia) ──
+            reasons = []
+            reasons.append(
+                f"Menyelesaikan ini meningkatkan kesiapan sebesar {req['weight_pct']}%"
+            )
+            if blocking_others:
+                n = len(blocking_others)
+                reasons.append(
+                    f"Memblokir {n} requirement lain: {', '.join(blocking_others[:2])}"
+                )
+            if req["is_overdue"]:
+                reasons.append("Requirement ini sudah melewati tenggat waktu")
+            elif not req["assigned_to_id"]:
+                reasons.append("Belum ada anggota tim yang ditugaskan")
+            if req["evidence_count"] == 0 and len(reasons) < 3:
+                reasons.append("Belum ada bukti yang diunggah")
+            elif req["has_pending_evidence"] and len(reasons) < 3:
+                reasons.append("Bukti sudah diunggah — menunggu persetujuan")
+
+            # ── Time estimate based on current state ──────────────
+            est = 0
+            if not req["assigned_to_id"]:
+                est += 5   # assign step
+            if req["evidence_count"] == 0:
+                est += 7   # upload evidence
+            if req["evidence_count"] > 0:
+                est += 3   # get verified
+            est += 2       # mark complete
+            est = max(est, 2)
+
+            candidates.append({
+                "requirement_name":     req["name"],
+                "requirement_id":       req["id"],
+                "status_id":            req["status_id"],
+                "action":               f"Selesaikan {req['name']}",
+                "readiness_impact_pct": req["weight_pct"],
+                "est_minutes":          est,
+                "priority_score":       score,
+                "reasons":              reasons[:3],
+                "is_assigned":          bool(req["assigned_to_id"]),
+                "evidence_count":       req["evidence_count"],
+            })
+
+        # ── All clear — nothing to recommend ─────────────────────
+        if not candidates:
+            return {
+                "has_recommendations": False,
+                "all_clear":           intel["blocking_count"] == 0,
+                "primary":             None,
+                "alternatives":        [],
+                "current_readiness":   intel["readiness_score"],
+                "projected_readiness": intel["readiness_score"],
+                "message":             (
+                    "Semua requirement wajib sudah selesai! 🎉"
+                    if intel["blocking_count"] == 0
+                    else "Tidak ada tindakan tersedia saat ini."
+                ),
+            }
+
+        # ── Sort by priority score — highest first ────────────────
+        candidates.sort(key=lambda c: c["priority_score"], reverse=True)
+
+        # ── Primary recommendation ────────────────────────────────
+        top = candidates[0]
+        priority_label = (
+            "high"   if top["priority_score"] >= 70 else
+            "medium" if top["priority_score"] >= 40 else
+            "low"
+        )
+        primary = {
+            "requirement_name":      top["requirement_name"],
+            "requirement_id":        top["requirement_id"],
+            "status_id":             top["status_id"],
+            "action":                top["action"],
+            "priority":              priority_label,
+            "readiness_impact_pct":  top["readiness_impact_pct"],
+            "est_minutes":           top["est_minutes"],
+            "reasons":               top["reasons"],
+            "is_assigned":           top["is_assigned"],
+            "evidence_count":        top["evidence_count"],
+        }
+
+        # ── Alternatives (rank 2-4) ───────────────────────────────
+        alternatives = [
+            {
+                "rank":                 i + 2,
+                "requirement_name":     c["requirement_name"],
+                "requirement_id":       c["requirement_id"],
+                "status_id":            c["status_id"],
+                "action":               c["action"],
+                "readiness_impact_pct": c["readiness_impact_pct"],
+                "est_minutes":          c["est_minutes"],
+                "priority_score":       c["priority_score"],
+            }
+            for i, c in enumerate(candidates[1:3])
+        ]
+
+        projected = min(
+            intel["readiness_score"] + top["readiness_impact_pct"], 100
+        )
+
+        return {
+            "has_recommendations": True,
+            "all_clear":           False,
+            "primary":             primary,
+            "alternatives":        alternatives,
+            "current_readiness":   intel["readiness_score"],
+            "projected_readiness": projected,
+        }
     # =========================================================
     # SNAPSHOT / ADVANCE / CHECKLIST — unchanged
     # =========================================================

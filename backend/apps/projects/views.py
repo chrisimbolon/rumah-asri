@@ -695,3 +695,75 @@ class ProjectReadinessHistoryView(TenantScopedAPIView):
                 for s in snapshots
             ],
         })
+    
+class ProjectDecisionEngineView(TenantScopedAPIView):
+    """
+    Sprint 13: Decision Engine — ranked recommendations with quantified impact.
+
+    GET /api/projects/<id>/decision/
+
+    Response (blocked project):
+      {
+        "success":            true,
+        "project_id":         "uuid",
+        "project_name":       "Perumahan Asri Cluster A",
+        "has_recommendations": true,
+        "all_clear":           false,
+        "current_readiness":   40,
+        "projected_readiness": 100,
+        "primary": {
+          "requirement_name":     "Kontraktor",
+          "requirement_id":       "uuid",
+          "status_id":            "uuid",
+          "action":               "Selesaikan Kontraktor",
+          "priority":             "high",
+          "readiness_impact_pct": 60,
+          "est_minutes":          17,
+          "reasons": [
+            "Menyelesaikan ini meningkatkan kesiapan sebesar 60%",
+            "Memblokir 1 requirement lain: Jadwal proyek",
+            "Belum ada anggota tim yang ditugaskan"
+          ],
+          "is_assigned":   false,
+          "evidence_count": 1
+        },
+        "alternatives": [
+          {
+            "rank":                 2,
+            "requirement_name":     "Rencana Kerja",
+            "action":               "Selesaikan Rencana Kerja",
+            "readiness_impact_pct": 40,
+            "est_minutes":          12
+          }
+        ]
+      }
+
+    Response (all clear):
+      {
+        "success":            true,
+        "has_recommendations": false,
+        "all_clear":           true,
+        "primary":             null,
+        "alternatives":        [],
+        "current_readiness":   100,
+        "projected_readiness": 100,
+        "message":             "Semua requirement wajib sudah selesai! 🎉"
+      }
+
+    Design:
+    - Pure computation via Project.get_decision_engine()
+    - Deterministic, auditable — every number is arithmetic on weight_pct
+    - Tenant isolation via TenantScopedAPIView.get_object(pk)
+    - No new migration, no new model
+    """
+    model = Project
+
+    def get(self, request, pk):
+        project = self.get_object(pk)
+        engine  = project.get_decision_engine()
+        return Response({
+            "success":      True,
+            "project_id":   str(project.id),
+            "project_name": project.name,
+            **engine,
+        })

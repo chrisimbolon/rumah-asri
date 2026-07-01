@@ -625,3 +625,128 @@ class ActionChainAndActivityFilterTests(APITestCase):
                 (status.HTTP_404_NOT_FOUND, status.HTTP_403_FORBIDDEN),
                 f"Dev B should be blocked for type={filter_type}",
             )
+
+class DecisionEngineTests(APITestCase):
+    """
+    Sprint 13: Decision Engine isolation + correctness.
+
+    Covers:
+    - Tenant isolation on /decision/ endpoint
+    - Returns primary recommendation for a blocked project
+    - Returns all_clear when no mandatory requirements are pending
+    """
+
+    def setUp(self):
+        from apps.projects.models import (
+            ProjectRequirementStatus,
+            StageRequirement,
+        )
+        # ── Shared requirement ──────────────────────────────────────
+        self.req, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Kontraktor S13",
+            defaults={"is_mandatory": True, "weight": 60},
+        )
+
+        # ── Org A — victim ──────────────────────────────────────────
+        self.org_a = Organization.objects.create(name="Asri Sentosa Sprint13")
+        self.dev_a = CustomUser.objects.create_user(
+            email="dev.a.s13@test.id", password="pass12345!",
+            full_name="Dev A S13", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_a, user=self.dev_a, role="owner", is_active=True,
+        )
+        # Blocked project: mandatory requirement is PENDING
+        self.project_blocked = Project.objects.create(
+            organization=self.org_a, name="Cluster Blocked S13", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.req_status = ProjectRequirementStatus.objects.create(
+            project=self.project_blocked,
+            requirement=self.req,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+
+        # ── Org B — attacker ─────────────────────────────────────────
+        self.org_b = Organization.objects.create(name="Griya Sprint13")
+        self.dev_b = CustomUser.objects.create_user(
+            email="dev.b.s13@test.id", password="pass12345!",
+            full_name="Dev B S13", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_b, user=self.dev_b, role="owner", is_active=True,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    # ── Isolation ─────────────────────────────────────────────
+
+    def test_dev_b_cannot_read_dev_a_decision_engine(self):
+        """
+        Sprint 13: /decision/ endpoint must not expose Org A's
+        recommendation data to Org B's developer.
+        """
+        self._login_as(self.dev_b)
+        resp = self.client.get(
+            f"/api/projects/{self.project_blocked.id}/decision/"
+        )
+        self.assertIn(
+            resp.status_code,
+            (status.HTTP_404_NOT_FOUND, status.HTTP_403_FORBIDDEN),
+        )
+
+    # ── Correctness ───────────────────────────────────────────
+
+    def test_decision_engine_returns_primary_for_blocked_project(self):
+        """
+        Sprint 13: when a project has a pending mandatory requirement,
+        the Decision Engine must return has_recommendations=True with
+        a valid primary recommendation and correct structure.
+        """
+        self._login_as(self.dev_a)
+        resp = self.client.get(
+            f"/api/projects/{self.project_blocked.id}/decision/"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["has_recommendations"])
+        self.assertFalse(resp.data["all_clear"])
+
+        primary = resp.data["primary"]
+        self.assertIsNotNone(primary)
+        # Must name the blocking requirement
+        self.assertEqual(primary["requirement_name"], self.req.name)
+        # readiness_impact_pct must equal the requirement's weight_pct
+        self.assertGreater(primary["readiness_impact_pct"], 0)
+        # Must have reasons
+        self.assertIsInstance(primary["reasons"], list)
+        self.assertGreater(len(primary["reasons"]), 0)
+        # Projected readiness must be higher than current
+        self.assertGreater(
+            resp.data["projected_readiness"],
+            resp.data["current_readiness"],
+        )
+        # Must have priority field
+        self.assertIn(primary["priority"], ("high", "medium", "low"))
+
+    def test_decision_engine_all_clear_when_no_blockers(self):
+        """
+        Sprint 13: when all mandatory requirements are completed,
+        has_recommendations must be False and all_clear must be True.
+        """
+        from apps.projects.models import ProjectRequirementStatus
+        # Complete the requirement so nothing is blocking
+        self.req_status.status = ProjectRequirementStatus.Status.COMPLETED
+        self.req_status.save()
+
+        self._login_as(self.dev_a)
+        resp = self.client.get(
+            f"/api/projects/{self.project_blocked.id}/decision/"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["has_recommendations"])
+        self.assertTrue(resp.data["all_clear"])
+        self.assertIsNone(resp.data["primary"])
+        self.assertEqual(resp.data["alternatives"], [])
