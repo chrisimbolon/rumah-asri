@@ -74,7 +74,6 @@ import {
   XAxis, YAxis,
 } from "recharts";
 
-
 // ── Circular readiness gauge ──────────────────────────────────
 function ReadinessGauge({ score }: { score: number }) {
   const radius        = 36;
