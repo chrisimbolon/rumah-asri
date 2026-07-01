@@ -42,8 +42,9 @@ from apps.projects.models import (
     ProjectRequirementStatus,
     RequirementComment,
     RequirementEvidence,
+    ReadinessSnapshot,
     StageRequirement,
-)
+) 
 
 
 class ProjectsCrossTenantIsolationTests(APITestCase):
@@ -327,3 +328,113 @@ class ProjectsCrossTenantIsolationTests(APITestCase):
             for item in resp.data["my_tasks"] + resp.data["unassigned"]
         }
         self.assertIn(str(self.req_status_a.id), all_status_ids)
+
+class ReadinessSnapshotTests(APITestCase):
+    """
+    Sprint 10: ReadinessSnapshot isolation + correctness.
+
+    Covers:
+    - Tenant isolation on /readiness-history/ endpoint
+    - snapshot_readiness() writes to ReadinessSnapshot
+    - snapshot_readiness() uses update_or_create (no duplicate rows per day)
+    - History endpoint returns data in correct date order
+    - Empty history (no snapshots yet) returns empty results, not 500
+    """
+
+    def setUp(self):
+        # ── Org A ──────────────────────────────────────────────
+        self.org_a = Organization.objects.create(name="Asri Sentosa Sprint10")
+        self.dev_a = CustomUser.objects.create_user(
+            email="dev.a.s10@test.id", password="pass12345!",
+            full_name="Dev A S10", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_a, user=self.dev_a, role="owner", is_active=True,
+        )
+        self.project_a = Project.objects.create(
+            organization=self.org_a, name="Cluster A S10", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+
+        # ── Org B ──────────────────────────────────────────────
+        self.org_b = Organization.objects.create(name="Griya Makmur Sprint10")
+        self.dev_b = CustomUser.objects.create_user(
+            email="dev.b.s10@test.id", password="pass12345!",
+            full_name="Dev B S10", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_b, user=self.dev_b, role="owner", is_active=True,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    # ── Isolation ─────────────────────────────────────────────
+
+    def test_dev_b_cannot_read_dev_a_readiness_history(self):
+        """Core isolation: the readiness-history endpoint must not
+        expose Org A's score data to Org B's developer."""
+        # Seed a snapshot for Org A
+        ReadinessSnapshot.objects.create(
+            project=self.project_a, score=40, snapped_at=date.today(),
+        )
+        self._login_as(self.dev_b)
+        resp = self.client.get(f"/api/projects/{self.project_a.id}/readiness-history/")
+        self.assertIn(
+            resp.status_code,
+            (status.HTTP_404_NOT_FOUND, status.HTTP_403_FORBIDDEN),
+        )
+
+    # ── snapshot_readiness() correctness ──────────────────────
+
+    def test_snapshot_readiness_writes_readiness_snapshot_row(self):
+        """snapshot_readiness() must create a ReadinessSnapshot row
+        for today so the trend chart has data."""
+        self.assertEqual(
+            ReadinessSnapshot.objects.filter(project=self.project_a).count(), 0
+        )
+        self.project_a.snapshot_readiness()
+        self.assertEqual(
+            ReadinessSnapshot.objects.filter(project=self.project_a).count(), 1
+        )
+
+    def test_snapshot_readiness_is_idempotent_within_same_day(self):
+        """Calling snapshot_readiness() twice on the same day must not
+        create duplicate rows — update_or_create enforces uniqueness."""
+        self.project_a.snapshot_readiness()
+        self.project_a.snapshot_readiness()
+        self.assertEqual(
+            ReadinessSnapshot.objects.filter(project=self.project_a).count(), 1
+        )
+
+    # ── Endpoint correctness ───────────────────────────────────
+
+    def test_readiness_history_returns_results_in_date_order(self):
+        """History must come back oldest-first so the frontend line
+        chart renders left-to-right without any client-side sort."""
+        today     = date.today()
+        yesterday = today - timedelta(days=1)
+        ReadinessSnapshot.objects.create(project=self.project_a, score=52, snapped_at=today)
+        ReadinessSnapshot.objects.create(project=self.project_a, score=40, snapped_at=yesterday)
+
+        self._login_as(self.dev_a)
+        resp = self.client.get(
+            f"/api/projects/{self.project_a.id}/readiness-history/"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        dates  = [r["date"] for r in resp.data["results"]]
+        scores = [r["score"] for r in resp.data["results"]]
+        self.assertEqual(dates,  [yesterday.isoformat(), today.isoformat()])
+        self.assertEqual(scores, [40, 52])
+
+    def test_readiness_history_empty_returns_200_not_500(self):
+        """If no snapshots exist yet (first run, no data), the endpoint
+        must return an empty results list, never a 500."""
+        self._login_as(self.dev_a)
+        resp = self.client.get(
+            f"/api/projects/{self.project_a.id}/readiness-history/"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["success"])
+        self.assertEqual(resp.data["results"], [])

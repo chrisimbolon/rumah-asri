@@ -1,26 +1,27 @@
-# ==============================================
+# =============================================================================
 # backend/apps/projects/urls.py
-# All original URLs preserved — additive only.
-# Sprint 1 to 9 implemented
-# ==============================================
+# Sprint 10: adds readiness-history/ endpoint.
+# All Sprint 1-9 URLs preserved — additive only.
+# =============================================================================
 from django.urls import path
 
 from .views import (
+    AssignRequirementView,
     EvidenceEligibleVerifiersView,
+    MyActionsView,
     ProjectActivityView,
     ProjectAdvanceView,
     ProjectDetailView,
     ProjectFinancialView,
     ProjectIntelligenceView,
     ProjectListView,
+    ProjectOrgMembersView,
     ProjectPortfolioView,
+    ProjectReadinessHistoryView,        # Sprint 10
     ProjectRequirementUpdateView,
+    RequirementCommentView,
     RequirementEvidenceVerifyView,
     RequirementEvidenceView,
-    ProjectOrgMembersView,
-    RequirementCommentView,
-    AssignRequirementView,
-    MyActionsView,
 )
 
 urlpatterns = [
@@ -28,11 +29,10 @@ urlpatterns = [
     path("portfolio/",
          ProjectPortfolioView.as_view(),
          name="project-portfolio"),
-     
+
     path("my-actions/",
          MyActionsView.as_view(),
          name="project-my-actions"),
-
 
     # ── List + create ──────────────────────────────────────────
     path("",
@@ -54,6 +54,11 @@ urlpatterns = [
          ProjectIntelligenceView.as_view(),
          name="project-intelligence"),
 
+    # ── Sprint 10: Readiness trend history ────────────────────
+    path("<uuid:pk>/readiness-history/",
+         ProjectReadinessHistoryView.as_view(),
+         name="project-readiness-history"),
+
     # ── Update single requirement status ──────────────────────
     path("<uuid:pk>/requirements/<uuid:req_status_id>/",
          ProjectRequirementUpdateView.as_view(),
@@ -69,6 +74,11 @@ urlpatterns = [
          RequirementEvidenceVerifyView.as_view(),
          name="project-requirement-evidence-verify"),
 
+    # ── Evidence eligible verifiers ───────────────────────────
+    path("<uuid:pk>/requirements/<uuid:req_status_id>/evidence/<uuid:ev_id>/verifiers/",
+         EvidenceEligibleVerifiersView.as_view(),
+         name="evidence-eligible-verifiers"),
+
     # ── Sprint 3: Activity timeline ────────────────────────────
     path("<uuid:pk>/activity/",
          ProjectActivityView.as_view(),
@@ -79,21 +89,18 @@ urlpatterns = [
          ProjectFinancialView.as_view(),
          name="project-financial"),
 
-    path("<uuid:pk>/requirements/<uuid:req_status_id>/assign/", 
+    # ── Sprint 7: Assign + due date ───────────────────────────
+    path("<uuid:pk>/requirements/<uuid:req_status_id>/assign/",
          AssignRequirementView.as_view(),
          name="requirement-assign"),
 
-     path("<uuid:pk>/requirements/<uuid:req_status_id>/comments/",
+    # ── Sprint 7: Comments ────────────────────────────────────
+    path("<uuid:pk>/requirements/<uuid:req_status_id>/comments/",
          RequirementCommentView.as_view(),
          name="requirement-comments"),
 
-     path("<uuid:pk>/members/",
+    # ── Sprint 7: Org members ─────────────────────────────────
+    path("<uuid:pk>/members/",
          ProjectOrgMembersView.as_view(),
          name="project-members"),
-         
-     path("<uuid:pk>/requirements/<uuid:req_status_id>/evidence/<uuid:ev_id>/verifiers/",
-          EvidenceEligibleVerifiersView.as_view(),
-          name="evidence-eligible-verifiers",
-          ),
-
 ]

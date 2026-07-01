@@ -28,7 +28,7 @@ Sprint 9 : my_tasks    — requirements assigned to the user
           (items assigned to OTHER users are excluded — not noise)
 
 ZERO BREAKING CHANGES — all existing fields preserved.
-59 tests still green.
+82 tests still green.
 """
 import uuid
 from datetime import date, timedelta
@@ -555,6 +555,29 @@ class RiskSnapshot(models.Model):
         return f"{self.project.name} — {self.snapped_at}: score={self.score} ({self.level})"
 
 
+class ReadinessSnapshot(models.Model):
+    """
+    Sprint 10: Daily readiness score history for the trend chart.
+    One row per project per day — update_or_create in snapshot_readiness().
+    Mirrors RiskSnapshot (Sprint 6) pattern exactly.
+    """
+    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project    = models.ForeignKey(
+        "Project", on_delete=models.CASCADE, related_name="readiness_snapshots",
+    )
+    score      = models.IntegerField()
+    snapped_at = models.DateField(default=date.today, db_index=True)
+
+    class Meta:
+        verbose_name        = "Readiness Snapshot"
+        verbose_name_plural = "Readiness Snapshots"
+        ordering            = ["-snapped_at"]
+        unique_together     = [["project", "snapped_at"]]
+
+    def __str__(self):
+        return f"{self.project.name} — {self.snapped_at}: score={self.score}"
+
+
 # =============================================================================
 # Project — Sprint 7: org members helper + overdue alerts
 # =============================================================================
@@ -949,6 +972,22 @@ class Project(TenantScopedModel):
         snapshots = list(self.risk_snapshots.filter(snapped_at__gte=cutoff).order_by("snapped_at").values("snapped_at", "score", "level"))
         return [{"date": s["snapped_at"].isoformat(), "score": s["score"], "level": s["level"]} for s in snapshots]
 
+    @property
+    def readiness_trend_data(self):
+        """Sprint 10: Last 30 days of readiness snapshots for the trend chart."""
+        cutoff    = date.today() - timedelta(days=30)
+        snapshots = list(
+            self.readiness_snapshots
+            .filter(snapped_at__gte=cutoff)
+            .order_by("snapped_at")
+            .values("snapped_at", "score")
+        )
+        return [
+            {"date": s["snapped_at"].isoformat(), "score": s["score"]}
+            for s in snapshots
+        ]
+
+
     # =========================================================
     # INTELLIGENCE PROPERTIES — unchanged
     # =========================================================
@@ -1169,6 +1208,44 @@ class Project(TenantScopedModel):
             })
 
         risk_since = self.risk_since
+        completed_count   = sum(1 for item in items if item["status"] == ProjectRequirementStatus.Status.COMPLETED)
+        total_count       = len(items)
+
+        pending_evidence_count  = self.requirement_statuses.filter(
+            requirement__stage=self.stage,
+            requirement__is_active=True,
+            evidence__verification_status=RequirementEvidence.VerificationStatus.PENDING,
+            evidence__is_latest=True,
+        ).distinct().count()
+
+        rejected_evidence_count = self.requirement_statuses.filter(
+            requirement__stage=self.stage,
+            requirement__is_active=True,
+            evidence__verification_status=RequirementEvidence.VerificationStatus.REJECTED,
+            evidence__is_latest=True,
+        ).distinct().count()
+
+        evidence_uploaded = self.requirement_statuses.filter(
+            requirement__stage=self.stage,
+            requirement__is_active=True,
+        ).filter(evidence__isnull=False).distinct().count()
+
+        evidence_verified = self.requirement_statuses.filter(
+            requirement__stage=self.stage,
+            requirement__is_active=True,
+            evidence__verification_status=RequirementEvidence.VerificationStatus.APPROVED,
+            evidence__is_latest=True,
+        ).distinct().count()
+
+        key_progress = {
+            "requirements_completed": completed_count,
+            "requirements_total":     total_count,
+            "evidence_uploaded":      evidence_uploaded,
+            "evidence_verified":      evidence_verified,
+            "evidence_awaiting":      pending_evidence_count,
+            "overdue_count":          self._get_overdue_requirements_count(),
+        }
+
         return {
             "readiness_score":    self.readiness_score,
             "blocking_count":     self.blocking_count,
@@ -1189,18 +1266,10 @@ class Project(TenantScopedModel):
             "risk_factors":          risk_data["factors"],
             "risk_since":            risk_since.isoformat() if risk_since else None,
             "risk_trend_data":       self.risk_trend_data,
-             "pending_evidence_count": self.requirement_statuses.filter(
-                requirement__stage=self.stage,
-                requirement__is_active=True,
-                evidence__verification_status="pending",
-                evidence__is_latest=True,
-            ).distinct().count(),
-            "rejected_evidence_count": self.requirement_statuses.filter(
-                requirement__stage=self.stage,
-                requirement__is_active=True,
-                evidence__verification_status="rejected",
-                evidence__is_latest=True,
-            ).distinct().count(),
+            "pending_evidence_count":  pending_evidence_count,
+            "rejected_evidence_count": rejected_evidence_count,
+            "key_progress":            key_progress,           # Sprint 10
+            "readiness_trend_data":    self.readiness_trend_data,  # now uses ReadinessSnapshot
         }
 
     # =========================================================
@@ -1214,6 +1283,11 @@ class Project(TenantScopedModel):
             self.readiness_score_last       = current
             self.readiness_score_updated_at = timezone.now()
             self.save(update_fields=["readiness_score_last", "readiness_score_updated_at", "updated_at"])
+        # Sprint 10: write daily snapshot for readiness trend chart
+        ReadinessSnapshot.objects.update_or_create(
+            project=self, snapped_at=date.today(),
+            defaults={"score": current},
+        )
 
     def snapshot_risk(self):
         from django.utils import timezone

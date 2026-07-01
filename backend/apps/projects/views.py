@@ -3,6 +3,7 @@
 # Sprint 8: evidence version tracking + self-verify guard
 # All Sprint 1-7 views preserved — additive only.
 # =============================================================================
+from datetime import date
 from django.db import models as django_models
 from rest_framework import status
 from rest_framework.response import Response
@@ -500,3 +501,64 @@ class ProjectFinancialView(TenantScopedAPIView):
         project = self.get_object(pk)
         snapshot = project.financial_snapshot()
         return Response({"success": True, "project_id": str(project.id), "project_name": project.name, "financial": snapshot})
+
+class ProjectReadinessHistoryView(TenantScopedAPIView):
+    """
+    Sprint 10: 30-day (default) readiness score history for the trend chart.
+    Reads from ReadinessSnapshot — populated daily by snapshot_readiness().
+
+    GET /api/projects/<id>/readiness-history/?days=30
+
+    Query params:
+      days (int, 1-90, default 30) — how far back to look
+
+    Response:
+      {
+        "success":       true,
+        "project_id":    "uuid",
+        "project_name":  "Perumahan Asri Cluster A",
+        "current_score": 65,
+        "days":          30,
+        "results": [
+          {"date": "2026-06-01", "score": 40},
+          {"date": "2026-06-15", "score": 52},
+          ...
+        ]
+      }
+
+    Notes:
+    - If no snapshots exist yet (first run), returns empty results list.
+      The frontend handles this gracefully — shows "not enough data yet".
+    - Tenant isolation is guaranteed by TenantScopedAPIView.get_object(pk).
+    """
+    model = Project
+
+    def get(self, request, pk):
+        project = self.get_object(pk)
+
+        # Cap days to 90 to keep response lean — 90 data points max
+        try:
+            days = max(1, min(int(request.query_params.get("days", 30)), 90))
+        except (ValueError, TypeError):
+            days = 30
+
+        from datetime import timedelta
+        cutoff    = date.today() - timedelta(days=days)
+        snapshots = (
+            project.readiness_snapshots
+            .filter(snapped_at__gte=cutoff)
+            .order_by("snapped_at")
+            .values("snapped_at", "score")
+        )
+
+        return Response({
+            "success":       True,
+            "project_id":    str(project.id),
+            "project_name":  project.name,
+            "current_score": project.readiness_score,
+            "days":          days,
+            "results": [
+                {"date": s["snapped_at"].isoformat(), "score": s["score"]}
+                for s in snapshots
+            ],
+        })
