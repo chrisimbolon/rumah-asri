@@ -1928,11 +1928,11 @@ function ActionChainPanel({ chain }: { chain: ActionChain | null }) {
   );
 }
 
-
 // ── Sprint 12: Activity Timeline Panel ────────────────────────
 // New card rendered BELOW the main requirements + project info grid.
 // Fetches from GET /activity/?limit=20&type={filterType}
 // Filter tabs trigger re-fetch — no client-side filtering.
+
 function ActivityTimelinePanel({ projectId }: { projectId: string }) {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loading,    setLoading]    = useState(true);
