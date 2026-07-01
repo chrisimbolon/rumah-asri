@@ -20,11 +20,13 @@ import {
   evidenceApi,
   getRiskScoreMeta,
   IntelligenceSummary,
+  KeyProgress,
   OrgMember,
   Project,
   projectsApi,
   ProjectStage,
   READINESS_LABEL_META,
+  ReadinessHistoryPoint,
   RequirementComment,
   RequirementEvidence,
   RequirementItem,
@@ -57,6 +59,15 @@ import {
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import {
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis, YAxis,
+} from "recharts";
+
 
 // ── Circular readiness gauge ──────────────────────────────────
 function ReadinessGauge({ score }: { score: number }) {
@@ -1186,6 +1197,330 @@ function ParallelStageToggles({ project, onUpdated }: { project: Project; onUpda
   );
 }
 
+// ── Sprint 10: Readiness Trend Panel ─────────────────────────
+function ReadinessTrendPanel({
+  projectId,
+  currentScore,
+  inlineData,
+}: {
+  projectId:   string;
+  currentScore: number;
+  inlineData:  ReadinessHistoryPoint[];  // from get_intelligence_summary
+}) {
+  // Use inline data from intelligence summary (already fetched).
+  // If we have < 2 points, fetch fresh from the endpoint to get more history.
+  const [history, setHistory] = useState<ReadinessHistoryPoint[]>(inlineData);
+  const [loading, setLoading] = useState(inlineData.length < 2);
+
+  useEffect(() => {
+    if (inlineData.length >= 2) { setHistory(inlineData); return; }
+    projectsApi.getReadinessHistory(projectId, 30)
+      .then((d) => setHistory(d.results))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [projectId, inlineData]);
+
+  const color =
+    currentScore >= 80 ? "var(--color-success)" :
+    currentScore >= 50 ? "var(--color-warning)" :
+                         "var(--color-danger)";
+
+  // Format date to "25 Jun" for X axis
+  const fmt = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString("id-ID", { day: "numeric", month: "short" });
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
+            Tren Kesiapan
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>
+            30 hari terakhir
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 24, fontWeight: 800, color }}>{currentScore}%</div>
+          <div style={{ fontSize: 10, color: "var(--color-ink-3)" }}>saat ini</div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ height: 120, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-ink-3)", fontSize: 12 }}>
+          Memuat data tren...
+        </div>
+      ) : history.length < 2 ? (
+        <div style={{ height: 120, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontSize: 22, opacity: 0.3 }}>📈</div>
+          <div style={{ fontSize: 12, color: "var(--color-ink-3)" }}>
+            Data tren tersedia setelah beberapa hari aktivitas
+          </div>
+        </div>
+      ) : (
+        <ResponsiveContainer width="100%" height={120}>
+          <LineChart data={history} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+            <XAxis
+              dataKey="date"
+              tickFormatter={fmt}
+              tick={{ fontSize: 10, fill: "var(--color-ink-3)" }}
+              axisLine={false}
+              tickLine={false}
+              interval="preserveStartEnd"
+            />
+            <YAxis
+              domain={[0, 100]}
+              tick={{ fontSize: 10, fill: "var(--color-ink-3)" }}
+              axisLine={false}
+              tickLine={false}
+            />
+            <Tooltip
+              formatter={(value) => [`${value ?? 0}%`, "Kesiapan"]}
+              labelFormatter={(label) => fmt(String(label ?? ""))}
+              contentStyle={{
+                fontSize: 11,
+                border: "1px solid rgba(14,13,11,0.1)",
+                borderRadius: 6,
+                boxShadow: "0 4px 12px rgba(14,13,11,0.08)",
+              }}
+            />
+            <ReferenceLine y={80} stroke="var(--color-success)" strokeDasharray="3 3" strokeWidth={1} />
+            <Line
+              type="monotone"
+              dataKey="score"
+              stroke={color}
+              strokeWidth={2.5}
+              dot={false}
+              activeDot={{ r: 4, fill: color }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  );
+}
+
+
+// ── Sprint 10: Key Progress Card ──────────────────────────────
+function KeyProgressCard({ progress }: { progress: KeyProgress }) {
+  const metrics = [
+    {
+      label:   "Req. Selesai",
+      value:   progress.requirements_completed,
+      total:   progress.requirements_total,
+      color:   progress.requirements_completed === progress.requirements_total
+                 ? "var(--color-success)"
+                 : "var(--color-warning)",
+      icon:    "✅",
+    },
+    {
+      label:   "Bukti Diunggah",
+      value:   progress.evidence_uploaded,
+      total:   progress.requirements_total,
+      color:   "var(--color-accent)",
+      icon:    "📎",
+    },
+    {
+      label:   "Diverifikasi",
+      value:   progress.evidence_verified,
+      total:   progress.requirements_total,
+      color:   "var(--color-success)",
+      icon:    "✓",
+    },
+    {
+      label:   "Menunggu Review",
+      value:   progress.evidence_awaiting,
+      total:   null,
+      color:   progress.evidence_awaiting > 0 ? "var(--color-warning)" : "var(--color-ink-3)",
+      icon:    "⏳",
+    },
+    {
+      label:   "Terlambat",
+      value:   progress.overdue_count,
+      total:   null,
+      color:   progress.overdue_count > 0 ? "var(--color-danger)" : "var(--color-ink-3)",
+      icon:    "⚠",
+    },
+  ];
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 14 }}>
+        Progress Utama
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+        {metrics.map((m) => (
+          <div key={m.label} style={{
+            textAlign: "center",
+            padding: "10px 8px",
+            borderRadius: 8,
+            backgroundColor: "var(--color-paper-2)",
+          }}>
+            <div style={{ fontSize: 11, marginBottom: 4 }}>{m.icon}</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: m.color, lineHeight: 1 }}>
+              {m.value}
+              {m.total !== null && (
+                <span style={{ fontSize: 11, fontWeight: 400, color: "var(--color-ink-3)" }}>
+                  /{m.total}
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 4, lineHeight: 1.2 }}>
+              {m.label}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+// ── Sprint 10: Workspace Table view ──────────────────────────
+// Drop-in alternative to the Checklist view. Toggled by a state variable
+// in the main page. Shows all requirements as a compact sortable table.
+function WorkspaceTable({
+  requirements,
+  projectId,
+  onUpdated,
+}: {
+  requirements: import("@/lib/api/projects").RequirementItem[];
+  projectId:    string;
+  onUpdated:    (intel: import("@/lib/api/projects").IntelligenceSummary) => void;
+}) {
+  const statusColors: Record<string, { color: string; label: string }> = {
+    pending:             { color: "var(--color-ink-3)",   label: "Belum"     },
+    in_progress:         { color: "var(--color-warning)", label: "Diproses"  },
+    menunggu_verifikasi: { color: "var(--color-accent)",  label: "Review"    },
+    completed:           { color: "var(--color-success)", label: "Selesai"   },
+    not_applicable:      { color: "var(--color-ink-3)",   label: "N/A"       },
+  };
+
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr style={{ borderBottom: "2px solid rgba(14,13,11,0.08)" }}>
+            {["Requirement", "Pemilik", "Status", "Tenggat", "Bukti", "Bobot"].map((h) => (
+              <th key={h} style={{
+                padding: "8px 10px", textAlign: "left",
+                fontSize: 10, fontWeight: 700,
+                color: "var(--color-ink-3)",
+                textTransform: "uppercase", letterSpacing: "0.06em",
+                whiteSpace: "nowrap",
+              }}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {requirements.map((req) => {
+            const sm      = statusColors[req.status] ?? statusColors.pending;
+            const isOver  = req.is_overdue;
+            const blocked = req.is_dependency_blocked;
+
+            return (
+              <tr key={req.id} style={{
+                borderBottom: "1px solid rgba(14,13,11,0.05)",
+                opacity: blocked ? 0.5 : 1,
+                backgroundColor: req.status === "completed"
+                  ? "var(--color-success-light)"
+                  : "transparent",
+              }}>
+                {/* Requirement name */}
+                <td style={{ padding: "10px 10px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {blocked && <Lock size={11} style={{ color: "var(--color-ink-3)", flexShrink: 0 }} />}
+                    <span style={{
+                      fontWeight: 500,
+                      color: req.status === "completed" ? "var(--color-ink-3)" : "var(--color-ink)",
+                      textDecoration: req.status === "completed" ? "line-through" : "none",
+                    }}>
+                      {req.name}
+                    </span>
+                    {req.is_mandatory && req.status !== "completed" && !blocked && (
+                      <span style={{ fontSize: 9, color: "var(--color-danger)", fontWeight: 700 }}>⚡</span>
+                    )}
+                  </div>
+                  {req.description && (
+                    <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 2 }}>
+                      {req.description}
+                    </div>
+                  )}
+                </td>
+
+                {/* Owner */}
+                <td style={{ padding: "10px 10px", whiteSpace: "nowrap" }}>
+                  {req.assigned_to_name
+                    ? <span style={{ fontSize: 11, color: "var(--color-ink)" }}>👤 {req.assigned_to_name}</span>
+                    : <span style={{ fontSize: 11, color: "var(--color-ink-3)", fontStyle: "italic" }}>—</span>
+                  }
+                </td>
+
+                {/* Status badge */}
+                <td style={{ padding: "10px 10px", whiteSpace: "nowrap" }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 600,
+                    padding: "2px 8px", borderRadius: 999,
+                    color: sm.color,
+                    backgroundColor: `${sm.color}18`,
+                  }}>
+                    {sm.label}
+                  </span>
+                </td>
+
+                {/* Due date */}
+                <td style={{ padding: "10px 10px", whiteSpace: "nowrap" }}>
+                  {req.due_date ? (
+                    <span style={{
+                      fontSize: 11,
+                      color: isOver ? "var(--color-danger)" : "var(--color-ink-3)",
+                      fontWeight: isOver ? 700 : 400,
+                    }}>
+                      {isOver
+                        ? `⏰ ${Math.abs(req.days_until_due ?? 0)}h terlambat`
+                        : new Date(req.due_date).toLocaleDateString("id-ID", { day: "numeric", month: "short" })
+                      }
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>—</span>
+                  )}
+                </td>
+
+                {/* Evidence count */}
+                <td style={{ padding: "10px 10px", textAlign: "center" }}>
+                  {req.evidence_count > 0 ? (
+                    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-accent)" }}>
+                      📎 {req.evidence_count}
+                      {req.has_pending_evidence && " ⏳"}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>—</span>
+                  )}
+                </td>
+
+                {/* Weight */}
+                <td style={{ padding: "10px 10px", whiteSpace: "nowrap" }}>
+                  {req.is_mandatory ? (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--color-ink-3)" }}>
+                      {req.weight_pct}%
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>—</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -1199,6 +1534,7 @@ export default function ProjectDetailPage() {
   const [editMode,  setEditMode]  = useState(false);
   const [error,     setError]     = useState<string | null>(null);
   const [form,      setForm]      = useState<UpdateProjectPayload>({});
+  const [reqView, setReqView] = useState<"checklist" | "workspace">("checklist");
 
   const loadProject = async () => {
     try {
@@ -1386,6 +1722,19 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
+      {/* Sprint 10: Readiness Trend + Key Progress */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+          <ReadinessTrendPanel
+            projectId={project.id}
+            currentScore={intel.readiness_score}
+            inlineData={intel.readiness_trend_data ?? []}
+        />
+        {intel.key_progress && (
+        <KeyProgressCard progress={intel.key_progress} />
+        )}
+      </div>
+
+
       {/* ── Alerts + Dimensions row ── */}
       {((intel.alerts && intel.alerts.length > 0) || intel.readiness_dimensions) && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
@@ -1433,9 +1782,29 @@ export default function ProjectDetailPage() {
 
         {/* ── Requirements ── */}
         <div className="card">
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 4 }}>
-            Checklist Tahap {meta.label}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
+         Checklist Tahap {meta.label}
           </div>
+          {/* Sprint 10: view mode toggle */}
+          <div style={{ display: "flex", gap: 4 }}>
+            {(["checklist", "workspace"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setReqView(mode)}
+                style={{
+                padding: "3px 10px", borderRadius: 4, border: "1px solid rgba(14,13,11,0.12)",
+                fontSize: 10, fontWeight: 600, cursor: "pointer",
+                backgroundColor: reqView === mode ? "var(--color-accent)" : "white",
+                color:           reqView === mode ? "white" : "var(--color-ink-3)",
+                transition: "all 0.15s",
+                }}>
+                {mode === "checklist" ? "📋 Checklist" : "📊 Workspace"}
+              </button>
+            ))}
+          </div>
+        </div>
+
           {/* Sprint 4: dependency legend */}
           {depBlockedCount > 0 && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12, padding: "6px 10px", backgroundColor: "rgba(14,13,11,0.04)", borderRadius: 6 }}>
@@ -1449,7 +1818,13 @@ export default function ProjectDetailPage() {
             {intel.requirements.filter(r => r.status === "completed").length}/{intel.requirements.length} selesai
           </div>
 
-          {intel.requirements.length === 0 ? (
+          {reqView === "workspace" ? (
+            <WorkspaceTable
+              requirements={intel.requirements}
+              projectId={project.id}
+              onUpdated={handleRequirementUpdated}
+            />
+          ) : intel.requirements.length === 0 ? (
             <div style={{ fontSize: 12, color: "var(--color-ink-3)", fontStyle: "italic", textAlign: "center", padding: "24px 0" }}>
               Tidak ada checklist untuk tahap ini
             </div>
