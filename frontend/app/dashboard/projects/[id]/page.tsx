@@ -16,6 +16,8 @@
 import {
   ALERT_META,
   commentApi,
+  DependencyGraph,
+  DependencyNode,
   EVIDENCE_META,
   EVIDENCE_VERSION_META,
   evidenceApi,
@@ -1522,6 +1524,309 @@ function WorkspaceTable({
   );
 }
 
+function DependencyGraphPanel({ projectId }: { projectId: string }) {
+  const [graph,    setGraph]    = useState<DependencyGraph | null>(null);
+  const [loading,  setLoading]  = useState(true);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    projectsApi.getDependencyGraph(projectId)
+      .then(setGraph)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
+  // ── Status colour helpers ────────────────────────────────
+  const nodeColor = (node: DependencyNode): string => {
+    if (node.status === "completed")           return "var(--color-success)";
+    if (node.status === "menunggu_verifikasi") return "var(--color-accent)";
+    if (node.is_blocking)                      return "var(--color-danger)";
+    if (node.is_dependency_blocked)            return "var(--color-ink-3)";
+    if (node.status === "in_progress")         return "var(--color-warning)";
+    return "rgba(14,13,11,0.3)";
+  };
+
+  const nodeBg = (node: DependencyNode): string => {
+    if (node.status === "completed")           return "var(--color-success-light)";
+    if (node.status === "menunggu_verifikasi") return "var(--color-accent-light)";
+    if (node.is_blocking)                      return "var(--color-danger-light)";
+    if (node.is_dependency_blocked)            return "rgba(14,13,11,0.04)";
+    if (node.status === "in_progress")         return "var(--color-warning-light)";
+    return "var(--color-paper-2)";
+  };
+
+  const nodeIcon = (node: DependencyNode): string => {
+    if (node.status === "completed")           return "✅";
+    if (node.status === "menunggu_verifikasi") return "⏳";
+    if (node.is_blocking)                      return "⚡";
+    if (node.is_dependency_blocked)            return "🔒";
+    if (node.status === "in_progress")         return "●";
+    return "○";
+  };
+
+  if (loading) return (
+    <div className="card" style={{ marginBottom: 16, textAlign: "center", padding: 16, color: "var(--color-ink-3)", fontSize: 12 }}>
+      Memuat dependency graph...
+    </div>
+  );
+
+  if (!graph || graph.nodes.length === 0) return null;
+
+  // ── Topological sort → column assignment ─────────────────
+  // Each node gets a column = max(prereq_columns) + 1.
+  // Nodes with no prerequisites are in column 0.
+  const incomingEdges = new Map<string, string[]>();
+  graph.nodes.forEach(n => incomingEdges.set(n.id, []));
+  graph.edges.forEach(e => {
+    const arr = incomingEdges.get(e.to) ?? [];
+    arr.push(e.from);
+    incomingEdges.set(e.to, arr);
+  });
+
+  const columns = new Map<string, number>();
+  const assignCol = (nodeId: string, visited = new Set<string>()): number => {
+    if (columns.has(nodeId)) return columns.get(nodeId)!;
+    if (visited.has(nodeId)) return 0;
+    visited.add(nodeId);
+    const prereqs = incomingEdges.get(nodeId) ?? [];
+    const col = prereqs.length === 0
+      ? 0
+      : Math.max(...prereqs.map(p => assignCol(p, new Set(visited)))) + 1;
+    columns.set(nodeId, col);
+    return col;
+  };
+  graph.nodes.forEach(n => assignCol(n.id));
+
+  // Group nodes by column, maintain original order within column
+  const colGroups = new Map<number, string[]>();
+  graph.nodes.forEach(n => {
+    const col = columns.get(n.id) ?? 0;
+    if (!colGroups.has(col)) colGroups.set(col, []);
+    colGroups.get(col)!.push(n.id);
+  });
+  const numCols = Math.max(...Array.from(columns.values())) + 1;
+
+  // ── Node positions ────────────────────────────────────────
+  const NODE_W  = 152;
+  const NODE_H  = 58;
+  const COL_GAP = 56;
+  const ROW_GAP = 14;
+
+  const nodeMap    = new Map(graph.nodes.map(n => [n.id, n]));
+  const positions  = new Map<string, { x: number; y: number }>();
+
+  for (let col = 0; col < numCols; col++) {
+    const nodesInCol = colGroups.get(col) ?? [];
+    nodesInCol.forEach((nodeId, rowIdx) => {
+      positions.set(nodeId, {
+        x: col * (NODE_W + COL_GAP),
+        y: rowIdx * (NODE_H + ROW_GAP),
+      });
+    });
+  }
+
+  const maxRows = Math.max(...Array.from(colGroups.values()).map(g => g.length));
+  const svgW    = numCols * (NODE_W + COL_GAP) - COL_GAP + 24;
+  const svgH    = maxRows * (NODE_H + ROW_GAP) - ROW_GAP + 16;
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      {/* ── Header ── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
+            Dependency Graph
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>
+            Apa yang bergantung pada apa — tahap {graph.stage_display}
+          </div>
+        </div>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          style={{ fontSize: 11, color: "var(--color-accent)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+          {expanded ? "Sembunyikan ↑" : "Lihat graf ↓"}
+        </button>
+      </div>
+
+      {/* ── Legend ── */}
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 12 }}>
+        {[
+          { color: "var(--color-success)", label: "Selesai"    },
+          { color: "var(--color-warning)", label: "Diproses"   },
+          { color: "var(--color-accent)",  label: "Review"     },
+          { color: "var(--color-danger)",  label: "Memblokir"  },
+          { color: "var(--color-ink-3)",   label: "Terkunci"   },
+        ].map(({ color, label }) => (
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <div style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: color }} />
+            <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Collapsed: pill chain ── */}
+      {!expanded && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {graph.nodes.map((node, i) => {
+            const color = nodeColor(node);
+            const bg    = nodeBg(node);
+            const icon  = nodeIcon(node);
+            return (
+              <div key={node.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{
+                  padding: "5px 11px", borderRadius: 999,
+                  backgroundColor: bg,
+                  border: `1.5px solid ${color}44`,
+                  fontSize: 11, fontWeight: 600, color,
+                  display: "flex", alignItems: "center", gap: 5,
+                }}>
+                  <span style={{ fontSize: 12 }}>{icon}</span>
+                  {node.name}
+                  {node.is_mandatory && (
+                    <span style={{ fontSize: 9, opacity: 0.7 }}>{node.weight_pct}%</span>
+                  )}
+                </div>
+                {/* Only show arrow if there's an edge FROM this node */}
+                {graph.edges.some(e => e.from === node.id) && (
+                  <span style={{ color: "var(--color-ink-3)", fontSize: 14, lineHeight: 1 }}>→</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Expanded: SVG graph ── */}
+      {expanded && (
+        <div style={{ overflowX: "auto", paddingBottom: 4 }}>
+          <svg
+            width={svgW}
+            height={svgH + 8}
+            style={{ display: "block", minWidth: svgW }}
+          >
+            {/* ── Edges ── */}
+            {graph.edges.map((edge, i) => {
+              const from = positions.get(edge.from);
+              const to   = positions.get(edge.to);
+              if (!from || !to) return null;
+
+              const x1 = from.x + NODE_W + 10;
+              const y1 = from.y + NODE_H / 2 + 5;
+              const x2 = to.x + 10;
+              const y2 = to.y + NODE_H / 2 + 5;
+              const cx  = x1 + (x2 - x1) * 0.55;
+
+              const toNode   = nodeMap.get(edge.to);
+              const fromNode = nodeMap.get(edge.from);
+              const edgeColor =
+                toNode?.is_dependency_blocked  ? "rgba(14,13,11,0.12)" :
+                toNode?.is_blocking            ? "var(--color-danger)"  :
+                fromNode?.status === "completed" ? "var(--color-success)" :
+                                                  "rgba(14,13,11,0.18)";
+              const isDashed = !!toNode?.is_dependency_blocked;
+
+              return (
+                <g key={`edge-${i}`}>
+                  <path
+                    d={`M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`}
+                    fill="none"
+                    stroke={edgeColor}
+                    strokeWidth={1.5}
+                    strokeDasharray={isDashed ? "4 3" : undefined}
+                  />
+                  {/* Arrowhead */}
+                  <polygon
+                    points={`${x2},${y2} ${x2 - 7},${y2 - 4} ${x2 - 7},${y2 + 4}`}
+                    fill={edgeColor}
+                  />
+                </g>
+              );
+            })}
+
+            {/* ── Nodes ── */}
+            {graph.nodes.map((node) => {
+              const pos   = positions.get(node.id);
+              if (!pos) return null;
+
+              const color = nodeColor(node);
+              const bg    = nodeBg(node);
+              const icon  = nodeIcon(node);
+              const px    = pos.x + 10;
+              const py    = pos.y + 5;
+              // Truncate long names for SVG text
+              const displayName = node.name.length > 17
+                ? node.name.slice(0, 15) + "…"
+                : node.name;
+
+              return (
+                <g key={`node-${node.id}`} transform={`translate(${px}, ${py})`}>
+                  {/* Node rectangle */}
+                  <rect
+                    width={NODE_W}
+                    height={NODE_H}
+                    rx={8}
+                    fill={bg}
+                    stroke={color}
+                    strokeWidth={node.is_blocking ? 2 : 1.5}
+                  />
+                  {/* Status icon */}
+                  <text
+                    x={12}
+                    y={NODE_H / 2}
+                    fontSize={15}
+                    dominantBaseline="middle"
+                    textAnchor="start"
+                  >
+                    {icon}
+                  </text>
+                  {/* Requirement name */}
+                  <text
+                    x={32}
+                    y={NODE_H / 2 - (node.is_mandatory ? 7 : 0)}
+                    fontSize={11}
+                    fontWeight={600}
+                    fill={color}
+                    dominantBaseline="middle"
+                  >
+                    {displayName}
+                  </text>
+                  {/* Weight badge (mandatory only) */}
+                  {node.is_mandatory && (
+                    <text
+                      x={32}
+                      y={NODE_H / 2 + 9}
+                      fontSize={9}
+                      fill={color}
+                      dominantBaseline="middle"
+                      opacity={0.65}
+                    >
+                      bobot {node.weight_pct}%
+                      {node.is_blocking    ? " · ⚡ memblokir" :
+                       node.status === "completed" ? " · selesai" : ""}
+                    </text>
+                  )}
+                  {/* Optional label */}
+                  {!node.is_mandatory && (
+                    <text
+                      x={32}
+                      y={NODE_H / 2 + 9}
+                      fontSize={9}
+                      fill="var(--color-ink-3)"
+                      dominantBaseline="middle"
+                    >
+                      opsional
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -1780,6 +2085,9 @@ export default function ProjectDetailPage() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+
+        {/* Sprint 11: Dependency Graph */}
+        <DependencyGraphPanel projectId={project.id} />
 
         {/* ── Requirements ── */}
         <div className="card">
