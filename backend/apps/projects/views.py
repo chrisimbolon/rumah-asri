@@ -480,9 +480,9 @@ class EvidenceEligibleVerifiersView(TenantScopedAPIView):
         })
 
 
-# =============================================================================
+# ==================================================
 # Sprint 3: Activity + Financial (unchanged)
-# =============================================================================
+# ==================================================
 
 class ProjectActivityView(TenantScopedAPIView):
     """
