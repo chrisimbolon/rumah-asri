@@ -438,3 +438,69 @@ class ReadinessSnapshotTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertTrue(resp.data["success"])
         self.assertEqual(resp.data["results"], [])
+
+class DependencyGraphTests(APITestCase):
+    """
+    Sprint 11: Dependency graph endpoint isolation + correctness.
+    """
+
+    def setUp(self):
+        from apps.projects.models import StageRequirement, ProjectRequirementStatus
+        self.req, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Kontraktor S11",
+            defaults={"is_mandatory": True, "weight": 60},
+        )
+
+        self.org_a = Organization.objects.create(name="Asri S11 A")
+        self.dev_a = CustomUser.objects.create_user(
+            email="dev.a.s11@test.id", password="pass12345!",
+            full_name="Dev A S11", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_a, user=self.dev_a, role="owner", is_active=True,
+        )
+        self.project_a = Project.objects.create(
+            organization=self.org_a, name="Cluster A S11", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+
+        self.org_b = Organization.objects.create(name="Griya S11 B")
+        self.dev_b = CustomUser.objects.create_user(
+            email="dev.b.s11@test.id", password="pass12345!",
+            full_name="Dev B S11", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_b, user=self.dev_b, role="owner", is_active=True,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def test_dev_b_cannot_read_dev_a_dependency_graph(self):
+        self._login_as(self.dev_b)
+        resp = self.client.get(
+            f"/api/projects/{self.project_a.id}/dependency-graph/"
+        )
+        self.assertIn(
+            resp.status_code,
+            (status.HTTP_404_NOT_FOUND, status.HTTP_403_FORBIDDEN),
+        )
+
+    def test_dev_a_dependency_graph_returns_nodes_and_edges(self):
+        self._login_as(self.dev_a)
+        resp = self.client.get(
+            f"/api/projects/{self.project_a.id}/dependency-graph/"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["success"])
+        self.assertIn("nodes", resp.data)
+        self.assertIn("edges", resp.data)
+        self.assertIsInstance(resp.data["nodes"], list)
+        self.assertIsInstance(resp.data["edges"], list)
+        if resp.data["nodes"]:
+            node = resp.data["nodes"][0]
+            for field in ("id", "name", "status", "is_mandatory",
+                          "is_blocking", "is_dependency_blocked", "weight_pct"):
+                self.assertIn(field, node)

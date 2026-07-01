@@ -1,7 +1,7 @@
 # =============================================================================
 # backend/apps/projects/urls.py
-# Sprint 10: adds readiness-history/ endpoint.
-# All Sprint 1-9 URLs preserved — additive only.
+# Sprint 11: adds dependency-graph/ endpoint.
+# All Sprint 1-10 URLs preserved — additive only.
 # =============================================================================
 from django.urls import path
 
@@ -11,13 +11,14 @@ from .views import (
     MyActionsView,
     ProjectActivityView,
     ProjectAdvanceView,
+    ProjectDependencyGraphView,         # Sprint 11
     ProjectDetailView,
     ProjectFinancialView,
     ProjectIntelligenceView,
     ProjectListView,
     ProjectOrgMembersView,
     ProjectPortfolioView,
-    ProjectReadinessHistoryView,        # Sprint 10
+    ProjectReadinessHistoryView,
     ProjectRequirementUpdateView,
     RequirementCommentView,
     RequirementEvidenceVerifyView,
@@ -58,6 +59,11 @@ urlpatterns = [
     path("<uuid:pk>/readiness-history/",
          ProjectReadinessHistoryView.as_view(),
          name="project-readiness-history"),
+
+    # ── Sprint 11: Dependency graph ───────────────────────────
+    path("<uuid:pk>/dependency-graph/",
+         ProjectDependencyGraphView.as_view(),
+         name="project-dependency-graph"),
 
     # ── Update single requirement status ──────────────────────
     path("<uuid:pk>/requirements/<uuid:req_status_id>/",

@@ -501,6 +501,97 @@ class ProjectFinancialView(TenantScopedAPIView):
         project = self.get_object(pk)
         snapshot = project.financial_snapshot()
         return Response({"success": True, "project_id": str(project.id), "project_name": project.name, "financial": snapshot})
+    
+class ProjectDependencyGraphView(TenantScopedAPIView):
+    """
+    Sprint 11: Visual dependency graph data for the current stage.
+    Transforms get_intelligence_summary() requirements into nodes + edges.
+
+    GET /api/projects/<id>/dependency-graph/
+
+    Response:
+      {
+        "success":      true,
+        "project_id":   "uuid",
+        "project_name": "Perumahan Asri Cluster A",
+        "stage":        "konstruksi",
+        "nodes": [
+          {
+            "id":                    "uuid",
+            "name":                  "Kontraktor",
+            "status":                "in_progress",
+            "status_display":        "Sedang Diproses",
+            "is_mandatory":          true,
+            "is_blocking":           true,
+            "is_dependency_blocked": false,
+            "weight_pct":            60,
+            "prerequisites":         [],
+            "unmet_prerequisites":   []
+          }
+        ],
+        "edges": [
+          { "from": "uuid-a", "to": "uuid-b" }
+        ]
+      }
+
+    Design decisions:
+    - Reuses get_intelligence_summary() as single source of truth.
+      All blocking/dependency state is already computed there.
+    - edges derived from prerequisites[] — the Sprint 4 M2M field.
+    - No new migration. No new model. Pure computation.
+    - Tenant isolation guaranteed by TenantScopedAPIView.get_object(pk).
+    """
+    model = Project
+
+    def get(self, request, pk):
+        project = self.get_object(pk)
+        intel   = project.get_intelligence_summary()
+        requirements = intel["requirements"]
+
+        # Build name→id map for edge resolution
+        name_to_id = {req["name"]: req["id"] for req in requirements}
+
+        # Build nodes — derive is_blocking from existing intelligence fields
+        nodes = []
+        for req in requirements:
+            is_blocking = (
+                req["is_mandatory"]
+                and req["status"] not in ("completed", "menunggu_verifikasi")
+                and not req["is_dependency_blocked"]
+            )
+            nodes.append({
+                "id":                    req["id"],
+                "name":                  req["name"],
+                "status":                req["status"],
+                "status_display":        req["status_display"],
+                "is_mandatory":          req["is_mandatory"],
+                "is_blocking":           is_blocking,
+                "is_dependency_blocked": req["is_dependency_blocked"],
+                "weight_pct":            req["weight_pct"],
+                "prerequisites":         req["prerequisites"],
+                "unmet_prerequisites":   req["unmet_prerequisites"],
+            })
+
+        # Build edges from prerequisite relationships
+        edges = []
+        for req in requirements:
+            for prereq_name in req["prerequisites"]:
+                from_id = name_to_id.get(prereq_name)
+                if from_id:
+                    edges.append({
+                        "from": from_id,
+                        "to":   req["id"],
+                    })
+
+        return Response({
+            "success":      True,
+            "project_id":   str(project.id),
+            "project_name": project.name,
+            "stage":        project.stage,
+            "stage_display": project.stage_display,
+            "nodes":        nodes,
+            "edges":        edges,
+        })
 
 class ProjectReadinessHistoryView(TenantScopedAPIView):
     """
