@@ -14,6 +14,9 @@
 // ============================================================
 
 import {
+  ActionChain,
+  ActivityFilterType,
+  ActivityItem,
   ALERT_META,
   commentApi,
   DependencyGraph,
@@ -1827,6 +1830,290 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
   );
 }
 
+// ── Sprint 12: Action Chain Panel ─────────────────────────────
+// Slots inside the existing Alerts card, below AlertsPanel.
+// Shows ordered micro-steps to resolve the primary blocker.
+// Only renders if intel.action_chain is non-null (i.e. there IS a blocker).
+function ActionChainPanel({ chain }: { chain: ActionChain | null }) {
+  if (!chain) return null;
+
+  const stepIcon: Record<string, string> = {
+    assign:   "👤",
+    upload:   "📎",
+    verify:   "⏳",
+    complete: "✓",
+  };
+
+  return (
+    <div style={{
+      marginTop: 12, paddingTop: 12,
+      borderTop: "1px solid rgba(14,13,11,0.06)",
+    }}>
+      {/* Sub-header */}
+      <div style={{
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between", marginBottom: 10,
+      }}>
+        <div style={{
+          fontSize: 10, fontWeight: 700,
+          color: "var(--color-ink-3)",
+          textTransform: "uppercase", letterSpacing: "0.06em",
+        }}>
+          Langkah Berikutnya
+        </div>
+        <div style={{
+          fontSize: 10, fontWeight: 600,
+          color: chain.completed_steps > 0 ? "var(--color-success)" : "var(--color-ink-3)",
+        }}>
+          {chain.completed_steps}/{chain.total_steps} selesai
+        </div>
+      </div>
+
+      {/* Steps */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        {chain.steps.map((step) => (
+          <div key={step.step} style={{
+            display: "flex", alignItems: "center", gap: 9,
+            opacity: step.is_done ? 0.45 : 1,
+          }}>
+            {/* Step circle */}
+            <div style={{
+              width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+              backgroundColor: step.is_done
+                ? "var(--color-success)"
+                : "rgba(14,13,11,0.07)",
+              border: step.is_done
+                ? "none"
+                : "1.5px solid rgba(14,13,11,0.15)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: step.is_done ? 11 : 10, fontWeight: 700,
+              color: step.is_done ? "white" : "var(--color-ink-3)",
+            }}>
+              {step.is_done ? "✓" : step.step}
+            </div>
+            {/* Step label */}
+            <div style={{ flex: 1 }}>
+              <span style={{
+                fontSize: 11,
+                fontWeight: step.is_done ? 400 : 600,
+                color: step.is_done ? "var(--color-ink-3)" : "var(--color-ink)",
+                textDecoration: step.is_done ? "line-through" : "none",
+              }}>
+                {stepIcon[step.action_type] ?? "•"} {step.action}
+              </span>
+            </div>
+            {/* Time estimate (only for pending steps) */}
+            {!step.is_done && (
+              <span style={{
+                fontSize: 10, color: "var(--color-ink-3)",
+                whiteSpace: "nowrap", flexShrink: 0,
+              }}>
+                ~{step.est_minutes} mnt
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Estimated total remaining */}
+      {chain.est_remaining_minutes > 0 && (
+        <div style={{
+          marginTop: 10, paddingTop: 8,
+          borderTop: "1px solid rgba(14,13,11,0.04)",
+          fontSize: 10, color: "var(--color-ink-3)", textAlign: "right",
+        }}>
+          ⏱ Est. sisa: <strong>{chain.est_remaining_minutes} menit</strong> untuk membuka blokir
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── Sprint 12: Activity Timeline Panel ────────────────────────
+// New card rendered BELOW the main requirements + project info grid.
+// Fetches from GET /activity/?limit=20&type={filterType}
+// Filter tabs trigger re-fetch — no client-side filtering.
+function ActivityTimelinePanel({ projectId }: { projectId: string }) {
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [filterType, setFilterType] = useState<ActivityFilterType>("all");
+  const [count,      setCount]      = useState(0);
+
+  useEffect(() => {
+    setLoading(true);
+    projectsApi.getActivity(projectId, 20, filterType)
+      .then((data) => {
+        setActivities(data.results);
+        setCount(data.count);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [projectId, filterType]);
+
+  const filterTabs: { key: ActivityFilterType; label: string; icon: string }[] = [
+    { key: "all",         label: "Semua",     icon: "📋" },
+    { key: "evidence",    label: "Bukti",      icon: "📎" },
+    { key: "readiness",   label: "Kesiapan",  icon: "✅" },
+    { key: "assignments", label: "Penugasan", icon: "👤" },
+    { key: "comments",    label: "Komentar",  icon: "💬" },
+  ];
+
+  // Action type → icon mapping
+  const actionIcon: Record<string, string> = {
+    created:           "🆕",
+    updated:           "✏️",
+    evidence_uploaded: "📎",
+    evidence_approved: "✅",
+    evidence_rejected: "❌",
+    completed:         "✓",
+    stage_advanced:    "🚀",
+    assigned:          "👤",
+    due_date_set:      "📅",
+    comment_added:     "💬",
+  };
+
+  // Action type → colour for the dot
+  const actionColor = (action: string): string => {
+    if (action === "completed" || action === "evidence_approved") return "var(--color-success)";
+    if (action === "evidence_rejected")                           return "var(--color-danger)";
+    if (action === "stage_advanced")                              return "var(--color-accent)";
+    if (action === "evidence_uploaded")                           return "var(--color-warning)";
+    if (action === "assigned" || action === "due_date_set")       return "var(--color-info)";
+    return "rgba(14,13,11,0.2)";
+  };
+
+  // Human-readable relative timestamps in Bahasa Indonesia
+  const relativeTime = (iso: string): string => {
+    const diff    = Date.now() - new Date(iso).getTime();
+    const minutes = Math.floor(diff / 60_000);
+    if (minutes < 1)   return "baru saja";
+    if (minutes < 60)  return `${minutes} mnt yang lalu`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24)    return `${hours} jam yang lalu`;
+    const days = Math.floor(hours / 24);
+    if (days === 1)    return "kemarin";
+    if (days < 30)     return `${days} hari yang lalu`;
+    return new Date(iso).toLocaleDateString("id-ID", {
+      day: "numeric", month: "short", year: "numeric",
+    });
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      {/* ── Header ── */}
+      <div style={{
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between", marginBottom: 12,
+      }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
+            Activity Timeline
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>
+            {count > 0 ? `${count} aktivitas terakhir` : "Riwayat perubahan proyek"}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Filter tabs ── */}
+      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 14 }}>
+        {filterTabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setFilterType(tab.key)}
+            style={{
+              padding: "4px 10px", borderRadius: 999,
+              fontSize: 10, fontWeight: 600, cursor: "pointer",
+              transition: "all 0.15s",
+              border: filterType === tab.key
+                ? "none"
+                : "1px solid rgba(14,13,11,0.12)",
+              backgroundColor: filterType === tab.key
+                ? "var(--color-accent)"
+                : "white",
+              color: filterType === tab.key ? "white" : "var(--color-ink-3)",
+            }}>
+            {tab.icon} {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Timeline content ── */}
+      {loading ? (
+        <div style={{
+          textAlign: "center", padding: "20px 0",
+          color: "var(--color-ink-3)", fontSize: 12,
+        }}>
+          Memuat aktivitas...
+        </div>
+      ) : activities.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "20px 0", color: "var(--color-ink-3)" }}>
+          <div style={{ fontSize: 24, marginBottom: 6, opacity: 0.35 }}>📋</div>
+          <div style={{ fontSize: 12 }}>
+            {filterType === "all"
+              ? "Belum ada aktivitas untuk proyek ini"
+              : "Belum ada aktivitas untuk filter ini"}
+          </div>
+        </div>
+      ) : (
+        <div style={{ position: "relative" }}>
+          {/* Vertical timeline line */}
+          <div style={{
+            position: "absolute", left: 10, top: 12, bottom: 12,
+            width: 1, backgroundColor: "rgba(14,13,11,0.07)",
+          }} />
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {activities.map((item) => (
+              <div key={item.id} style={{ display: "flex", gap: 12, position: "relative" }}>
+                {/* Coloured dot */}
+                <div style={{
+                  width: 21, height: 21, borderRadius: "50%", flexShrink: 0,
+                  backgroundColor: actionColor(item.action),
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 9, color: "white", zIndex: 1,
+                }}>
+                  {actionIcon[item.action] ?? "•"}
+                </div>
+
+                {/* Content */}
+                <div style={{ flex: 1, paddingBottom: 2 }}>
+                  <div style={{ fontSize: 11, color: "var(--color-ink)", lineHeight: 1.4 }}>
+                    {item.message}
+                  </div>
+                  {item.notes && (
+                    <div style={{
+                      fontSize: 10, color: "var(--color-ink-3)",
+                      marginTop: 2, fontStyle: "italic",
+                    }}>
+                      "{item.notes}"
+                    </div>
+                  )}
+                  {(item.old_value || item.new_value) && item.old_value !== item.new_value && (
+                    <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 2 }}>
+                      <span style={{ textDecoration: "line-through" }}>{item.old_value}</span>
+                      {" → "}
+                      <span style={{ fontWeight: 600, color: "var(--color-accent)" }}>
+                        {item.new_value}
+                      </span>
+                    </div>
+                  )}
+                  <div style={{
+                    fontSize: 10, color: "var(--color-ink-3)", marginTop: 3,
+                  }}>
+                    {relativeTime(item.timestamp)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -2055,6 +2342,7 @@ export default function ProjectDetailPage() {
               )}
             </div>
             <AlertsPanel alerts={intel.alerts ?? []} />
+            <ActionChainPanel chain={intel.action_chain ?? null} />
             {intel.risk_reasons && intel.risk_reasons.length > 0 && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(14,13,11,0.06)" }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Alasan Risiko</div>
@@ -2264,6 +2552,7 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       </div>
+      <ActivityTimelinePanel projectId={project.id} />
     </div>
   );
 }
