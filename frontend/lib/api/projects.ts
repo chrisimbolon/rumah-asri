@@ -126,7 +126,6 @@ export interface ReadinessBreakdown {
   items:            ReadinessBreakdownItem[];
 }
 
-
 // ── RequirementItem — Sprint 2: adds evidence fields ─────────
 
 export interface RequirementItem {
