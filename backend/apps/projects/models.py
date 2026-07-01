@@ -28,7 +28,7 @@ Sprint 9 : my_tasks    — requirements assigned to the user
           (items assigned to OTHER users are excluded — not noise)
 
 ZERO BREAKING CHANGES — all existing fields preserved.
-82 tests still green.
+85 tests still green.
 """
 import uuid
 from datetime import date, timedelta
