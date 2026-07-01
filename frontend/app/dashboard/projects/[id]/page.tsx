@@ -19,6 +19,7 @@ import {
   ActivityItem,
   ALERT_META,
   commentApi,
+  DecisionEngine,
   DependencyGraph,
   DependencyNode,
   EVIDENCE_META,
@@ -2113,6 +2114,245 @@ function ActivityTimelinePanel({ projectId }: { projectId: string }) {
   );
 }
 
+// ── Sprint 13: Decision Engine Panel ─────────────────────────
+// Shows the single best action with quantified readiness impact,
+// 3 bullet reasons, and ranked alternatives 2-3.
+// Fetches independently from GET /api/projects/<id>/decision/
+// so the panel loads without blocking the rest of the page.
+function DecisionEnginePanel({ projectId }: { projectId: string }) {
+  const [engine,  setEngine]  = useState<DecisionEngine | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    projectsApi.getDecisionEngine(projectId)
+      .then(setEngine)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
+  // Priority → colour + label mapping
+  const priorityMeta: Record<string, { color: string; bg: string; label: string }> = {
+    high:   { color: "var(--color-danger)",  bg: "var(--color-danger-light)",  label: "Prioritas Tinggi"  },
+    medium: { color: "var(--color-warning)", bg: "var(--color-warning-light)", label: "Prioritas Sedang"  },
+    low:    { color: "var(--color-ink-3)",   bg: "var(--color-paper-2)",       label: "Prioritas Rendah"  },
+  };
+
+  if (loading) {
+    return (
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 8 }}>
+          🎯 Decision Engine
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-ink-3)", padding: "12px 0" }}>
+          Menganalisis data proyek...
+        </div>
+      </div>
+    );
+  }
+
+  if (!engine) return null;
+
+  // ── All clear — nothing to do ─────────────────────────────
+  if (!engine.has_recommendations) {
+    return (
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 12 }}>
+          🎯 Decision Engine
+        </div>
+        <div style={{
+          padding: "16px",
+          backgroundColor: "var(--color-success-light)",
+          borderRadius: 10,
+          textAlign: "center",
+        }}>
+          <div style={{ fontSize: 22, marginBottom: 6 }}>🎉</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-success)" }}>
+            {engine.message ?? "Semua requirement wajib sudah selesai!"}
+          </div>
+          {engine.all_clear && (
+            <div style={{ fontSize: 11, color: "var(--color-success)", opacity: 0.8, marginTop: 4 }}>
+              Proyek siap melanjutkan ke tahap berikutnya
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const primary = engine.primary!;
+  const pm      = priorityMeta[primary.priority] ?? priorityMeta.medium;
+  const readinessGain = engine.projected_readiness - engine.current_readiness;
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      {/* ── Header ── */}
+      <div style={{
+        display: "flex", alignItems: "flex-start",
+        justifyContent: "space-between", marginBottom: 14,
+      }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
+            🎯 Decision Engine
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>
+            Apa yang harus dilakukan sekarang
+          </div>
+        </div>
+        {/* Readiness projection */}
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginBottom: 2 }}>
+            proyeksi kesiapan
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--color-ink-3)" }}>
+              {engine.current_readiness}%
+            </span>
+            <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>→</span>
+            <span style={{ fontSize: 16, fontWeight: 800, color: "var(--color-success)" }}>
+              {engine.projected_readiness}%
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Primary recommendation card ── */}
+      <div style={{
+        padding: "14px 16px", borderRadius: 10,
+        backgroundColor: "var(--color-paper-2)",
+        border: `2px solid ${pm.color}28`,
+        marginBottom: engine.alternatives.length > 0 ? 12 : 0,
+      }}>
+        {/* Priority badge + time estimate */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <span style={{
+            fontSize: 9, fontWeight: 700,
+            padding: "2px 8px", borderRadius: 999,
+            backgroundColor: pm.color, color: "white",
+            textTransform: "uppercase", letterSpacing: "0.05em",
+          }}>
+            {pm.label}
+          </span>
+          <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
+            ~{primary.est_minutes} menit
+          </span>
+        </div>
+
+        {/* Action title + impact badge */}
+        <div style={{
+          display: "flex", alignItems: "flex-start",
+          justifyContent: "space-between", gap: 12, marginBottom: 12,
+        }}>
+          <div style={{
+            fontSize: 15, fontWeight: 700,
+            color: "var(--color-ink)", flex: 1, lineHeight: 1.3,
+          }}>
+            {primary.action}
+          </div>
+          {/* Readiness impact badge */}
+          <div style={{
+            padding: "8px 12px", borderRadius: 8, flexShrink: 0,
+            backgroundColor: "var(--color-success-light)",
+            textAlign: "center",
+          }}>
+            <div style={{
+              fontSize: 20, fontWeight: 800,
+              color: "var(--color-success)", lineHeight: 1,
+            }}>
+              +{readinessGain}%
+            </div>
+            <div style={{ fontSize: 9, color: "var(--color-success)", marginTop: 2 }}>
+              kesiapan
+            </div>
+          </div>
+        </div>
+
+        {/* Reasons */}
+        <div style={{
+          display: "flex", flexDirection: "column",
+          gap: 5, marginBottom: 14,
+        }}>
+          {primary.reasons.map((reason, i) => (
+            <div key={i} style={{ display: "flex", gap: 7, fontSize: 11, color: "var(--color-ink)", lineHeight: 1.4 }}>
+              <span style={{ color: pm.color, flexShrink: 0, fontWeight: 700 }}>•</span>
+              {reason}
+            </div>
+          ))}
+        </div>
+
+        {/* CTA — scrolls to the requirements card */}
+        <button
+          onClick={() => {
+            document
+              .getElementById("requirements-card")
+              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+          style={{
+            width: "100%", padding: "10px", borderRadius: 8,
+            border: "none", cursor: "pointer",
+            backgroundColor: pm.color, color: "white",
+            fontSize: 12, fontWeight: 700,
+            transition: "opacity 0.15s",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.88")}
+          onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+        >
+          Ambil Tindakan →
+        </button>
+      </div>
+
+      {/* ── Alternatives ── */}
+      {engine.alternatives.length > 0 && (
+        <div>
+          <div style={{
+            fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)",
+            textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8,
+          }}>
+            Tindakan Lainnya
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {engine.alternatives.map((alt) => (
+              <div key={alt.rank} style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "9px 12px", borderRadius: 8,
+                backgroundColor: "var(--color-paper-2)",
+              }}>
+                {/* Rank circle */}
+                <div style={{
+                  width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+                  backgroundColor: "rgba(14,13,11,0.07)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)",
+                }}>
+                  {alt.rank}
+                </div>
+                {/* Action label */}
+                <div style={{ flex: 1, fontSize: 11, fontWeight: 600, color: "var(--color-ink)" }}>
+                  {alt.action}
+                </div>
+                {/* Impact */}
+                <div style={{
+                  fontSize: 12, fontWeight: 700,
+                  color: "var(--color-success)", whiteSpace: "nowrap",
+                }}>
+                  +{alt.readiness_impact_pct}%
+                </div>
+                {/* Time estimate */}
+                <div style={{
+                  fontSize: 10, color: "var(--color-ink-3)",
+                  whiteSpace: "nowrap",
+                }}>
+                  ~{alt.est_minutes} mnt
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Main page ─────────────────────────────────────────────────
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -2326,6 +2566,8 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
+      {/* Sprint 13: Decision Engine */}
+      <DecisionEnginePanel projectId={project.id} />
 
       {/* ── Alerts + Dimensions row ── */}
       {((intel.alerts && intel.alerts.length > 0) || intel.readiness_dimensions) && (
@@ -2377,7 +2619,7 @@ export default function ProjectDetailPage() {
         <DependencyGraphPanel projectId={project.id} />
 
         {/* ── Requirements ── */}
-        <div className="card">
+        <div className="card" id="requirements-card">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
          Checklist Tahap {meta.label}
