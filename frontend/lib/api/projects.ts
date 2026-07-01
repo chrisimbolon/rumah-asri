@@ -300,6 +300,34 @@ export interface KeyProgress {
   overdue_count:          number;
 }
 
+// Sprint 11: Dependency graph ──────────────────────────────────
+export interface DependencyNode {
+  id:                    string;
+  name:                  string;
+  status:                ReqStatus;
+  status_display:        string;
+  is_mandatory:          boolean;
+  is_blocking:           boolean;
+  is_dependency_blocked: boolean;
+  weight_pct:            number;
+  prerequisites:         string[];
+  unmet_prerequisites:   string[];
+}
+
+export interface DependencyEdge {
+  from: string;   // node id
+  to:   string;   // node id
+}
+
+export interface DependencyGraph {
+  project_id:    string;
+  project_name:  string;
+  stage:         ProjectStage;
+  stage_display: string;
+  nodes:         DependencyNode[];
+  edges:         DependencyEdge[];
+}
+
 // ── Project — UNCHANGED ───────────────────────────────────────
 
 export interface Project {
@@ -627,12 +655,18 @@ export const projectsApi = {
     return data;
   },
 
-  async getReadinessHistory(id: string, days = 30):  Promise<ReadinessHistory> {
+  async getReadinessHistory(id: string, days = 30): Promise<ReadinessHistory> {
     const { data } = await api.get(
       `/api/projects/${id}/readiness-history/?days=${days}`
     );
     return data;
   },
+
+  async getDependencyGraph(id: string): Promise<DependencyGraph> {
+    const { data } = await api.get(`/api/projects/${id}/dependency-graph/`);
+    return data;
+  },
+
 
 };
 
