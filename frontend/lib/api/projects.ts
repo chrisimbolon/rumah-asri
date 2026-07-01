@@ -354,6 +354,41 @@ export interface ActionChain {
   est_remaining_minutes: number;
 }
 
+// Sprint 13: Decision Engine ───────────────────────────────────
+export interface DecisionRecommendation {
+  requirement_name:      string;
+  requirement_id:        string;
+  status_id:             string | null;
+  action:                string;
+  priority:              "high" | "medium" | "low";
+  readiness_impact_pct:  number;
+  est_minutes:           number;
+  reasons:               string[];
+  is_assigned:           boolean;
+  evidence_count:        number;
+}
+
+export interface DecisionAlternative {
+  rank:                  number;
+  requirement_name:      string;
+  requirement_id:        string;
+  status_id:             string | null;
+  action:                string;
+  readiness_impact_pct:  number;
+  est_minutes:           number;
+  priority_score:        number;
+}
+
+export interface DecisionEngine {
+  has_recommendations:  boolean;
+  all_clear:            boolean;
+  primary:              DecisionRecommendation | null;
+  alternatives:         DecisionAlternative[];
+  current_readiness:    number;
+  projected_readiness:  number;
+  message?:             string;   // only present when all_clear or no candidates
+}
+
 // ── Project — UNCHANGED ───────────────────────────────────────
 
 export interface Project {
@@ -697,6 +732,10 @@ export const projectsApi = {
     return data;
   },
 
+  async getDecisionEngine(id: string): Promise<DecisionEngine> {
+    const { data } = await api.get(`/api/projects/${id}/decision/`);
+    return data;
+  },
 
 };
 
