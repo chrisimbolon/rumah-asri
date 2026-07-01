@@ -485,14 +485,56 @@ class EvidenceEligibleVerifiersView(TenantScopedAPIView):
 # =============================================================================
 
 class ProjectActivityView(TenantScopedAPIView):
+    """
+    Sprint 3: Activity timeline for a project.
+    Sprint 12: adds ?type= filter for Evidence / Kesiapan / Penugasan / Komentar.
+
+    GET /api/projects/<id>/activity/?limit=20&type=all
+
+    Query params:
+      limit (int, 1-100, default 20)
+      type  (str, default "all"):
+        "all"         — no filter, all action types
+        "evidence"    — evidence_uploaded, evidence_approved, evidence_rejected
+        "readiness"   — completed, stage_advanced, updated
+        "assignments" — assigned, due_date_set
+        "comments"    — comment_added
+
+    Response:
+      {
+        "success":      true,
+        "project_id":   "uuid",
+        "project_name": "Perumahan Asri Cluster A",
+        "count":        12,
+        "filter_type":  "evidence",
+        "results":      [...]
+      }
+    """
     model = Project
 
-    def get(self, request, pk):
-        project = self.get_object(pk)
-        limit = min(int(request.query_params.get("limit", 20)), 100)
-        activities = project.activity_timeline(limit=limit)
-        return Response({"success": True, "project_id": str(project.id), "project_name": project.name, "count": len(activities), "results": activities})
+    # Map frontend filter key → RequirementAudit.Action values
+    ACTION_FILTER_MAP = {
+        "evidence":    ["evidence_uploaded", "evidence_approved", "evidence_rejected"],
+        "readiness":   ["completed", "stage_advanced", "updated"],
+        "assignments": ["assigned", "due_date_set"],
+        "comments":    ["comment_added"],
+    }
 
+    def get(self, request, pk):
+        project     = self.get_object(pk)
+        limit       = min(int(request.query_params.get("limit", 20)), 100)
+        filter_type = request.query_params.get("type", "all")
+        # None = no filter (all types) — model handles this correctly
+        action_filter = self.ACTION_FILTER_MAP.get(filter_type)
+        activities  = project.activity_timeline(limit=limit, action_filter=action_filter)
+        return Response({
+            "success":      True,
+            "project_id":   str(project.id),
+            "project_name": project.name,
+            "count":        len(activities),
+            "filter_type":  filter_type,
+            "results":      activities,
+        })
 
 class ProjectFinancialView(TenantScopedAPIView):
     model = Project

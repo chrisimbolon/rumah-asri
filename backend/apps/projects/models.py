@@ -1237,6 +1237,66 @@ class Project(TenantScopedModel):
             evidence__is_latest=True,
         ).distinct().count()
 
+        action_chain = None
+        blocking_req = next(
+            (req for req in items
+             if req["is_mandatory"]
+             and req["status"] not in ("completed", "menunggu_verifikasi")
+             and not req["is_dependency_blocked"]),
+            None,
+        )
+        if blocking_req:
+            req_name = blocking_req["name"]
+            steps = [
+                {
+                    "step":        1,
+                    "action":      f"Tugaskan {req_name}",
+                    "action_type": "assign",
+                    "status_id":   blocking_req["status_id"],
+                    "is_done":     bool(blocking_req["assigned_to_id"]),
+                    "est_minutes": 5,
+                },
+                {
+                    "step":        2,
+                    "action":      f"Upload bukti {req_name}",
+                    "action_type": "upload",
+                    "status_id":   blocking_req["status_id"],
+                    "is_done":     blocking_req["evidence_count"] > 0,
+                    "est_minutes": 7,
+                },
+            ]
+            # Step 3 only appears once evidence has been uploaded
+            if blocking_req["evidence_count"] > 0:
+                steps.append({
+                    "step":        3,
+                    "action":      "Minta persetujuan bukti",
+                    "action_type": "verify",
+                    "status_id":   blocking_req["status_id"],
+                    "is_done":     blocking_req["latest_evidence_status"] == "approved",
+                    "est_minutes": 3,
+                })
+            # Final step: mark complete — always pending (it's the blocker)
+            steps.append({
+                "step":        len(steps) + 1,
+                "action":      f"Tandai {req_name} selesai",
+                "action_type": "complete",
+                "status_id":   blocking_req["status_id"],
+                "is_done":     False,
+                "est_minutes": 2,
+            })
+            completed = sum(1 for s in steps if s["is_done"])
+            action_chain = {
+                "requirement_name":      req_name,
+                "requirement_id":        blocking_req["id"],
+                "status_id":             blocking_req["status_id"],
+                "steps":                 steps,
+                "total_steps":           len(steps),
+                "completed_steps":       completed,
+                "est_remaining_minutes": sum(
+                    s["est_minutes"] for s in steps if not s["is_done"]
+                ),
+            }        
+
         key_progress = {
             "requirements_completed": completed_count,
             "requirements_total":     total_count,
@@ -1270,6 +1330,7 @@ class Project(TenantScopedModel):
             "rejected_evidence_count": rejected_evidence_count,
             "key_progress":            key_progress,           # Sprint 10
             "readiness_trend_data":    self.readiness_trend_data,  # now uses ReadinessSnapshot
+            "action_chain": action_chain,    # Sprint 12
         }
 
     # =========================================================
@@ -1358,9 +1419,18 @@ class Project(TenantScopedModel):
     # SPRINT 3: TIMELINE + FINANCIAL — unchanged
     # =========================================================
 
-    def activity_timeline(self, limit=20):
-        activities = []
-        audit_logs = RequirementAudit.objects.filter(requirement_status__project=self).select_related("requirement_status__requirement", "changed_by").order_by("-changed_at")[:limit]
+    def activity_timeline(self, limit=20, action_filter=None):
+        audit_logs = RequirementAudit.objects.filter(
+            requirement_status__project=self
+        ).select_related("requirement_status__requirement", "changed_by").order_by("-changed_at")
+
+        # Sprint 12: optional action type filter
+        if action_filter:
+            audit_logs = audit_logs.filter(action__in=action_filter)
+
+        audit_logs = audit_logs[:limit]
+
+        # ── rest of the method is UNCHANGED from here ──
         action_labels = {
             RequirementAudit.Action.CREATED:           "membuat requirement",
             RequirementAudit.Action.UPDATED:           "memperbarui",
@@ -1373,11 +1443,24 @@ class Project(TenantScopedModel):
             RequirementAudit.Action.DUE_DATE_SET:      "menetapkan tenggat untuk",
             RequirementAudit.Action.COMMENT_ADDED:     "menambahkan komentar pada",
         }
+        activities = []
         for log in audit_logs:
             req_name    = log.requirement_status.requirement.name
             actor_name  = log.changed_by.full_name if log.changed_by else "Sistem"
             action_verb = action_labels.get(log.action, log.action)
-            activities.append({"id": str(log.id), "type": "requirement", "action": log.action, "actor": actor_name, "actor_id": str(log.changed_by.id) if log.changed_by else None, "subject": req_name, "message": f"{actor_name} {action_verb} {req_name}", "notes": log.notes, "old_value": log.old_value, "new_value": log.new_value, "timestamp": log.changed_at.isoformat()})
+            activities.append({
+                "id":        str(log.id),
+                "type":      "requirement",
+                "action":    log.action,
+                "actor":     actor_name,
+                "actor_id":  str(log.changed_by.id) if log.changed_by else None,
+                "subject":   req_name,
+                "message":   f"{actor_name} {action_verb} {req_name}",
+                "notes":     log.notes,
+                "old_value": log.old_value,
+                "new_value": log.new_value,
+                "timestamp": log.changed_at.isoformat(),
+            })
         return activities
 
     def financial_snapshot(self):

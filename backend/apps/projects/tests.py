@@ -504,3 +504,124 @@ class DependencyGraphTests(APITestCase):
             for field in ("id", "name", "status", "is_mandatory",
                           "is_blocking", "is_dependency_blocked", "weight_pct"):
                 self.assertIn(field, node)
+
+class ActionChainAndActivityFilterTests(APITestCase):
+    """
+    Sprint 12: Action chain + activity timeline filter isolation + correctness.
+
+    Covers:
+    - action_chain is present in intelligence for a blocked project
+    - action_chain is None when project has no blockers
+    - Dev B cannot filter Dev A's activity timeline (tenant isolation)
+    """
+
+    def setUp(self):
+        from apps.projects.models import (
+            ProjectRequirementStatus,
+            StageRequirement,
+        )
+        # ── Shared requirement ──────────────────────────────────────
+        self.req, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Kontraktor S12",
+            defaults={"is_mandatory": True, "weight": 60},
+        )
+
+        # ── Org A — the victim ──────────────────────────────────────
+        self.org_a = Organization.objects.create(name="Asri Sentosa Sprint12")
+        self.dev_a = CustomUser.objects.create_user(
+            email="dev.a.s12@test.id", password="pass12345!",
+            full_name="Dev A S12", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_a, user=self.dev_a, role="owner", is_active=True,
+        )
+        # Blocked project: has a mandatory requirement that is PENDING
+        self.project_blocked = Project.objects.create(
+            organization=self.org_a, name="Cluster Blocked S12", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        # Requirement status = PENDING (blocking)
+        self.req_status = ProjectRequirementStatus.objects.create(
+            project=self.project_blocked,
+            requirement=self.req,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+
+        # ── Org B — the attacker ─────────────────────────────────────
+        self.org_b = Organization.objects.create(name="Griya Sprint12")
+        self.dev_b = CustomUser.objects.create_user(
+            email="dev.b.s12@test.id", password="pass12345!",
+            full_name="Dev B S12", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_b, user=self.dev_b, role="owner", is_active=True,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    # ── Action chain correctness ──────────────────────────────────
+
+    def test_action_chain_present_for_blocked_project(self):
+        """
+        Sprint 12: intelligence summary must include a non-null action_chain
+        when the project has a pending mandatory requirement blocking the stage.
+        The chain must have the correct structure.
+        """
+        self._login_as(self.dev_a)
+        resp = self.client.get(
+            f"/api/projects/{self.project_blocked.id}/intelligence/"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        chain = resp.data["intelligence"].get("action_chain")
+        self.assertIsNotNone(chain, "action_chain should be non-null for blocked project")
+        self.assertIn("steps",              chain)
+        self.assertIn("total_steps",        chain)
+        self.assertIn("completed_steps",    chain)
+        self.assertIn("requirement_name",   chain)
+        self.assertIn("est_remaining_minutes", chain)
+        self.assertIsInstance(chain["steps"], list)
+        self.assertGreater(len(chain["steps"]), 0)
+        # First step must be "assign" type since req_status has no assigned_to
+        first_step = chain["steps"][0]
+        self.assertEqual(first_step["action_type"], "assign")
+        self.assertFalse(first_step["is_done"])
+
+    def test_action_chain_is_none_when_no_blockers(self):
+        """
+        Sprint 12: action_chain must be None when all mandatory requirements
+        are completed — no blockers, nothing to chain.
+        """
+        # Mark the requirement as completed
+        from apps.projects.models import ProjectRequirementStatus
+        self.req_status.status = ProjectRequirementStatus.Status.COMPLETED
+        self.req_status.save()
+
+        self._login_as(self.dev_a)
+        resp = self.client.get(
+            f"/api/projects/{self.project_blocked.id}/intelligence/"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        chain = resp.data["intelligence"].get("action_chain")
+        self.assertIsNone(chain, "action_chain should be None when no blockers exist")
+
+    # ── Activity filter isolation ──────────────────────────────────
+
+    def test_dev_b_cannot_filter_dev_a_activity_timeline(self):
+        """
+        Sprint 12: the new ?type= filter must not open a new cross-tenant
+        attack surface. Dev B cannot read Dev A's filtered activity feed
+        any more than the unfiltered one.
+        """
+        self._login_as(self.dev_b)
+        for filter_type in ("all", "evidence", "readiness", "assignments", "comments"):
+            resp = self.client.get(
+                f"/api/projects/{self.project_blocked.id}/activity/?type={filter_type}"
+            )
+            self.assertIn(
+                resp.status_code,
+                (status.HTTP_404_NOT_FOUND, status.HTTP_403_FORBIDDEN),
+                f"Dev B should be blocked for type={filter_type}",
+            )
