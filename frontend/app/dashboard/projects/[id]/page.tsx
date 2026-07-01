@@ -1382,10 +1382,10 @@ function KeyProgressCard({ progress }: { progress: KeyProgress }) {
   );
 }
 
-
 // ── Sprint 10: Workspace Table view ──────────────────────────
 // Drop-in alternative to the Checklist view. Toggled by a state variable
 // in the main page. Shows all requirements as a compact sortable table.
+
 function WorkspaceTable({
   requirements,
   projectId,
