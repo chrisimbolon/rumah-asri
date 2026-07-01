@@ -210,6 +210,8 @@ export interface IntelligenceSummary {
   // Sprint 8: evidence workflow
   pending_evidence_count:  number;
   rejected_evidence_count: number;
+  key_progress:        KeyProgress;
+  readiness_trend_data: ReadinessHistoryPoint[];
 }
 
 export interface StageChecklistItem {
@@ -272,6 +274,30 @@ export interface MyActionsResponse {
   unassigned:        ActionItem[];
   unassigned_count:  number;
   total_actionable:  number;
+}
+
+// Sprint 10: Readiness trend history ──────────────────────────
+export interface ReadinessHistoryPoint {
+  date:  string;   // ISO date "2026-06-25"
+  score: number;   // 0-100
+}
+
+export interface ReadinessHistory {
+  project_id:    string;
+  project_name:  string;
+  current_score: number;
+  days:          number;
+  results:       ReadinessHistoryPoint[];
+}
+
+// Sprint 10: Key progress aggregate ───────────────────────────
+export interface KeyProgress {
+  requirements_completed: number;
+  requirements_total:     number;
+  evidence_uploaded:      number;
+  evidence_verified:      number;
+  evidence_awaiting:      number;
+  overdue_count:          number;
 }
 
 // ── Project — UNCHANGED ───────────────────────────────────────
@@ -600,6 +626,14 @@ export const projectsApi = {
     const { data } = await api.get("/api/projects/my-actions/");
     return data;
   },
+
+  async getReadinessHistory(id: string, days = 30):  Promise<ReadinessHistory> {
+    const { data } = await api.get(
+      `/api/projects/${id}/readiness-history/?days=${days}`
+    );
+    return data;
+  },
+
 };
 
 // Sprint 2: evidence API calls
