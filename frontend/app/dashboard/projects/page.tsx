@@ -23,8 +23,9 @@ import {
   Loader2,
   MapPin,
   Plus,
+  SortAsc,
   TrendingUp,
-  X,
+  X
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -259,6 +260,60 @@ export default function ProjectsPage() {
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState<string | null>(null);
   const [showCreate,  setShowCreate]  = useState(false);
+    type FilterKey = "all" | "blocking" | "high_risk" | "delayed";
+  const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
+  const [sortByReadiness, setSortByReadiness] = useState(false);
+
+  // Derived: filtered + sorted projects — computed from existing `projects` state
+  // No new API call needed — all fields already in Project[]
+  const today = new Date();
+  const displayProjects = projects
+    .filter((p) => {
+      if (activeFilter === "blocking")  return p.blocking_count > 0;
+      if (activeFilter === "high_risk") return p.risk_level === "high";
+      if (activeFilter === "delayed")   return (
+        !!p.end_date &&
+        new Date(p.end_date) < today &&
+        !["selesai", "serah_terima"].includes(p.stage)
+      );
+      return true;
+    })
+    .sort((a, b) => sortByReadiness
+      ? a.readiness_score - b.readiness_score   // worst first
+      : 0                                        // default API order
+    );
+
+  // Filter tabs config — counts computed live from all projects
+  const filterTabs: { key: FilterKey; label: string; count: number; color: string }[] = [
+    {
+      key:   "all",
+      label: "Semua",
+      count: projects.length,
+      color: "var(--color-ink)",
+    },
+    {
+      key:   "blocking",
+      label: "Ada Blokir",
+      count: projects.filter(p => p.blocking_count > 0).length,
+      color: "var(--color-danger)",
+    },
+    {
+      key:   "high_risk",
+      label: "Risiko Tinggi",
+      count: projects.filter(p => p.risk_level === "high").length,
+      color: "var(--color-warning)",
+    },
+    {
+      key:   "delayed",
+      label: "Terlambat",
+      count: projects.filter(p =>
+        !!p.end_date &&
+        new Date(p.end_date) < today &&
+        !["selesai", "serah_terima"].includes(p.stage)
+      ).length,
+      color: "var(--color-accent)",
+    },
+  ];
 
   useEffect(() => {
     projectsApi.list()
@@ -337,6 +392,71 @@ export default function ProjectsPage() {
         ))}
       </div>
 
+          {/* ── Sprint 11: Filter bar ── */}
+  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {filterTabs.map((tab) => (
+        <button
+          key={tab.key}
+          onClick={() => setActiveFilter(tab.key)}
+          style={{
+            padding: "5px 12px", borderRadius: 999, fontSize: 11, fontWeight: 600,
+            cursor: "pointer", transition: "all 0.15s",
+            border: activeFilter === tab.key ? "none" : "1px solid rgba(14,13,11,0.12)",
+            backgroundColor: activeFilter === tab.key ? tab.color : "white",
+            color: activeFilter === tab.key ? "white" : "var(--color-ink-3)",
+          }}>
+          {tab.label}
+          {tab.count > 0 && (
+            <span style={{
+              marginLeft: 6, fontSize: 10, fontWeight: 700,
+              padding: "1px 6px", borderRadius: 999,
+              backgroundColor: activeFilter === tab.key ? "rgba(255,255,255,0.25)" : "rgba(14,13,11,0.06)",
+              color: activeFilter === tab.key ? "white" : "var(--color-ink-3)",
+            }}>
+              {tab.count}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+    {/* Sort toggle */}
+    <button
+      onClick={() => setSortByReadiness(!sortByReadiness)}
+      style={{
+        padding: "5px 12px", borderRadius: 999, fontSize: 11, fontWeight: 600,
+        cursor: "pointer", transition: "all 0.15s",
+        border: sortByReadiness ? "none" : "1px solid rgba(14,13,11,0.12)",
+        backgroundColor: sortByReadiness ? "var(--color-info)" : "white",
+        color: sortByReadiness ? "white" : "var(--color-ink-3)",
+        display: "flex", alignItems: "center", gap: 5,
+      }}>
+      <SortAsc size={12} />
+      {sortByReadiness ? "Kesiapan ↑ (aktif)" : "Urutkan: Kesiapan ↑"}
+    </button>
+  </div>
+
+  {/* Empty filter state */}
+  {displayProjects.length === 0 && projects.length > 0 && (
+    <div style={{ textAlign: "center", padding: "40px 24px", color: "var(--color-ink-3)" }}>
+      <div style={{ fontSize: 28, marginBottom: 8 }}>🔍</div>
+      <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>
+        Tidak ada proyek yang cocok
+      </div>
+      <div style={{ fontSize: 12 }}>
+        Coba filter lain atau{" "}
+        <button
+          onClick={() => setActiveFilter("all")}
+          style={{ color: "var(--color-accent)", background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+          tampilkan semua
+        </button>
+      </div>
+    </div>
+  )}
+
+
+
+
       {/* ── Empty state ── */}
       {projects.length === 0 && (
         <div style={{ textAlign: "center", padding: "60px 24px" }}>
@@ -359,7 +479,7 @@ export default function ProjectsPage() {
 
       {/* ── Project cards grid ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
-        {projects.map((p) => (
+        {displayProjects.map((p) => (
           <div
             key={p.id}
             className="card"
