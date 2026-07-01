@@ -212,6 +212,7 @@ export interface IntelligenceSummary {
   rejected_evidence_count: number;
   key_progress:        KeyProgress;
   readiness_trend_data: ReadinessHistoryPoint[];
+  action_chain: ActionChain | null;   // Sprint 12
 }
 
 export interface StageChecklistItem {
@@ -326,6 +327,33 @@ export interface DependencyGraph {
   stage_display: string;
   nodes:         DependencyNode[];
   edges:         DependencyEdge[];
+}
+
+// Sprint 12: Action chain ──────────────────────────────────────
+export type ActivityFilterType =
+  | "all"
+  | "evidence"
+  | "readiness"
+  | "assignments"
+  | "comments";
+
+export interface ActionChainStep {
+  step:        number;
+  action:      string;
+  action_type: "assign" | "upload" | "verify" | "complete";
+  status_id:   string | null;
+  is_done:     boolean;
+  est_minutes: number;
+}
+
+export interface ActionChain {
+  requirement_name:      string;
+  requirement_id:        string;
+  status_id:             string | null;
+  steps:                 ActionChainStep[];
+  total_steps:           number;
+  completed_steps:       number;
+  est_remaining_minutes: number;
 }
 
 // ── Project — UNCHANGED ───────────────────────────────────────
@@ -621,11 +649,15 @@ export const projectsApi = {
     return data.project;
   },
 
-  async getActivity(id: string, limit = 20): Promise<ActivityItem[]> {
-  const { data } = await api.get(
-    `/api/projects/${id}/activity/?limit=${limit}`
-  );
-  return data.results;
+  async getActivity(
+    id:    string,
+    limit: number = 20,
+    type:  ActivityFilterType = "all"
+  ): Promise<{ count: number; filter_type: string; results: ActivityItem[] }> {
+    const { data } = await api.get(
+      `/api/projects/${id}/activity/?limit=${limit}&type=${type}`
+    );
+    return { count: data.count, filter_type: data.filter_type, results: data.results };
   },
 
   async getFinancial(id: string): Promise<FinancialSnapshot> {
