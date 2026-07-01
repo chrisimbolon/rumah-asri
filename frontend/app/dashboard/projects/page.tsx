@@ -2,6 +2,7 @@
 // ================================================
 // === frontend/app/dashboard/projects/page.tsx 
 // Sprint 9: Next Actions Assistant
+//  Sprint 11: Visual Dependency Graph + Portfolio Scale
 // ================================================
 
 import {
