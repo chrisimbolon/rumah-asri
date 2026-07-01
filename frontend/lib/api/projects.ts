@@ -145,8 +145,7 @@ export interface RequirementItem {
   evidence_count:         number;
   latest_evidence_status: EvidenceVerifStatus | null;
   has_pending_evidence:   boolean;
-  // Sprint 3
-  audit_count: number;
+  audit_count: number; // Sprint 3
   // Sprint 4: dependency fields 
   prerequisites:         string[];   // prereq names
   unmet_prerequisites:   string[];   // which prereqs are not done yet
