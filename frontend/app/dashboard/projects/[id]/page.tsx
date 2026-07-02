@@ -1210,8 +1210,8 @@ function ReadinessTrendPanel({
   currentScore: number;
   inlineData:  ReadinessHistoryPoint[];  // from get_intelligence_summary
 }) {
-  // Use inline data from intelligence summary (already fetched).
-  // If we have < 2 points, fetch fresh from the endpoint to get more history.
+  // Use inline data from intelligence summary (already fetched), If we have < 2 points, fetch fresh from the endpoint to get more history.
+
   const [history, setHistory] = useState<ReadinessHistoryPoint[]>(inlineData);
   const [loading, setLoading] = useState(inlineData.length < 2);
 
