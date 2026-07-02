@@ -39,3 +39,11 @@ EMAIL_PORT    = config("EMAIL_PORT", default=587, cast=int)
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER     = config("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
+
+# ── Allowed hosts ─────────────────────────────────────────────
+ALLOWED_HOSTS = [
+    "developindo.com",
+    "www.developindo.com",
+    "localhost",        # Docker health check
+    "127.0.0.1",        # Docker health check
+]
