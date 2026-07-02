@@ -1826,8 +1826,7 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
 }
 
 // ── Sprint 12: Action Chain Panel ─────────────────────────────
-// Slots inside the existing Alerts card, below AlertsPanel.
-// Shows ordered micro-steps to resolve the primary blocker.
+// Slots inside the existing Alerts card, below AlertsPanel. Shows ordered micro-steps to resolve the primary blocker.
 // Only renders if intel.action_chain is non-null (i.e. there IS a blocker).
 function ActionChainPanel({ chain }: { chain: ActionChain | null }) {
   if (!chain) return null;
