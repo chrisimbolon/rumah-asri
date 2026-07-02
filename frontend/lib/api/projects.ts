@@ -63,7 +63,6 @@ export interface CollectionEfficiency {
 }
 
 // ── Sprint 8: NEW types ───────────────────────────────────────
-
 export interface RequirementEvidence {
   id:                   string;
   file_name:            string;
