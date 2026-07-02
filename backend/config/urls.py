@@ -8,10 +8,14 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
+from django.http import JsonResponse
+
 
 urlpatterns = [
     # ── Django admin ──────────────────────────────────────────
     path("admin/", admin.site.urls),
+
+    path("api/health/", lambda r: JsonResponse({"status": "ok", "service": "developindo"})),
 
     # ── Auth ──────────────────────────────────────────────────
     path("api/auth/",          include("apps.authentication.urls")),
