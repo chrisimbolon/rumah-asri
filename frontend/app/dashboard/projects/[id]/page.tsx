@@ -11,6 +11,7 @@
 //  Sprint7 :requirement ownership and accountability - implemented here
 //  Sprint 9 : next actions assistant dashboard widget - is NOT implemented at this stage
 //  Spint 10 :Live Intelligence Dashboard - IS implemented here
+//  Sprint 14 : Risk Forecast (14-day projection) - IS implemented here
 // ============================================================
 
 import {
