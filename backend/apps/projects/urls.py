@@ -1,7 +1,7 @@
 # =============================================================================
 # backend/apps/projects/urls.py
-# Sprint 13: adds /decision/ endpoint.
-# All Sprint 1-12 URLs preserved — additive only.
+# Sprint 14: adds /risk-forecast/ endpoint.
+# All Sprint 1-13 URLs preserved — additive only.
 # =============================================================================
 from django.urls import path
 
@@ -11,7 +11,7 @@ from .views import (
     MyActionsView,
     ProjectActivityView,
     ProjectAdvanceView,
-    ProjectDecisionEngineView,          # Sprint 13
+    ProjectDecisionEngineView,
     ProjectDependencyGraphView,
     ProjectDetailView,
     ProjectFinancialView,
@@ -21,6 +21,7 @@ from .views import (
     ProjectPortfolioView,
     ProjectReadinessHistoryView,
     ProjectRequirementUpdateView,
+    ProjectRiskForecastView,            # Sprint 14
     RequirementCommentView,
     RequirementEvidenceVerifyView,
     RequirementEvidenceView,
@@ -70,6 +71,11 @@ urlpatterns = [
     path("<uuid:pk>/decision/",
          ProjectDecisionEngineView.as_view(),
          name="project-decision-engine"),
+
+    # ── Sprint 14: Risk Forecast ──────────────────────────────
+    path("<uuid:pk>/risk-forecast/",
+         ProjectRiskForecastView.as_view(),
+         name="project-risk-forecast"),
 
     # ── Update single requirement status ──────────────────────
     path("<uuid:pk>/requirements/<uuid:req_status_id>/",

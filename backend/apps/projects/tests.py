@@ -750,3 +750,129 @@ class DecisionEngineTests(APITestCase):
         self.assertTrue(resp.data["all_clear"])
         self.assertIsNone(resp.data["primary"])
         self.assertEqual(resp.data["alternatives"], [])
+
+class RiskForecastTests(APITestCase):
+    """
+    Sprint 14: Risk Forecast isolation + correctness.
+
+    Covers:
+    - Tenant isolation on /risk-forecast/ endpoint
+    - Forecast score >= current for a project already past its end_date
+      (timeline_overrun factor grows with time — can't shrink)
+    - Forecast == current for a brand-new project with no time-based factors
+      (no overrun, no payment overdue, no permit rejections)
+    """
+
+    def setUp(self):
+        # ── Org A — victim ──────────────────────────────────────────
+        self.org_a = Organization.objects.create(name="Asri Sentosa Sprint14")
+        self.dev_a = CustomUser.objects.create_user(
+            email="dev.a.s14@test.id", password="pass12345!",
+            full_name="Dev A S14", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_a, user=self.dev_a, role="owner", is_active=True,
+        )
+
+        # Overdue project — end_date in the past → timeline_overrun active
+        self.project_overdue = Project.objects.create(
+            organization=self.org_a, name="Cluster Overdue S14", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),   # well in the past
+        )
+
+        # Fresh project — end_date in the future → no time-based risk factors
+        self.project_fresh = Project.objects.create(
+            organization=self.org_a, name="Cluster Fresh S14", location="Bekasi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2026, 1, 1),
+            end_date=date(2030, 12, 31),   # far in the future
+        )
+
+        # ── Org B — attacker ─────────────────────────────────────────
+        self.org_b = Organization.objects.create(name="Griya Sprint14")
+        self.dev_b = CustomUser.objects.create_user(
+            email="dev.b.s14@test.id", password="pass12345!",
+            full_name="Dev B S14", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_b, user=self.dev_b, role="owner", is_active=True,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    # ── Isolation ─────────────────────────────────────────────
+
+    def test_dev_b_cannot_read_dev_a_risk_forecast(self):
+        """
+        Sprint 14: /risk-forecast/ endpoint must not expose Org A's
+        risk projection data to Org B's developer.
+        """
+        self._login_as(self.dev_b)
+        resp = self.client.get(
+            f"/api/projects/{self.project_overdue.id}/risk-forecast/"
+        )
+        self.assertIn(
+            resp.status_code,
+            (status.HTTP_404_NOT_FOUND, status.HTTP_403_FORBIDDEN),
+        )
+
+    # ── Correctness ───────────────────────────────────────────
+
+    def test_risk_forecast_score_gte_current_for_overdue_project(self):
+        """
+        Sprint 14: For a project already past its end_date, the forecast
+        score must be >= the current score. timeline_overrun points can only
+        stay the same or increase (they're capped at 20pts max), never decrease.
+
+        Also verifies the response structure is correct.
+        """
+        self._login_as(self.dev_a)
+        resp = self.client.get(
+            f"/api/projects/{self.project_overdue.id}/risk-forecast/?days=14"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["success"])
+
+        # Forecast score must be >= current (time-based factors can only grow)
+        self.assertGreaterEqual(
+            resp.data["forecast"]["score"],
+            resp.data["current"]["score"],
+        )
+        # Delta must be non-negative
+        self.assertGreaterEqual(resp.data["delta"], 0)
+
+        # Response structure check
+        for field in ("current", "forecast", "delta", "will_escalate", "top_drivers", "days"):
+            self.assertIn(field, resp.data, f"Missing field: {field}")
+        self.assertEqual(resp.data["days"], 14)
+
+        # top_drivers must be a list
+        self.assertIsInstance(resp.data["top_drivers"], list)
+        if resp.data["top_drivers"]:
+            driver = resp.data["top_drivers"][0]
+            for f in ("key", "name", "current_points", "forecast_points", "delta_points", "is_new"):
+                self.assertIn(f, driver, f"Missing driver field: {f}")
+
+    def test_risk_forecast_equals_current_for_no_time_factors(self):
+        """
+        Sprint 14: For a fresh project with no overrun and no payment overdue,
+        the forecast score must equal the current score.
+        The reference_date param doesn't change anything if no time-sensitive
+        factors are active — deterministic and honest.
+        """
+        self._login_as(self.dev_a)
+        resp = self.client.get(
+            f"/api/projects/{self.project_fresh.id}/risk-forecast/?days=14"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        # No time-based factors → forecast == current
+        self.assertEqual(
+            resp.data["forecast"]["score"],
+            resp.data["current"]["score"],
+        )
+        self.assertEqual(resp.data["delta"], 0)
+        self.assertFalse(resp.data["will_escalate"])

@@ -898,11 +898,19 @@ class Project(TenantScopedModel):
         }
 
     # =========================================================
-    # SPRINT 6: RISK ENGINE — unchanged
+    # SPRINT 14: RISK FORECAST 
     # =========================================================
 
-    def _get_risk_data(self):
-        today   = date.today()
+    def _get_risk_data(self, reference_date=None):
+        """
+        Sprint 14: added reference_date param for forecast computation.
+        reference_date=None → uses today (existing behaviour, unchanged).
+        reference_date=future_date → computes risk as of that future date.
+        Only time-based factors change (timeline_overrun, payment_overdue).
+        Static factors (pbg_rejected, amdal_rejected, mandatory_blockers)
+        remain as current state — they don't self-resolve with time.
+        """
+        today   = reference_date or date.today()    # ← Sprint 14: parameterised
         factors = []
         score   = 0
         if self.pbg_status == self.PermitStatus.REJECTED:
@@ -922,13 +930,31 @@ class Project(TenantScopedModel):
             score += pts
             impact = "Tinggi" if overrun_days > 30 else "Sedang"
             factors.append({"key": "timeline_overrun", "name": f"Terlambat {overrun_days} hari", "description": f"Proyek melewati target selesai {overrun_days} hari — dampak: {self._overrun_impact_text(overrun_days)}", "impact": impact, "impact_key": "high" if overrun_days > 30 else "medium", "points": pts, "max_points": 20, "action": "Perbarui target selesai atau percepat konstruksi", "triggered": True, "days": overrun_days})
-        overdue_count = self._get_overdue_payments_count()
+        overdue_count = self._get_overdue_payments_count(reference_date=today)  # ← Sprint 14
         if overdue_count > 0:
             pts = min(5 * overdue_count, 10); score += pts
             factors.append({"key": "payment_overdue", "name": f"{overdue_count} pembayaran tertunggak", "description": f"{overdue_count} invoice pembayaran melewati jatuh tempo — collection efficiency menurun", "impact": "Sedang", "impact_key": "medium", "points": pts, "max_points": 10, "action": "Tindak lanjuti pembayaran yang tertunggak segera", "triggered": True})
         score = min(score, 100)
         level = "high" if score >= 60 else "medium" if score >= 30 else "low"
         return {"score": score, "level": level, "factors": factors}
+
+    def _get_forecast_risk_data(self, days=14):
+        """
+        Sprint 14: Compute projected risk score in `days` days
+        if no action is taken.
+
+        Design:
+        - Calls _get_risk_data(reference_date=future_date) — same logic,
+          different 'today'. DRY, zero code duplication.
+        - Time-based factors grow naturally:
+            timeline_overrun: overrun_days increases by `days`
+            payment_overdue:  more payments cross their due_date
+        - Static factors unchanged (they don't self-resolve):
+            pbg_rejected, amdal_rejected, mandatory_blockers
+        - Deterministic. Auditable. Never hallucinated.
+        """
+        future_date = date.today() + timedelta(days=days)
+        return self._get_risk_data(reference_date=future_date)
 
     def _overrun_impact_text(self, days):
         if days <= 7:   return "perlu perhatian"
@@ -1094,12 +1120,19 @@ class Project(TenantScopedModel):
         except Exception:
             return {"total_billed": 0, "total_settled": 0, "total_arrears": 0, "efficiency_pct": 100, "status": "healthy", "status_display": "Sehat"}
 
-    def _get_overdue_payments_count(self):
+    def _get_overdue_payments_count(self, reference_date=None):
+        """
+        Sprint 14: added reference_date param for forecast computation.
+        reference_date=None → uses today (existing behaviour, unchanged).
+        reference_date=future → counts payments that will be overdue then.
+        """
         try:
             from apps.payments.models import Payment
             from django.utils import timezone
-            today = timezone.now().date()
-            return Payment.objects.filter(unit__project=self).filter(models.Q(status="menunggak") | models.Q(status="menunggu", due_date__lt=today)).count()
+            today = reference_date or timezone.now().date()
+            return Payment.objects.filter(unit__project=self).filter(
+                models.Q(status="menunggak") | models.Q(status="menunggu", due_date__lt=today)
+            ).count()
         except Exception:
             return 0
 

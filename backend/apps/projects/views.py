@@ -767,3 +767,119 @@ class ProjectDecisionEngineView(TenantScopedAPIView):
             "project_name": project.name,
             **engine,
         })
+
+class ProjectRiskForecastView(TenantScopedAPIView):
+    """
+    Sprint 14: 14-day risk forecast — what happens to the risk score
+    if nothing changes in the next N days.
+
+    GET /api/projects/<id>/risk-forecast/?days=14
+
+    Query params:
+      days (int, 1-30, default 14) — how far ahead to project
+
+    Response:
+      {
+        "success":       true,
+        "project_id":    "uuid",
+        "project_name":  "Perumahan Asri Cluster A",
+        "days":          14,
+        "current": {
+          "score": 30,  "level": "medium",  "level_display": "Sedang"
+        },
+        "forecast": {
+          "score": 34,  "level": "medium",  "level_display": "Sedang"
+        },
+        "delta":         4,
+        "will_escalate": false,
+        "top_drivers": [
+          {
+            "key":             "timeline_overrun",
+            "name":            "Terlambat 210 hari",
+            "description":     "Proyek melewati target selesai 210 hari...",
+            "impact":          "Tinggi",
+            "current_points":  20,
+            "forecast_points": 20,
+            "delta_points":    0,
+            "is_new":          false
+          }
+        ]
+      }
+
+    Design:
+    - Calls _get_risk_data() + _get_forecast_risk_data() — pure computation.
+    - delta = forecast.score - current.score (always >= 0 for time-based growth)
+    - will_escalate = level increases (low→medium or medium→high)
+    - top_drivers = all factors present in forecast, sorted by forecast_points desc
+    - is_new = factor wasn't present in current but appears in forecast
+      (e.g. a project that isn't overdue today but WILL be in 14 days)
+    - Tenant isolation via TenantScopedAPIView.get_object(pk)
+    - Zero new migration. Zero new model.
+    """
+    model = Project
+
+    LEVEL_DISPLAY = {"low": "Rendah", "medium": "Sedang", "high": "Tinggi"}
+    LEVEL_ORDER   = {"low": 0, "medium": 1, "high": 2}
+
+    def get(self, request, pk):
+        project = self.get_object(pk)
+
+        try:
+            days = max(1, min(int(request.query_params.get("days", 14)), 30))
+        except (ValueError, TypeError):
+            days = 14
+
+        current_data  = project._get_risk_data()
+        forecast_data = project._get_forecast_risk_data(days=days)
+
+        # ── Build top_drivers ────────────────────────────────────
+        # Map factor key → points for quick lookup
+        current_map  = {f["key"]: f for f in current_data["factors"]}
+        forecast_map = {f["key"]: f for f in forecast_data["factors"]}
+
+        # Include all factors that appear in the forecast
+        top_drivers = []
+        for key, fore in forecast_map.items():
+            curr      = current_map.get(key)
+            curr_pts  = curr["points"] if curr else 0
+            fore_pts  = fore["points"]
+            top_drivers.append({
+                "key":             key,
+                "name":            fore["name"],
+                "description":     fore["description"],
+                "impact":          fore["impact"],
+                "current_points":  curr_pts,
+                "forecast_points": fore_pts,
+                "delta_points":    fore_pts - curr_pts,
+                "is_new":          curr is None,
+            })
+
+        top_drivers.sort(key=lambda d: d["forecast_points"], reverse=True)
+
+        # ── Escalation check ─────────────────────────────────────
+        current_level  = current_data["level"]
+        forecast_level = forecast_data["level"]
+        will_escalate  = (
+            self.LEVEL_ORDER.get(forecast_level, 0) >
+            self.LEVEL_ORDER.get(current_level, 0)
+        )
+
+        return Response({
+            "success":      True,
+            "project_id":   str(project.id),
+            "project_name": project.name,
+            "days":         days,
+            "current": {
+                "score":         current_data["score"],
+                "level":         current_level,
+                "level_display": self.LEVEL_DISPLAY.get(current_level, current_level),
+            },
+            "forecast": {
+                "score":         forecast_data["score"],
+                "level":         forecast_level,
+                "level_display": self.LEVEL_DISPLAY.get(forecast_level, forecast_level),
+            },
+            "delta":         forecast_data["score"] - current_data["score"],
+            "will_escalate": will_escalate,
+            "top_drivers":   top_drivers,
+        })
