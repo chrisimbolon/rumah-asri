@@ -2,10 +2,6 @@
 // ===========================================================
 // === frontend/app/dashboard/projects/[id]/page.tsx ===
 // Sprint 4: dependency-aware RequirementRow
-//   + 🔒 Dependency blocked state (grey, locked icon)
-//   + "Selesaikan X dulu" tooltip on blocked rows
-//   + Prerequisite chain shown inline
-//   + handleStatusChange catches dependency_blocked errors
 // All Sprint 1/2/3 sections preserved — additive only.
 //  Sprint7 :requirement ownership and accountability - implemented here
 //  Sprint 9 : next actions assistant dashboard widget - is NOT implemented at this stage
