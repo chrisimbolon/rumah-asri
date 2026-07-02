@@ -6,7 +6,6 @@
 //   + "Selesaikan X dulu" tooltip on blocked rows
 //   + Prerequisite chain shown inline
 //   + handleStatusChange catches dependency_blocked errors
-//   + projects.ts: RequirementItem gets Sprint 4 fields
 // All Sprint 1/2/3 sections preserved — additive only.
 //  Sprint7 :requirement ownership and accountability - implemented here
 //  Sprint 9 : next actions assistant dashboard widget - is NOT implemented at this stage
