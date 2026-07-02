@@ -389,6 +389,35 @@ export interface DecisionEngine {
   message?:             string;   // only present when all_clear or no candidates
 }
 
+// Sprint 14: Risk Forecast ─────────────────────────────────────
+export interface RiskForecastPoint {
+  score:         number;
+  level:         "low" | "medium" | "high";
+  level_display: string;
+}
+
+export interface RiskForecastDriver {
+  key:             string;
+  name:            string;
+  description:     string;
+  impact:          string;
+  current_points:  number;
+  forecast_points: number;
+  delta_points:    number;
+  is_new:          boolean;   // factor didn't exist currently, appears in forecast
+}
+
+export interface RiskForecast {
+  project_id:    string;
+  project_name:  string;
+  days:          number;
+  current:       RiskForecastPoint;
+  forecast:      RiskForecastPoint;
+  delta:         number;       // forecast.score - current.score
+  will_escalate: boolean;      // level goes up (low→medium or medium→high)
+  top_drivers:   RiskForecastDriver[];
+}
+
 // ── Project — UNCHANGED ───────────────────────────────────────
 
 export interface Project {
@@ -734,6 +763,13 @@ export const projectsApi = {
 
   async getDecisionEngine(id: string): Promise<DecisionEngine> {
     const { data } = await api.get(`/api/projects/${id}/decision/`);
+    return data;
+  },
+
+  async getRiskForecast(id: string, days = 14): Promise<RiskForecast> {
+    const { data } = await api.get(
+      `/api/projects/${id}/risk-forecast/?days=${days}`
+    );
     return data;
   },
 
