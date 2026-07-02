@@ -39,6 +39,7 @@ import {
   RequirementItem,
   RISK_FACTOR_IMPACT_META,
   RISK_META,
+  RiskForecast,
   STAGE_META,
   TREND_META,
   UpdateProjectPayload
@@ -2352,6 +2353,240 @@ function DecisionEnginePanel({ projectId }: { projectId: string }) {
   );
 }
 
+// ── Sprint 14: Risk Forecast Panel ───────────────────────────
+// Shows current risk vs projected risk in 14 days.
+// "What happens if nothing changes?" — honest, deterministic.
+// Fetches independently so it doesn't block the rest of the page.
+
+function RiskForecastPanel({ projectId }: { projectId: string }) {
+  const [forecast, setForecast] = useState<RiskForecast | null>(null);
+  const [loading,  setLoading]  = useState(true);
+
+  useEffect(() => {
+    projectsApi.getRiskForecast(projectId)
+      .then(setForecast)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
+  // Risk level → colour helper
+  const levelColor = (level: string): string => {
+    if (level === "high")   return "var(--color-danger)";
+    if (level === "medium") return "var(--color-warning)";
+    return "var(--color-success)";
+  };
+  const levelBg = (level: string): string => {
+    if (level === "high")   return "var(--color-danger-light)";
+    if (level === "medium") return "var(--color-warning-light)";
+    return "var(--color-success-light)";
+  };
+
+  if (loading) {
+    return (
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 8 }}>
+          📈 Risk Forecast
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-ink-3)", padding: "10px 0" }}>
+          Menghitung proyeksi risiko...
+        </div>
+      </div>
+    );
+  }
+
+  if (!forecast) return null;
+
+  const currentColor  = levelColor(forecast.current.level);
+  const forecastColor = levelColor(forecast.forecast.level);
+  const isGrowing     = forecast.delta > 0;
+  const isStable      = forecast.delta === 0;
+
+  return (
+    <div className="card" style={{
+      marginBottom: 16,
+      // Pulse border if escalating — persistent, calm, not alarming
+      border: forecast.will_escalate
+        ? "1.5px solid var(--color-danger)"
+        : "1.5px solid rgba(14,13,11,0.08)",
+    }}>
+      {/* ── Header ── */}
+      <div style={{
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between", marginBottom: 14,
+      }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
+            📈 Risk Forecast
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>
+            Proyeksi dalam {forecast.days} hari jika tidak ada tindakan
+          </div>
+        </div>
+        {/* Delta badge */}
+        {isStable ? (
+          <div style={{
+            padding: "4px 10px", borderRadius: 6,
+            backgroundColor: "var(--color-paper-2)",
+            fontSize: 11, fontWeight: 700, color: "var(--color-ink-3)",
+          }}>
+            = Stabil
+          </div>
+        ) : (
+          <div style={{
+            padding: "4px 10px", borderRadius: 6,
+            backgroundColor: "var(--color-danger-light)",
+            fontSize: 11, fontWeight: 700, color: "var(--color-danger)",
+          }}>
+            +{forecast.delta} pts
+          </div>
+        )}
+      </div>
+
+      {/* ── Two-column: Current vs Forecast ── */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "1fr auto 1fr",
+        gap: 10, alignItems: "center", marginBottom: 14,
+      }}>
+        {/* Current */}
+        <div style={{
+          padding: "14px 16px", borderRadius: 10,
+          backgroundColor: levelBg(forecast.current.level),
+          textAlign: "center",
+        }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Saat Ini
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: currentColor, lineHeight: 1 }}>
+            {forecast.current.score}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 2 }}>/ 100</div>
+          <div style={{
+            marginTop: 8, padding: "3px 10px", borderRadius: 999,
+            backgroundColor: currentColor, color: "white",
+            fontSize: 10, fontWeight: 700, display: "inline-block",
+          }}>
+            {forecast.current.level_display}
+          </div>
+        </div>
+
+        {/* Arrow */}
+        <div style={{
+          fontSize: 20, color: isGrowing ? "var(--color-danger)" : "var(--color-ink-3)",
+          textAlign: "center",
+        }}>
+          {isGrowing ? "→" : "→"}
+        </div>
+
+        {/* Forecast */}
+        <div style={{
+          padding: "14px 16px", borderRadius: 10,
+          backgroundColor: levelBg(forecast.forecast.level),
+          textAlign: "center",
+          border: forecast.will_escalate ? `2px solid ${forecastColor}` : "none",
+        }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            {forecast.days} Hari Lagi
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: forecastColor, lineHeight: 1 }}>
+            {forecast.forecast.score}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 2 }}>/ 100</div>
+          <div style={{
+            marginTop: 8, padding: "3px 10px", borderRadius: 999,
+            backgroundColor: forecastColor, color: "white",
+            fontSize: 10, fontWeight: 700, display: "inline-block",
+          }}>
+            {forecast.forecast.level_display}
+            {forecast.will_escalate && " ⚠"}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Escalation warning ── */}
+      {forecast.will_escalate && (
+        <div style={{
+          marginBottom: 12, padding: "8px 12px",
+          backgroundColor: "var(--color-danger-light)",
+          borderRadius: 8, fontSize: 11,
+          color: "var(--color-danger)",
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
+          <span style={{ fontSize: 14 }}>⚠</span>
+          <span>
+            <strong>Tingkat risiko akan naik</strong> dari {forecast.current.level_display} ke {forecast.forecast.level_display} dalam {forecast.days} hari jika tidak ada tindakan.
+          </span>
+        </div>
+      )}
+
+      {/* ── Top drivers ── */}
+      {forecast.top_drivers.length > 0 && (
+        <div>
+          <div style={{
+            fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)",
+            textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8,
+          }}>
+            Faktor Risiko
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {forecast.top_drivers.map((driver) => (
+              <div key={driver.key} style={{
+                display: "flex", alignItems: "flex-start",
+                gap: 10, padding: "8px 10px", borderRadius: 8,
+                backgroundColor: driver.is_new || driver.delta_points > 0
+                  ? "var(--color-warning-light)"
+                  : "var(--color-paper-2)",
+              }}>
+                {/* Points indicator */}
+                <div style={{ flexShrink: 0, textAlign: "center", minWidth: 36 }}>
+                  <div style={{
+                    fontSize: 13, fontWeight: 800,
+                    color: driver.delta_points > 0 ? "var(--color-danger)" :
+                           driver.is_new          ? "var(--color-warning)" :
+                                                    "var(--color-ink-3)",
+                  }}>
+                    {driver.forecast_points}
+                  </div>
+                  <div style={{ fontSize: 9, color: "var(--color-ink-3)" }}>pts</div>
+                </div>
+                {/* Driver info */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-ink)", lineHeight: 1.3 }}>
+                    {driver.name}
+                    {driver.is_new && (
+                      <span style={{
+                        marginLeft: 6, fontSize: 9, fontWeight: 700,
+                        padding: "1px 5px", borderRadius: 3,
+                        backgroundColor: "var(--color-warning)",
+                        color: "white",
+                      }}>
+                        Baru
+                      </span>
+                    )}
+                  </div>
+                  {driver.delta_points > 0 && (
+                    <div style={{ fontSize: 10, color: "var(--color-danger)", marginTop: 2 }}>
+                      ↑ +{driver.delta_points} pts dari saat ini
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Stable message ── */}
+      {isStable && forecast.top_drivers.length === 0 && (
+        <div style={{
+          textAlign: "center", padding: "12px 0",
+          fontSize: 12, color: "var(--color-success)",
+        }}>
+          ✅ Tidak ada faktor risiko yang diproyeksikan dalam {forecast.days} hari ke depan
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Main page ─────────────────────────────────────────────────
 export default function ProjectDetailPage() {
@@ -2568,6 +2803,9 @@ export default function ProjectDetailPage() {
 
       {/* Sprint 13: Decision Engine */}
       <DecisionEnginePanel projectId={project.id} />
+
+      {/* Sprint 14: Risk Forecast */}
+      <RiskForecastPanel projectId={project.id} />
 
       {/* ── Alerts + Dimensions row ── */}
       {((intel.alerts && intel.alerts.length > 0) || intel.readiness_dimensions) && (
