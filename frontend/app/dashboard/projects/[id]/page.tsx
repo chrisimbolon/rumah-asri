@@ -1571,8 +1571,8 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
   if (!graph || graph.nodes.length === 0) return null;
 
   // ── Topological sort → column assignment ─────────────────
-  // Each node gets a column = max(prereq_columns) + 1.
-  // Nodes with no prerequisites are in column 0.
+  // Each node gets a column = max(prereq_columns) + 1. Nodes with no prerequisites are in column 0.
+
   const incomingEdges = new Map<string, string[]>();
   graph.nodes.forEach(n => incomingEdges.set(n.id, []));
   graph.edges.forEach(e => {
