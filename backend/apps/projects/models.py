@@ -466,6 +466,10 @@ class RequirementAudit(models.Model):
         related_name="requirement_audit_logs",
     )
     changed_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    readiness_before = models.IntegerField(null=True, blank=True)
+    readiness_after  = models.IntegerField(null=True, blank=True)
+    risk_before      = models.IntegerField(null=True, blank=True)
+    risk_after       = models.IntegerField(null=True, blank=True)
 
     class Meta:
         verbose_name        = "Audit Requirement"
@@ -476,20 +480,34 @@ class RequirementAudit(models.Model):
         return f"[{self.get_action_display()}] {self.requirement_status.requirement.name}"
 
     @classmethod
-    def log(cls, requirement_status, action, changed_by=None, old_value="", new_value="", notes=""):
+    def log(
+        cls,
+        requirement_status,
+        action,
+        changed_by      = None,
+        old_value       = "",
+        new_value       = "",
+        notes           = "",
+        readiness_before = None,   # Sprint 16
+        readiness_after  = None,   # Sprint 16
+        risk_before      = None,   # Sprint 16
+        risk_after       = None,   # Sprint 16
+    ):
         try:
             cls.objects.create(
-                requirement_status=requirement_status,
-                action=action,
-                old_value=old_value or "",
-                new_value=new_value or "",
-                notes=notes or "",
-                changed_by=changed_by,
+                requirement_status = requirement_status,
+                action             = action,
+                old_value          = old_value or "",
+                new_value          = new_value or "",
+                notes              = notes or "",
+                changed_by         = changed_by,
+                readiness_before   = readiness_before,
+                readiness_after    = readiness_after,
+                risk_before        = risk_before,
+                risk_after         = risk_after,
             )
         except Exception:
             pass
-
-
 # =============================================================================
 # RequirementComment — Sprint 7 NEW MODEL
 # Team discussion thread per requirement.
@@ -531,7 +549,6 @@ class RequirementComment(models.Model):
     def __str__(self):
         author_name = self.author.full_name if self.author else "?"
         return f"[{author_name}] {self.requirement_status.requirement.name}: {self.body[:50]}"
-
 
 # =============================================================================
 # RiskSnapshot — unchanged from Sprint 6
@@ -1235,6 +1252,17 @@ class Project(TenantScopedModel):
                 # Sprint 7: ownership
                 "assigned_to_id":   assigned_to_id,
                 "assigned_to_name": assigned_to_name,
+               # Sprint 16: Interactive Dependency Graph node detail
+                "block_reason":     (
+                    f"Selesaikan dulu: {', '.join(unmet_prereqs)}"
+                    if unmet_prereqs else None
+                ),
+                "est_minutes":      (
+                    (5 if not assigned_to_id else 0) +
+                    (7 if evidence_count == 0 else 0) +
+                    (3 if evidence_count > 0 else 0) +
+                    2
+                ),
                 "due_date":         req_due_date,
                 "is_overdue":       is_overdue,
                 "days_until_due":   days_until_due,
@@ -1629,7 +1657,6 @@ class Project(TenantScopedModel):
 
         audit_logs = audit_logs[:limit]
 
-        # ── rest of the method is UNCHANGED from here ──
         action_labels = {
             RequirementAudit.Action.CREATED:           "membuat requirement",
             RequirementAudit.Action.UPDATED:           "memperbarui",
@@ -1647,18 +1674,30 @@ class Project(TenantScopedModel):
             req_name    = log.requirement_status.requirement.name
             actor_name  = log.changed_by.full_name if log.changed_by else "Sistem"
             action_verb = action_labels.get(log.action, log.action)
+
+            # Sprint 16: compute impact deltas (None for pre-Sprint-16 logs)
+            readiness_delta = None
+            risk_delta      = None
+            if log.readiness_before is not None and log.readiness_after is not None:
+                readiness_delta = log.readiness_after - log.readiness_before
+            if log.risk_before is not None and log.risk_after is not None:
+                risk_delta = log.risk_after - log.risk_before
+
             activities.append({
-                "id":        str(log.id),
-                "type":      "requirement",
-                "action":    log.action,
-                "actor":     actor_name,
-                "actor_id":  str(log.changed_by.id) if log.changed_by else None,
-                "subject":   req_name,
-                "message":   f"{actor_name} {action_verb} {req_name}",
-                "notes":     log.notes,
-                "old_value": log.old_value,
-                "new_value": log.new_value,
-                "timestamp": log.changed_at.isoformat(),
+                "id":               str(log.id),
+                "type":             "requirement",
+                "action":           log.action,
+                "actor":            actor_name,
+                "actor_id":         str(log.changed_by.id) if log.changed_by else None,
+                "subject":          req_name,
+                "message":          f"{actor_name} {action_verb} {req_name}",
+                "notes":            log.notes,
+                "old_value":        log.old_value,
+                "new_value":        log.new_value,
+                "timestamp":        log.changed_at.isoformat(),
+                # Sprint 16: Cause & Effect
+                "readiness_delta":  readiness_delta,
+                "risk_delta":       risk_delta,
             })
         return activities
 

@@ -876,3 +876,130 @@ class RiskForecastTests(APITestCase):
         )
         self.assertEqual(resp.data["delta"], 0)
         self.assertFalse(resp.data["will_escalate"])
+
+class CauseEffectAndInteractiveDependencyTests(APITestCase):
+    """
+    Sprint 16: Cause & Effect impact capture + Interactive Dependency Graph.
+
+    Covers:
+    - Impact fields (readiness_before/after, risk_before/after) are stored
+      in RequirementAudit when a requirement is updated
+    - activity_timeline() returns readiness_delta and risk_delta
+    - dependency_graph nodes include block_reason, assigned_to_name, est_minutes
+    """
+
+    def setUp(self):
+        from apps.projects.models import (
+            ProjectRequirementStatus,
+            StageRequirement,
+        )
+        # ── Shared requirement ──────────────────────────────────────
+        self.req, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Kontraktor S16",
+            defaults={"is_mandatory": True, "weight": 60},
+        )
+
+        # ── Org + project setup ─────────────────────────────────────
+        self.org  = Organization.objects.create(name="Asri Sprint16")
+        self.user = CustomUser.objects.create_user(
+            email="dev.s16@test.id", password="pass12345!",
+            full_name="Dev S16", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.user, role="owner", is_active=True,
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster S16", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.req_status = ProjectRequirementStatus.objects.create(
+            project=self.project,
+            requirement=self.req,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    # ── Impact capture correctness ─────────────────────────────────
+
+    def test_impact_fields_captured_on_requirement_update(self):
+        """
+        Sprint 16: when a requirement status is updated, the most recent
+        RequirementAudit entry must have readiness_before and readiness_after
+        set (not None). This proves the impact capture loop is working.
+        """
+        from apps.projects.models import RequirementAudit
+        self._login_as(self.user)
+
+        resp = self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}/",
+            {"status": "in_progress"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["success"])
+
+        # The most recent audit log must have impact fields stored
+        latest_log = self.req_status.audit_logs.first()
+        self.assertIsNotNone(latest_log, "Audit log should exist after update")
+        self.assertIsNotNone(
+            latest_log.readiness_before,
+            "readiness_before should be stored after Sprint 16"
+        )
+        self.assertIsNotNone(
+            latest_log.readiness_after,
+            "readiness_after should be stored after Sprint 16"
+        )
+        self.assertIsNotNone(latest_log.risk_before)
+        self.assertIsNotNone(latest_log.risk_after)
+
+    def test_activity_timeline_includes_impact_data(self):
+        """
+        Sprint 16: activity_timeline() must include readiness_delta and
+        risk_delta in each activity item after the update creates an
+        impact-aware audit log.
+        """
+        from apps.projects.models import RequirementAudit
+        self._login_as(self.user)
+
+        # Perform an update to generate an impact-aware audit log
+        self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}/",
+            {"status": "in_progress"},
+            format="json",
+        )
+
+        # Fetch activity timeline
+        resp = self.client.get(f"/api/projects/{self.project.id}/activity/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertGreater(len(resp.data["results"]), 0)
+
+        # Most recent activity must have the new fields (even if delta is 0)
+        latest = resp.data["results"][0]
+        self.assertIn("readiness_delta", latest, "readiness_delta missing from activity")
+        self.assertIn("risk_delta",      latest, "risk_delta missing from activity")
+
+    def test_dependency_graph_node_includes_detail_fields(self):
+        """
+        Sprint 16: dependency graph nodes must include block_reason,
+        assigned_to_name, and est_minutes for the interactive detail panel.
+        """
+        self._login_as(self.user)
+        resp = self.client.get(
+            f"/api/projects/{self.project.id}/dependency-graph/"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["success"])
+
+        if resp.data["nodes"]:
+            node = resp.data["nodes"][0]
+            # Sprint 16 fields must be present
+            self.assertIn("block_reason",     node, "block_reason missing from node")
+            self.assertIn("assigned_to_name", node, "assigned_to_name missing from node")
+            self.assertIn("est_minutes",      node, "est_minutes missing from node")
+            # est_minutes must be a positive integer
+            self.assertIsInstance(node["est_minutes"], int)
+            self.assertGreater(node["est_minutes"], 0)

@@ -107,22 +107,38 @@ class ProjectRequirementUpdateView(TenantScopedAPIView):
 
     def put(self, request, pk, req_status_id):
         if request.user.role not in ("developer", "super_admin"):
-            return Response({"success": False, "message": "Tidak memiliki izin"}, status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         project = self.get_object(pk)
         try:
-            req_status = ProjectRequirementStatus.objects.get(id=req_status_id, project=project)
+            req_status = ProjectRequirementStatus.objects.get(
+                id=req_status_id, project=project
+            )
         except ProjectRequirementStatus.DoesNotExist:
-            return Response({"success": False, "message": "Requirement tidak ditemukan"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"success": False, "message": "Requirement tidak ditemukan"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         new_status = request.data.get("status")
         notes      = request.data.get("notes", req_status.notes)
 
         valid_statuses = [s[0] for s in ProjectRequirementStatus.Status.choices]
         if new_status not in valid_statuses:
-            return Response({"success": False, "message": f"Status tidak valid. Pilihan: {valid_statuses}"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "message": f"Status tidak valid. Pilihan: {valid_statuses}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         old_status = req_status.status
-        project.snapshot_readiness()
+
+        # ── Sprint 16: capture BEFORE state ────────────────────────
+        readiness_before = project.readiness_score
+        risk_before      = project._get_risk_data()["score"]
+
+        project.snapshot_readiness()   # existing — unchanged
 
         try:
             if new_status == ProjectRequirementStatus.Status.COMPLETED:
@@ -132,12 +148,64 @@ class ProjectRequirementUpdateView(TenantScopedAPIView):
                 req_status.notes      = notes
                 req_status.updated_by = request.user
                 req_status.save(update_fields=["status", "notes", "updated_by", "updated_at"])
-                RequirementAudit.log(requirement_status=req_status, action=RequirementAudit.Action.UPDATED, changed_by=request.user, old_value=old_status, new_value=new_status, notes=notes)
+                RequirementAudit.log(
+                    requirement_status=req_status,
+                    action=RequirementAudit.Action.UPDATED,
+                    changed_by=request.user,
+                    old_value=old_status,
+                    new_value=new_status,
+                    notes=notes,
+                )
         except ValueError as e:
-            return Response({"success": False, "message": str(e), "error_type": "dependency_blocked"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "message": str(e), "error_type": "dependency_blocked"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        project.snapshot_risk()
-        return Response({"success": True, "message": f"Requirement '{req_status.requirement.name}' diperbarui", "intelligence": project.get_intelligence_summary()})
+        project.snapshot_risk()   # existing — unchanged
+
+        # ── Sprint 16: capture AFTER state + store impact ────────────
+        readiness_after = project.readiness_score
+        risk_after      = project._get_risk_data()["score"]
+
+        # Update the most recently created audit log with impact data.
+        # This works for both mark_completed() (which creates its own log)
+        # and the manual RequirementAudit.log() call above.
+        try:
+            latest_log = req_status.audit_logs.first()   # ordered by -changed_at
+            if latest_log and latest_log.readiness_before is None:
+                latest_log.readiness_before = readiness_before
+                latest_log.readiness_after  = readiness_after
+                latest_log.risk_before      = risk_before
+                latest_log.risk_after       = risk_after
+                latest_log.save(update_fields=[
+                    "readiness_before", "readiness_after",
+                    "risk_before",      "risk_after",
+                ])
+        except Exception:
+            pass
+
+        # Build impact summary for the response
+        readiness_delta = readiness_after - readiness_before
+        risk_delta      = risk_after - risk_before
+
+        intel = project.get_intelligence_summary()
+
+        return Response({
+            "success": True,
+            "message": f"Requirement '{req_status.requirement.name}' diperbarui",
+            # Sprint 16: impact data in response for frontend feedback loop
+            "impact": {
+                "readiness_before":  readiness_before,
+                "readiness_after":   readiness_after,
+                "readiness_delta":   readiness_delta,
+                "risk_before":       risk_before,
+                "risk_after":        risk_after,
+                "risk_delta":        risk_delta,
+                "stage_can_advance": intel["blocking_count"] == 0,
+            },
+            "intelligence": intel,
+        })
 
 
 class ProjectPortfolioView(TenantScopedAPIView):
@@ -601,7 +669,24 @@ class ProjectDependencyGraphView(TenantScopedAPIView):
                 and req["status"] not in ("completed", "menunggu_verifikasi")
                 and not req["is_dependency_blocked"]
             )
+
+            # Sprint 16: block reason from unmet prerequisites
+            unmet = req.get("unmet_prerequisites", [])
+            block_reason = (
+                f"Selesaikan dulu: {', '.join(unmet)}"
+                if unmet else None
+            )
+
+            # Sprint 16: estimated minutes from current state (same as Decision Engine)
+            est = (
+                (5 if not req.get("assigned_to_id") else 0) +
+                (7 if req.get("evidence_count", 0) == 0 else 0) +
+                (3 if req.get("evidence_count", 0) > 0 else 0) +
+                2
+            )
+
             nodes.append({
+                # ── Sprint 1-11 fields (unchanged) ──
                 "id":                    req["id"],
                 "name":                  req["name"],
                 "status":                req["status"],
@@ -612,6 +697,10 @@ class ProjectDependencyGraphView(TenantScopedAPIView):
                 "weight_pct":            req["weight_pct"],
                 "prerequisites":         req["prerequisites"],
                 "unmet_prerequisites":   req["unmet_prerequisites"],
+                # ── Sprint 16: interactive detail fields ──
+                "block_reason":          block_reason,
+                "assigned_to_name":      req.get("assigned_to_name"),
+                "est_minutes":           est,
             })
 
         # Build edges from prerequisite relationships
