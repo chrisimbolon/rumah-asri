@@ -1213,7 +1213,7 @@ function useProjectPulse(
 ) {
   const sinceRef    = useRef<string>(new Date().toISOString());
   const onUpdateRef = useRef(onUpdate);
-  onUpdateRef.current = onUpdate;   // always call latest callback
+  onUpdateRef.current = onUpdate;   // always call latest callback, Watch very close on this line
 
   useEffect(() => {
     if (!enabled || !projectId) return;
