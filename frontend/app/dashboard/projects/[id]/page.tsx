@@ -1526,7 +1526,7 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
   const [graph,          setGraph]          = useState<DependencyGraph | null>(null);
   const [loading,        setLoading]        = useState(true);
   const [expanded,       setExpanded]       = useState(false);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);  // Sprint 16
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   useEffect(() => {
     projectsApi.getDependencyGraph(projectId)
