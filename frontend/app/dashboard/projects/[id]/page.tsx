@@ -1204,8 +1204,7 @@ function ParallelStageToggles({ project, onUpdated }: { project: Project; onUpda
 }
 
 // ── Sprint 17: Smart polling hook ─────────────────────────────
-// Polls /pulse/?since=<timestamp> every 15 seconds.
-// Silent on failure — polling is best-effort, never blocks the UI.
+// Polls /pulse/?since=<timestamp> every 15 seconds, Silent on failure — polling is best-effort, never blocks the UI.
 // Returns cleanup function to stop polling on unmount.
 function useProjectPulse(
   projectId:  string,
