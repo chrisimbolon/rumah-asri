@@ -7,6 +7,7 @@
 //  Sprint 9 : next actions assistant dashboard widget - is NOT implemented at this stage
 //  Spint 10 :Live Intelligence Dashboard - IS implemented here
 //  Sprint 14 : Risk Forecast (14-day projection) - IS implemented here
+//  Sprint 17 : Live Event Stream + Readiness Momentum - IS implemented here
 // ============================================================
 
 import {
