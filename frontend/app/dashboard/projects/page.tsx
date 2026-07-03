@@ -9,6 +9,8 @@
 import {
   CreateProjectPayload,
   deriveStats,
+  PortfolioAtRiskProject,
+  PortfolioIntelligence,
   Project,
   projectsApi,
   RecentActivityItem,
@@ -411,6 +413,270 @@ function DashboardEventStream() {
   );
 }
 
+// ── Sprint 18: Portfolio Intelligence Hub ─────────────────────
+// Bloomberg-style executive view of the entire org's project portfolio.
+// 6 key metrics with week-over-week deltas (when snapshot history exists).
+// Top at-risk projects listed below.
+// Polls every 60 seconds — portfolio changes slowly.
+function PortfolioIntelligenceHub() {
+  const [intel,   setIntel]   = useState<PortfolioIntelligence | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = async () => {
+    try {
+      const data = await projectsApi.getPortfolioIntelligence();
+      setIntel(data);
+    } catch {
+      // Silent failure
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetch();
+    const interval = setInterval(fetch, 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Format Rupiah: 46000000000 → "Rp 46B"
+  const formatRupiah = (amount: number): string => {
+    if (amount >= 1_000_000_000) return `Rp ${(amount / 1_000_000_000).toFixed(0)}B`;
+    if (amount >= 1_000_000)     return `Rp ${(amount / 1_000_000).toFixed(0)}M`;
+    return `Rp ${amount.toLocaleString("id-ID")}`;
+  };
+
+  // Delta display: positive or negative with arrow + colour
+  const DeltaBadge = ({
+    value,
+    goodWhenPositive = true,
+  }: {
+    value: number;
+    goodWhenPositive?: boolean;
+  }) => {
+    if (value === 0) {
+      return (
+        <span style={{ fontSize: 9, color: "var(--color-ink-3)", fontWeight: 600 }}>
+          = stabil
+        </span>
+      );
+    }
+    const isGood  = goodWhenPositive ? value > 0 : value < 0;
+    const color   = isGood ? "var(--color-success)" : "var(--color-danger)";
+    const arrow   = value > 0 ? "↑" : "↓";
+    const display = `${arrow} ${Math.abs(value)}${goodWhenPositive ? "%" : ""} mnggu ini`;
+    return (
+      <span style={{ fontSize: 9, fontWeight: 700, color }}>
+        {display}
+      </span>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 8 }}>
+          Portfolio Intelligence
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-ink-3)" }}>
+          Menganalisis portofolio...
+        </div>
+      </div>
+    );
+  }
+
+  if (!intel) return null;
+
+  const { current, week_delta, top_at_risk, has_history } = intel;
+
+  // 6 Bloomberg metrics
+  const metrics = [
+    {
+      label:   "Total Proyek",
+      value:   String(current.total_projects),
+      delta:   null,
+      color:   "var(--color-info)",
+      icon:    "📁",
+    },
+    {
+      label:         "Rata² Kesiapan",
+      value:         `${current.avg_readiness}%`,
+      delta:         week_delta ? (
+        <DeltaBadge value={week_delta.avg_readiness} goodWhenPositive={true} />
+      ) : null,
+      color:
+        current.avg_readiness >= 80 ? "var(--color-success)" :
+        current.avg_readiness >= 50 ? "var(--color-warning)" :
+                                      "var(--color-danger)",
+      icon: "📈",
+    },
+    {
+      label:   "Kritis",
+      value:   String(current.critical_count),
+      delta:   week_delta ? (
+        <DeltaBadge value={week_delta.critical_count} goodWhenPositive={false} />
+      ) : null,
+      color:   current.critical_count > 0 ? "var(--color-danger)" : "var(--color-success)",
+      icon:    "⚡",
+    },
+    {
+      label:   "Risiko Tinggi",
+      value:   String(current.high_risk_count),
+      delta:   week_delta ? (
+        <DeltaBadge value={week_delta.high_risk_count} goodWhenPositive={false} />
+      ) : null,
+      color:   current.high_risk_count > 0 ? "var(--color-warning)" : "var(--color-success)",
+      icon:    "🔴",
+    },
+    {
+      label:   "Terlambat",
+      value:   String(current.delayed_count),
+      delta:   week_delta ? (
+        <DeltaBadge value={week_delta.delayed_count} goodWhenPositive={false} />
+      ) : null,
+      color:   current.delayed_count > 0 ? "var(--color-warning)" : "var(--color-success)",
+      icon:    "⏰",
+    },
+    {
+      label:   "Value Terlindungi",
+      value:   formatRupiah(current.revenue_protected),
+      delta:   null,
+      color:   "var(--color-accent)",
+      icon:    "💰",
+    },
+  ];
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      {/* Header */}
+      <div style={{
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between", marginBottom: 14,
+      }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
+            Portfolio Intelligence
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>
+            {has_history
+              ? "Perbandingan 7 hari terakhir"
+              : "Data saat ini · Jalankan snapshot untuk melihat tren minggu ini"}
+          </div>
+        </div>
+      </div>
+
+      {/* 6 Bloomberg metrics */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(6, 1fr)",
+        gap: 8,
+        marginBottom: top_at_risk.length > 0 ? 16 : 0,
+      }}>
+        {metrics.map((m) => (
+          <div key={m.label} style={{
+            textAlign: "center",
+            padding: "10px 6px",
+            borderRadius: 8,
+            backgroundColor: "var(--color-paper-2)",
+          }}>
+            <div style={{ fontSize: 13, marginBottom: 4 }}>{m.icon}</div>
+            <div style={{
+              fontSize: 16, fontWeight: 800,
+              color: m.color, lineHeight: 1, marginBottom: 3,
+            }}>
+              {m.value}
+            </div>
+            <div style={{
+              fontSize: 9, color: "var(--color-ink-3)",
+              marginBottom: 3, lineHeight: 1.2,
+            }}>
+              {m.label}
+            </div>
+            {m.delta && (
+              <div>{m.delta}</div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Top at-risk mini-table */}
+      {top_at_risk.length > 0 && (
+        <div>
+          <div style={{
+            fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)",
+            textTransform: "uppercase", letterSpacing: "0.06em",
+            marginBottom: 8,
+          }}>
+            Proyek Berisiko Tertinggi
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {top_at_risk.map((p: PortfolioAtRiskProject) => (
+              <div key={p.id} style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "7px 10px", borderRadius: 7,
+                backgroundColor: "var(--color-paper-2)",
+                cursor: "pointer",
+              }}
+              onClick={() => window.location.href = `/dashboard/projects/${p.id}`}
+              >
+                {/* Readiness bar */}
+                <div style={{ minWidth: 32, textAlign: "center" }}>
+                  <div style={{
+                    fontSize: 12, fontWeight: 800,
+                    color: p.readiness >= 80 ? "var(--color-success)" :
+                           p.readiness >= 50 ? "var(--color-warning)" :
+                                               "var(--color-danger)",
+                  }}>
+                    {p.readiness}%
+                  </div>
+                </div>
+                {/* Name */}
+                <div style={{ flex: 1, fontSize: 11, fontWeight: 600, color: "var(--color-ink)" }}>
+                  {p.name}
+                </div>
+                {/* Risk badge */}
+                <span style={{
+                  fontSize: 9, fontWeight: 700,
+                  padding: "2px 7px", borderRadius: 999,
+                  backgroundColor:
+                    p.risk_level === "high"   ? "var(--color-danger-light)"  :
+                    p.risk_level === "medium" ? "var(--color-warning-light)" :
+                                                "var(--color-success-light)",
+                  color:
+                    p.risk_level === "high"   ? "var(--color-danger)"  :
+                    p.risk_level === "medium" ? "var(--color-warning)" :
+                                                "var(--color-success)",
+                }}>
+                  {p.risk_display}
+                </span>
+                {/* Blocker badge */}
+                {p.blocking > 0 && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 700,
+                    color: "var(--color-danger)",
+                  }}>
+                    ⚡ {p.blocking} blokir
+                  </span>
+                )}
+                {/* Next action */}
+                {p.next_action && (
+                  <span style={{
+                    fontSize: 10, color: "var(--color-ink-3)",
+                    whiteSpace: "nowrap", maxWidth: 120,
+                    overflow: "hidden", textOverflow: "ellipsis",
+                  }}>
+                    → {p.next_action}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────
 export default function ProjectsPage() {
   const [projects,    setProjects]    = useState<Project[]>([]);
@@ -548,6 +814,9 @@ export default function ProjectsPage() {
           </div>
         ))}
       </div>
+
+      {/* Sprint 18: Portfolio Intelligence Hub */}
+         <PortfolioIntelligenceHub />
 
       {/* Sprint 17: Cross-project Event Stream */}
         <DashboardEventStream />
