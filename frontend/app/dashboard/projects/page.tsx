@@ -440,7 +440,7 @@ export default function ProjectsPage() {
       : 0                                        // default API order
     );
 
-  // Filter tabs config — counts computed live from all projects
+  // Filter tabs config — counts computed live from all projects - this should be examined deeply
   const filterTabs: { key: FilterKey; label: string; count: number; color: string }[] = [
     {
       key:   "all",
