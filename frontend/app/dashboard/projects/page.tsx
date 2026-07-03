@@ -7,10 +7,11 @@
 
 import {
   CreateProjectPayload,
-  Project,
-  STAGE_META,
   deriveStats,
+  Project,
   projectsApi,
+  RecentActivityItem,
+  STAGE_META,
 } from "@/lib/api/projects";
 import { warnaProgres } from "@/lib/mock-data";
 import {
@@ -255,6 +256,160 @@ function CardStagePipeline({ stage }: { stage: Project["stage"] }) {
   );
 }
 
+// ── Sprint 17: Dashboard Cross-Project Event Stream ───────────
+function DashboardEventStream() {
+  const [events,      setEvents]      = useState<RecentActivityItem[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+
+  const fetchEvents = async () => {
+    try {
+      const data = await projectsApi.getRecentActivity(8);
+      setEvents(data.results);
+      setLastUpdated(
+        new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+      );
+    } catch {
+      // Silent failure
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchEvents();
+    const interval = setInterval(fetchEvents, 30_000);   // 30-second cadence
+    return () => clearInterval(interval);
+  }, []);
+
+  const actionIcon: Record<string, string> = {
+    completed:           "✅",
+    evidence_uploaded:   "📎",
+    evidence_approved:   "✓",
+    evidence_rejected:   "❌",
+    stage_advanced:      "🚀",
+    assigned:            "👤",
+    due_date_set:        "📅",
+    comment_added:       "💬",
+    updated:             "✏️",
+    created:             "🆕",
+  };
+
+  const relativeTime = (iso: string): string => {
+    const diff    = Date.now() - new Date(iso).getTime();
+    const minutes = Math.floor(diff / 60_000);
+    if (minutes < 1)   return "baru saja";
+    if (minutes < 60)  return `${minutes} mnt`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24)    return `${hours} jam`;
+    return `${Math.floor(hours / 24)} hari`;
+  };
+
+  if (loading) {
+    return (
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 8 }}>
+          Event Stream
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-ink-3)", padding: "8px 0" }}>
+          Memuat aktivitas terbaru...
+        </div>
+      </div>
+    );
+  }
+
+  if (events.length === 0) return null;
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      {/* Header */}
+      <div style={{
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between", marginBottom: 12,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
+            Event Stream
+          </div>
+          {/* Pulsing live dot */}
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <div style={{
+              width: 7, height: 7, borderRadius: "50%",
+              backgroundColor: "var(--color-success)",
+              boxShadow: "0 0 0 2px var(--color-success-light)",
+            }} />
+            <span style={{ fontSize: 10, color: "var(--color-success)", fontWeight: 600 }}>
+              Live
+            </span>
+          </div>
+          <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
+            Semua proyek
+          </span>
+        </div>
+        {lastUpdated && (
+          <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
+            diperbarui {lastUpdated}
+          </span>
+        )}
+      </div>
+
+      {/* Events */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        {events.slice(0, 6).map((event, i) => (
+          <div key={event.id} style={{
+            display: "flex", gap: 10, alignItems: "flex-start",
+            padding: "7px 0",
+            borderBottom: i < Math.min(events.length, 6) - 1
+              ? "1px solid rgba(14,13,11,0.05)"
+              : "none",
+          }}>
+            {/* Icon */}
+            <div style={{
+              width: 20, height: 20, borderRadius: "50%",
+              backgroundColor: "var(--color-paper-2)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 10, flexShrink: 0,
+            }}>
+              {actionIcon[event.action] ?? "📋"}
+            </div>
+
+            {/* Message + project name */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontSize: 11, color: "var(--color-ink)", lineHeight: 1.3,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                {event.message}
+                {event.readiness_delta != null && event.readiness_delta !== 0 && (
+                  <span style={{
+                    marginLeft: 6, fontSize: 9, fontWeight: 700,
+                    color: event.readiness_delta > 0
+                      ? "var(--color-success)"
+                      : "var(--color-danger)",
+                  }}>
+                    {event.readiness_delta > 0 ? "+" : ""}{event.readiness_delta}%
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 1 }}>
+                {event.project_name}
+              </div>
+            </div>
+
+            {/* Relative time */}
+            <div style={{
+              fontSize: 10, color: "var(--color-ink-3)",
+              whiteSpace: "nowrap", flexShrink: 0,
+            }}>
+              {relativeTime(event.timestamp)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────
 export default function ProjectsPage() {
   const [projects,    setProjects]    = useState<Project[]>([]);
@@ -393,6 +548,9 @@ export default function ProjectsPage() {
         ))}
       </div>
 
+      {/* Sprint 17: Cross-project Event Stream */}
+        <DashboardEventStream />
+
           {/* ── Sprint 11: Filter bar ── */}
   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -454,9 +612,6 @@ export default function ProjectsPage() {
       </div>
     </div>
   )}
-
-
-
 
       {/* ── Empty state ── */}
       {projects.length === 0 && (

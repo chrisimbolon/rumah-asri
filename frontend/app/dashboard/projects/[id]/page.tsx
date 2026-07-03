@@ -28,6 +28,8 @@ import {
   Project,
   projectsApi,
   ProjectStage,
+  PulseEvent,
+  PulseResponse,
   READINESS_LABEL_META,
   ReadinessHistoryPoint,
   RequirementComment,
@@ -62,7 +64,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, } from "react";
 import {
   Line,
   LineChart,
@@ -1200,20 +1202,80 @@ function ParallelStageToggles({ project, onUpdated }: { project: Project; onUpda
   );
 }
 
-// ── Sprint 10: Readiness Trend Panel ─────────────────────────
+// ── Sprint 17: Smart polling hook ─────────────────────────────
+// Polls /pulse/?since=<timestamp> every 15 seconds.
+// Silent on failure — polling is best-effort, never blocks the UI.
+// Returns cleanup function to stop polling on unmount.
+function useProjectPulse(
+  projectId:  string,
+  enabled:    boolean,
+  onUpdate:   (data: PulseResponse) => void,
+) {
+  const sinceRef    = useRef<string>(new Date().toISOString());
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;   // always call latest callback
+
+  useEffect(() => {
+    if (!enabled || !projectId) return;
+
+    const poll = async () => {
+      try {
+        const data = await projectsApi.getPulse(projectId, sinceRef.current);
+        if (data.has_updates) {
+          sinceRef.current = data.checked_at;
+          onUpdateRef.current(data);
+        }
+      } catch {
+        // Silent failure — polling continues regardless
+      }
+    };
+
+    const interval = setInterval(poll, 15_000);   // 15-second cadence
+    return () => clearInterval(interval);
+  }, [projectId, enabled]);
+}
+
 function ReadinessTrendPanel({
   projectId,
   currentScore,
   inlineData,
+  liveScore,         // Sprint 17: updated score from pulse
+  todayDelta,        // Sprint 17: +X% today badge
 }: {
-  projectId:   string;
+  projectId:    string;
   currentScore: number;
-  inlineData:  ReadinessHistoryPoint[];  // from get_intelligence_summary
+  inlineData:   ReadinessHistoryPoint[];
+  liveScore?:   number;
+  todayDelta?:  number | null;
 }) {
-  // Use inline data from intelligence summary (already fetched), If we have < 2 points, fetch fresh from the endpoint to get more history.
+  const [history,      setHistory]      = useState<ReadinessHistoryPoint[]>(inlineData);
+  const [loading,      setLoading]      = useState(inlineData.length < 2);
+  const [displayScore, setDisplayScore] = useState(liveScore ?? currentScore);
+  const [isGlowing,    setIsGlowing]    = useState(false);
 
-  const [history, setHistory] = useState<ReadinessHistoryPoint[]>(inlineData);
-  const [loading, setLoading] = useState(inlineData.length < 2);
+  // Sprint 17: animate when liveScore changes
+  useEffect(() => {
+    const target = liveScore ?? currentScore;
+    if (target === displayScore) return;
+
+    const from  = displayScore;
+    const diff  = target - from;
+    const steps = 20;
+    let step    = 0;
+
+    setIsGlowing(true);
+    const timer = setInterval(() => {
+      step++;
+      setDisplayScore(Math.round(from + (diff * step / steps)));
+      if (step >= steps) {
+        clearInterval(timer);
+        setDisplayScore(target);
+        setTimeout(() => setIsGlowing(false), 600);
+      }
+    }, 50);   // 1 second total animation
+
+    return () => clearInterval(timer);
+  }, [liveScore, currentScore]);
 
   useEffect(() => {
     if (inlineData.length >= 2) { setHistory(inlineData); return; }
@@ -1223,12 +1285,11 @@ function ReadinessTrendPanel({
       .finally(() => setLoading(false));
   }, [projectId, inlineData]);
 
-  const color =
-    currentScore >= 80 ? "var(--color-success)" :
-    currentScore >= 50 ? "var(--color-warning)" :
+  const scoreColor =
+    displayScore >= 80 ? "var(--color-success)" :
+    displayScore >= 50 ? "var(--color-warning)" :
                          "var(--color-danger)";
 
-  // Format date to "25 Jun" for X axis
   const fmt = (iso: string) => {
     const d = new Date(iso);
     return d.toLocaleDateString("id-ID", { day: "numeric", month: "short" });
@@ -1236,7 +1297,10 @@ function ReadinessTrendPanel({
 
   return (
     <div className="card" style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+      <div style={{
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between", marginBottom: 16,
+      }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
             Tren Kesiapan
@@ -1246,8 +1310,32 @@ function ReadinessTrendPanel({
           </div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 24, fontWeight: 800, color }}>{currentScore}%</div>
-          <div style={{ fontSize: 10, color: "var(--color-ink-3)" }}>saat ini</div>
+          {/* Sprint 17: animated score with glow */}
+          <div style={{
+            fontSize: 24, fontWeight: 800, color: scoreColor,
+            transition: "color 0.3s",
+            textShadow: isGlowing ? `0 0 12px ${scoreColor}66` : "none",
+          }}>
+            {displayScore}%
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+            <div style={{ fontSize: 10, color: "var(--color-ink-3)" }}>saat ini</div>
+            {/* Sprint 17: +X% today badge */}
+            {todayDelta != null && todayDelta !== 0 && (
+              <span style={{
+                fontSize: 9, fontWeight: 700,
+                padding: "1px 6px", borderRadius: 999,
+                backgroundColor: todayDelta > 0
+                  ? "var(--color-success-light)"
+                  : "var(--color-danger-light)",
+                color: todayDelta > 0
+                  ? "var(--color-success)"
+                  : "var(--color-danger)",
+              }}>
+                {todayDelta > 0 ? "+" : ""}{todayDelta}% hari ini
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1269,15 +1357,13 @@ function ReadinessTrendPanel({
               dataKey="date"
               tickFormatter={fmt}
               tick={{ fontSize: 10, fill: "var(--color-ink-3)" }}
-              axisLine={false}
-              tickLine={false}
+              axisLine={false} tickLine={false}
               interval="preserveStartEnd"
             />
             <YAxis
               domain={[0, 100]}
               tick={{ fontSize: 10, fill: "var(--color-ink-3)" }}
-              axisLine={false}
-              tickLine={false}
+              axisLine={false} tickLine={false}
             />
             <Tooltip
               formatter={(value) => [`${value ?? 0}%`, "Kesiapan"]}
@@ -1291,12 +1377,9 @@ function ReadinessTrendPanel({
             />
             <ReferenceLine y={80} stroke="var(--color-success)" strokeDasharray="3 3" strokeWidth={1} />
             <Line
-              type="monotone"
-              dataKey="score"
-              stroke={color}
-              strokeWidth={2.5}
-              dot={false}
-              activeDot={{ r: 4, fill: color }}
+              type="monotone" dataKey="score"
+              stroke={scoreColor} strokeWidth={2.5}
+              dot={false} activeDot={{ r: 4, fill: scoreColor }}
             />
           </LineChart>
         </ResponsiveContainer>
@@ -2706,6 +2789,112 @@ function RiskForecastPanel({ projectId }: { projectId: string }) {
   );
 }
 
+// ── Sprint 17: Event Stream Panel ─────────────────────────────
+function EventStreamPanel({
+  events,
+  lastUpdated,
+}: {
+  events:      PulseEvent[];
+  lastUpdated: string | null;
+}) {
+  if (events.length === 0) return null;
+
+  const actionIcon: Record<string, string> = {
+    completed:           "✅",
+    evidence_uploaded:   "📎",
+    evidence_approved:   "✓",
+    evidence_rejected:   "❌",
+    stage_advanced:      "🚀",
+    assigned:            "👤",
+    due_date_set:        "📅",
+    comment_added:       "💬",
+    updated:             "✏️",
+    created:             "🆕",
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      {/* Header */}
+      <div style={{
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between", marginBottom: 12,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
+            Event Stream
+          </div>
+          {/* Live indicator */}
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <div style={{
+              width: 7, height: 7, borderRadius: "50%",
+              backgroundColor: "var(--color-success)",
+              boxShadow: "0 0 0 2px var(--color-success-light)",
+            }} />
+            <span style={{ fontSize: 10, color: "var(--color-success)", fontWeight: 600 }}>
+              Live
+            </span>
+          </div>
+        </div>
+        {lastUpdated && (
+          <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
+            diperbarui {lastUpdated}
+          </span>
+        )}
+      </div>
+
+      {/* Event list */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        {events.slice(0, 5).map((event, i) => (
+          <div key={event.id} style={{
+            display: "flex", gap: 10, alignItems: "flex-start",
+            padding: "8px 0",
+            borderBottom: i < Math.min(events.length, 5) - 1
+              ? "1px solid rgba(14,13,11,0.05)"
+              : "none",
+          }}>
+            {/* Action icon */}
+            <div style={{
+              width: 22, height: 22, borderRadius: "50%",
+              backgroundColor: "var(--color-paper-2)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 11, flexShrink: 0,
+            }}>
+              {actionIcon[event.action] ?? "📋"}
+            </div>
+
+            {/* Content */}
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, color: "var(--color-ink)", lineHeight: 1.4 }}>
+                {event.message}
+                {/* Inline cause & effect */}
+                {event.readiness_delta != null && event.readiness_delta !== 0 && (
+                  <span style={{
+                    marginLeft: 8, fontSize: 9, fontWeight: 700,
+                    color: event.readiness_delta > 0
+                      ? "var(--color-success)"
+                      : "var(--color-danger)",
+                  }}>
+                    {event.readiness_delta > 0 ? "↑" : "↓"} Kesiapan{" "}
+                    {event.readiness_delta > 0 ? "+" : ""}
+                    {event.readiness_delta}%
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Time */}
+            <div style={{ fontSize: 10, color: "var(--color-ink-3)", whiteSpace: "nowrap" }}>
+              {new Date(event.timestamp).toLocaleTimeString("id-ID", {
+                hour: "2-digit", minute: "2-digit",
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -2720,6 +2909,32 @@ export default function ProjectDetailPage() {
   const [error,     setError]     = useState<string | null>(null);
   const [form,      setForm]      = useState<UpdateProjectPayload>({});
   const [reqView, setReqView] = useState<"checklist" | "workspace">("checklist");
+  const [liveScore,    setLiveScore]    = useState<number>(0);
+  const [todayDelta,   setTodayDelta]   = useState<number | null>(null);
+  const [liveEvents,   setLiveEvents]   = useState<PulseEvent[]>([]);
+  const [lastUpdated,  setLastUpdated]  = useState<string | null>(null);
+
+  // Initialize liveScore from intel when it loads
+  useEffect(() => {
+    if (intel) setLiveScore(intel.readiness_score);
+  }, [intel?.readiness_score]);
+
+  // Pulse handler — called every 15 seconds when updates arrive
+  const handlePulseUpdate = useCallback((data: PulseResponse) => {
+    setLiveScore(data.readiness_score);
+    if (data.readiness_delta_today !== null) {
+      setTodayDelta(data.readiness_delta_today);
+    }
+    if (data.new_events.length > 0) {
+      setLiveEvents(prev => [...data.new_events, ...prev].slice(0, 10));
+      setLastUpdated(
+        new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+      );
+    }
+  }, []);
+
+  // Start polling (only when project is loaded)
+  useProjectPulse(project?.id ?? "", !!project, handlePulseUpdate);
 
   const loadProject = async () => {
     try {
@@ -2907,12 +3122,17 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
+      {/* Sprint 17: Event Stream */}
+        <EventStreamPanel events={liveEvents} lastUpdated={lastUpdated} />
+
       {/* Sprint 10: Readiness Trend + Key Progress */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-          <ReadinessTrendPanel
-            projectId={project.id}
-            currentScore={intel.readiness_score}
-            inlineData={intel.readiness_trend_data ?? []}
+        <ReadinessTrendPanel
+          projectId={project.id}
+          currentScore={intel.readiness_score}
+          inlineData={intel.readiness_trend_data ?? []}
+          liveScore={liveScore || intel.readiness_score}
+          todayDelta={todayDelta}
         />
         {intel.key_progress && (
         <KeyProgressCard progress={intel.key_progress} />
