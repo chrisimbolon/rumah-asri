@@ -477,6 +477,39 @@ export interface RecentActivityItem {
   timestamp:       string;
 }
 
+// Sprint 18: Portfolio Intelligence Hub ────────────────────────
+export interface PortfolioMetrics {
+  total_projects:    number;
+  avg_readiness:     number;   // 0-100
+  critical_count:    number;   // projects with blockers
+  high_risk_count:   number;
+  delayed_count:     number;
+  revenue_protected: number;   // Rupiah integer
+}
+
+export interface PortfolioWeekDelta {
+  avg_readiness:   number;   // positive = improved (readiness went up)
+  critical_count:  number;   // negative = improved (fewer critical)
+  high_risk_count: number;   // negative = improved
+  delayed_count:   number;   // negative = improved
+}
+
+export interface PortfolioAtRiskProject {
+  id:           string;
+  name:         string;
+  readiness:    number;
+  risk_level:   "low" | "medium" | "high";
+  risk_display: string;
+  blocking:     number;
+  next_action:  string | null;
+}
+
+export interface PortfolioIntelligence {
+  current:     PortfolioMetrics;
+  week_delta:  PortfolioWeekDelta | null;   // null until first snapshot
+  top_at_risk: PortfolioAtRiskProject[];
+  has_history: boolean;
+}
 
 // ── Project — UNCHANGED ───────────────────────────────────────
 
@@ -844,6 +877,11 @@ export const projectsApi = {
   async getRecentActivity(limit = 10): Promise<{ count: number; results: RecentActivityItem[] }> {
     const { data } = await api.get(`/api/projects/recent-activity/?limit=${limit}`);
     return { count: data.count, results: data.results };
+  },
+
+  async getPortfolioIntelligence(): Promise<PortfolioIntelligence> {
+    const { data } = await api.get("/api/projects/portfolio-intelligence/");
+    return data;
   },
 
 };
