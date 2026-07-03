@@ -26,6 +26,7 @@ Sprint 7: Requirement Ownership & Accountability
 Sprint 9 : my_tasks    — requirements assigned to the user
           unassigned  — actionable items nobody owns yet
           (items assigned to OTHER users are excluded — not noise)
+Sprint 15 : Business Assistant on HOLD
 
 ZERO BREAKING CHANGES — all existing fields preserved.
 85 tests still green.
