@@ -972,3 +972,238 @@ class ProjectRiskForecastView(TenantScopedAPIView):
             "will_escalate": will_escalate,
             "top_drivers":   top_drivers,
         })
+    
+class ProjectPulseView(TenantScopedAPIView):
+    """
+    Sprint 17: Lightweight polling endpoint for smart live updates.
+    Called by frontend every 15 seconds. Returns ONLY events since `since`.
+
+    GET /api/projects/<id>/pulse/?since=<iso_timestamp>
+
+    Query params:
+      since (ISO datetime, optional) — return only events after this time.
+             If missing or invalid → returns last 5 events.
+
+    Response:
+      {
+        "success":               true,
+        "project_id":            "uuid",
+        "has_updates":           true,
+        "readiness_score":       65,
+        "readiness_delta_today": 6,    (null if no yesterday snapshot)
+        "risk_score":            30,
+        "blocking_count":        1,
+        "new_events": [
+          {
+            "id":              "uuid",
+            "action":          "evidence_uploaded",
+            "message":         "Budi mengunggah bukti untuk Kontraktor",
+            "actor":           "Budi Developer",
+            "subject":         "Kontraktor",
+            "readiness_delta": 0,
+            "risk_delta":      null,
+            "timestamp":       "2026-07-03T09:18:00+00:00"
+          }
+        ],
+        "checked_at": "2026-07-03T09:20:00+00:00"
+      }
+
+    Design:
+    - Extremely lightweight — one filtered queryset + project properties.
+    - has_updates=false means frontend skips re-rendering — no wasted cycles.
+    - readiness_delta_today: compares current score vs yesterday's snapshot.
+    - Tenant isolation via TenantScopedAPIView.get_object(pk).
+    - Zero new migration.
+    """
+    model = Project
+
+    ACTION_LABELS = {
+        "created":           "membuat requirement",
+        "updated":           "memperbarui",
+        "evidence_uploaded": "mengunggah bukti untuk",
+        "evidence_approved": "menyetujui bukti",
+        "evidence_rejected":  "menolak bukti",
+        "completed":         "menyelesaikan",
+        "stage_advanced":    "melanjutkan tahap ke",
+        "assigned":          "menugaskan",
+        "due_date_set":      "menetapkan tenggat untuk",
+        "comment_added":     "menambahkan komentar pada",
+    }
+
+    def get(self, request, pk):
+        from datetime import date, timedelta
+        from django.utils import timezone
+        from django.utils.dateparse import parse_datetime
+
+        project = self.get_object(pk)
+
+        # ── Parse 'since' timestamp ────────────────────────────
+        since = None
+        since_param = request.query_params.get("since", "").strip()
+        if since_param:
+            try:
+                since = parse_datetime(since_param.replace(" ", "+"))
+            except (ValueError, TypeError):
+                since = None
+
+        # ── Fetch audit logs ───────────────────────────────────
+        audit_qs = RequirementAudit.objects.filter(
+            requirement_status__project=project
+        ).select_related(
+            "requirement_status__requirement", "changed_by"
+        ).order_by("-changed_at")
+
+        if since:
+            audit_qs = audit_qs.filter(changed_at__gt=since)
+            has_updates = audit_qs.exists()
+        else:
+            audit_qs = audit_qs[:5]
+            has_updates = True
+
+        # ── Build event list (max 10) ──────────────────────────
+        events = []
+        for log in audit_qs[:10]:
+            req_name = log.requirement_status.requirement.name
+            actor    = log.changed_by.full_name if log.changed_by else "Sistem"
+            verb     = self.ACTION_LABELS.get(log.action, log.action)
+
+            readiness_delta = (
+                log.readiness_after - log.readiness_before
+                if log.readiness_before is not None and log.readiness_after is not None
+                else None
+            )
+            risk_delta = (
+                log.risk_after - log.risk_before
+                if log.risk_before is not None and log.risk_after is not None
+                else None
+            )
+
+            events.append({
+                "id":              str(log.id),
+                "action":          log.action,
+                "message":         f"{actor} {verb} {req_name}",
+                "actor":           actor,
+                "subject":         req_name,
+                "readiness_delta": readiness_delta,
+                "risk_delta":      risk_delta,
+                "timestamp":       log.changed_at.isoformat(),
+            })
+
+        # ── Readiness delta today (vs yesterday's snapshot) ───
+        yesterday = date.today() - timedelta(days=1)
+        yesterday_snap = project.readiness_snapshots.filter(
+            snapped_at=yesterday
+        ).first()
+        readiness_delta_today = (
+            project.readiness_score - yesterday_snap.score
+            if yesterday_snap else None
+        )
+
+        return Response({
+            "success":               True,
+            "project_id":            str(project.id),
+            "has_updates":           has_updates,
+            "readiness_score":       project.readiness_score,
+            "readiness_delta_today": readiness_delta_today,
+            "risk_score":            project._get_risk_data()["score"],
+            "blocking_count":        project.blocking_count,
+            "new_events":            events,
+            "checked_at":            timezone.now().isoformat(),
+        })
+
+
+class ProjectRecentActivityView(TenantScopedAPIView):
+    """
+    Sprint 17: Cross-project recent activity feed for the main dashboard.
+    Returns most recent events across ALL of the user's org projects.
+
+    GET /api/projects/recent-activity/?limit=10
+
+    Response:
+      {
+        "success": true,
+        "count":   5,
+        "results": [
+          {
+            "id":              "uuid",
+            "action":          "completed",
+            "message":         "Budi menyelesaikan Rencana kerja",
+            "actor":           "Budi Developer",
+            "subject":         "Rencana kerja",
+            "project_id":      "uuid",
+            "project_name":    "Perumahan Asri Cluster A",
+            "readiness_delta": 40,
+            "timestamp":       "2026-07-03T09:18:00+00:00"
+          }
+        ]
+      }
+
+    Design:
+    - get_queryset() returns Project.objects.for_user(user) — tenant scoped.
+    - Aggregates RequirementAudit across ALL org projects in one query.
+    - Used for the cross-project event stream on the main dashboard page.
+    - No new migration.
+    """
+    model = Project
+
+    ACTION_LABELS = {
+        "created":           "membuat requirement",
+        "updated":           "memperbarui",
+        "evidence_uploaded": "mengunggah bukti untuk",
+        "evidence_approved": "menyetujui bukti",
+        "evidence_rejected":  "menolak bukti",
+        "completed":         "menyelesaikan",
+        "stage_advanced":    "melanjutkan tahap ke",
+        "assigned":          "menugaskan",
+        "due_date_set":      "menetapkan tenggat untuk",
+        "comment_added":     "menambahkan komentar pada",
+    }
+
+    def get(self, request):
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", 10)), 50))
+        except (ValueError, TypeError):
+            limit = 10
+
+        # Tenant-scoped: only projects belonging to user's org
+        org_projects = self.get_queryset()
+
+        audit_logs = RequirementAudit.objects.filter(
+            requirement_status__project__in=org_projects
+        ).select_related(
+            "requirement_status__requirement",
+            "requirement_status__project",
+            "changed_by",
+        ).order_by("-changed_at")[:limit]
+
+        events = []
+        for log in audit_logs:
+            req_name     = log.requirement_status.requirement.name
+            project_name = log.requirement_status.project.name
+            project_id   = str(log.requirement_status.project.id)
+            actor        = log.changed_by.full_name if log.changed_by else "Sistem"
+            verb         = self.ACTION_LABELS.get(log.action, log.action)
+
+            readiness_delta = (
+                log.readiness_after - log.readiness_before
+                if log.readiness_before is not None and log.readiness_after is not None
+                else None
+            )
+
+            events.append({
+                "id":              str(log.id),
+                "action":          log.action,
+                "message":         f"{actor} {verb} {req_name}",
+                "actor":           actor,
+                "subject":         req_name,
+                "project_id":      project_id,
+                "project_name":    project_name,
+                "readiness_delta": readiness_delta,
+                "timestamp":       log.changed_at.isoformat(),
+            })
+
+        return Response({
+            "success": True,
+            "count":   len(events),
+            "results": events,
+        })

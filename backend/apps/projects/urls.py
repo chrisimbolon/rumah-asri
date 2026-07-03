@@ -1,7 +1,7 @@
 # =============================================================================
 # backend/apps/projects/urls.py
-# Sprint 14: adds /risk-forecast/ endpoint.
-# All Sprint 1-13 URLs preserved — additive only.
+# Sprint 17: adds /pulse/ and /recent-activity/ endpoints.
+# All Sprint 1-16 URLs preserved — additive only.
 # =============================================================================
 from django.urls import path
 
@@ -20,8 +20,10 @@ from .views import (
     ProjectOrgMembersView,
     ProjectPortfolioView,
     ProjectReadinessHistoryView,
+    ProjectRecentActivityView,          # Sprint 17
     ProjectRequirementUpdateView,
-    ProjectRiskForecastView,            # Sprint 14
+    ProjectRiskForecastView,
+    ProjectPulseView,                   # Sprint 17
     RequirementCommentView,
     RequirementEvidenceVerifyView,
     RequirementEvidenceView,
@@ -36,6 +38,11 @@ urlpatterns = [
     path("my-actions/",
          MyActionsView.as_view(),
          name="project-my-actions"),
+
+    # ── Sprint 17: Cross-project recent activity ───────────────
+    path("recent-activity/",
+         ProjectRecentActivityView.as_view(),
+         name="project-recent-activity"),
 
     # ── List + create ──────────────────────────────────────────
     path("",
@@ -76,6 +83,11 @@ urlpatterns = [
     path("<uuid:pk>/risk-forecast/",
          ProjectRiskForecastView.as_view(),
          name="project-risk-forecast"),
+
+    # ── Sprint 17: Live pulse ─────────────────────────────────
+    path("<uuid:pk>/pulse/",
+         ProjectPulseView.as_view(),
+         name="project-pulse"),
 
     # ── Update single requirement status ──────────────────────
     path("<uuid:pk>/requirements/<uuid:req_status_id>/",

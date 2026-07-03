@@ -1003,3 +1003,126 @@ class CauseEffectAndInteractiveDependencyTests(APITestCase):
             # est_minutes must be a positive integer
             self.assertIsInstance(node["est_minutes"], int)
             self.assertGreater(node["est_minutes"], 0)
+
+class LivePulseAndEventStreamTests(APITestCase):
+    """
+    Sprint 17: Pulse endpoint + cross-project event stream isolation + correctness.
+
+    Covers:
+    - Tenant isolation on /pulse/ endpoint
+    - /pulse/ returns has_updates=False when nothing changed since timestamp
+    - /recent-activity/ excludes events from other orgs (cross-tenant isolation)
+    """
+
+    def setUp(self):
+        # ── Org A — victim ──────────────────────────────────────────
+        self.org_a = Organization.objects.create(name="Asri Sprint17")
+        self.dev_a = CustomUser.objects.create_user(
+            email="dev.a.s17@test.id", password="pass12345!",
+            full_name="Dev A S17", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_a, user=self.dev_a, role="owner", is_active=True,
+        )
+        self.project_a = Project.objects.create(
+            organization=self.org_a, name="Cluster A S17", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+
+        # ── Org B — attacker ─────────────────────────────────────────
+        self.org_b = Organization.objects.create(name="Griya Sprint17")
+        self.dev_b = CustomUser.objects.create_user(
+            email="dev.b.s17@test.id", password="pass12345!",
+            full_name="Dev B S17", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_b, user=self.dev_b, role="owner", is_active=True,
+        )
+        self.project_b = Project.objects.create(
+            organization=self.org_b, name="Cluster B S17", location="Jakarta",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    # ── Pulse isolation ───────────────────────────────────────────
+
+    def test_dev_b_cannot_poll_dev_a_project_pulse(self):
+        """
+        Sprint 17: the /pulse/ endpoint must not expose Org A's
+        live event data to Org B's developer.
+        """
+        self._login_as(self.dev_b)
+        resp = self.client.get(
+            f"/api/projects/{self.project_a.id}/pulse/"
+        )
+        self.assertIn(
+            resp.status_code,
+            (status.HTTP_404_NOT_FOUND, status.HTTP_403_FORBIDDEN),
+        )
+
+    # ── Pulse correctness ─────────────────────────────────────────
+
+    def test_pulse_returns_no_updates_when_nothing_changed(self):
+        """
+        Sprint 17: polling with a future 'since' timestamp (nothing happened
+        after that point) must return has_updates=False and empty new_events.
+        This is the critical check that prevents unnecessary re-renders.
+        """
+        from django.utils import timezone
+        # Use a timestamp 1 hour in the future — nothing can have happened after it
+        future = (timezone.now() + timezone.timedelta(hours=1)).isoformat()
+        self._login_as(self.dev_a)
+        resp = self.client.get(
+            f"/api/projects/{self.project_a.id}/pulse/?since={future}"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["success"])
+        self.assertFalse(resp.data["has_updates"], "has_updates should be False when nothing changed")
+        self.assertEqual(len(resp.data["new_events"]), 0)
+        # But score and metadata should still be present
+        self.assertIn("readiness_score",   resp.data)
+        self.assertIn("blocking_count",    resp.data)
+        self.assertIn("checked_at",        resp.data)
+
+    # ── Recent activity isolation ─────────────────────────────────
+
+    def test_recent_activity_excludes_other_org_events(self):
+        """
+        Sprint 17: /recent-activity/ must return ONLY events from the
+        requesting user's org. Dev B must not see Dev A's project events
+        in the cross-project feed — even via the aggregated endpoint.
+        """
+        from apps.projects.models import RequirementAudit, StageRequirement, ProjectRequirementStatus
+
+        # Create a requirement and audit log for Org A's project
+        req_a, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Kontraktor S17A",
+            defaults={"is_mandatory": True, "weight": 60},
+        )
+        req_status_a = ProjectRequirementStatus.objects.create(
+            project=self.project_a, requirement=req_a,
+            status=ProjectRequirementStatus.Status.IN_PROGRESS,
+        )
+        RequirementAudit.log(
+            requirement_status=req_status_a,
+            action=RequirementAudit.Action.UPDATED,
+            changed_by=self.dev_a,
+            old_value="pending",
+            new_value="in_progress",
+        )
+
+        # Dev B queries recent-activity — must NOT see Dev A's events
+        self._login_as(self.dev_b)
+        resp = self.client.get("/api/projects/recent-activity/?limit=20")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        project_ids_in_feed = {e["project_id"] for e in resp.data["results"]}
+        self.assertNotIn(
+            str(self.project_a.id),
+            project_ids_in_feed,
+            "Org A's project events must not appear in Org B's recent-activity feed",
+        )
