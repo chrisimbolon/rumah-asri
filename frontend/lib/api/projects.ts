@@ -311,6 +311,10 @@ export interface DependencyNode {
   weight_pct:            number;
   prerequisites:         string[];
   unmet_prerequisites:   string[];
+  // Sprint 16: Interactive node detail
+  block_reason:      string | null;
+  assigned_to_name:  string | null;
+  est_minutes:       number;
 }
 
 export interface DependencyEdge {
@@ -418,6 +422,25 @@ export interface RiskForecast {
   top_drivers:   RiskForecastDriver[];
 }
 
+// Sprint 16: Requirement update impact (returned by PUT /requirements/<id>/)
+export interface RequirementUpdateImpact {
+  readiness_before:  number;
+  readiness_after:   number;
+  readiness_delta:   number;
+  risk_before:       number;
+  risk_after:        number;
+  risk_delta:        number;
+  stage_can_advance: boolean;
+}
+
+export interface RequirementUpdateResponse {
+  success:      boolean;
+  message:      string;
+  impact:       RequirementUpdateImpact;   // Sprint 16
+  intelligence: IntelligenceSummary;
+}
+
+
 // ── Project — UNCHANGED ───────────────────────────────────────
 
 export interface Project {
@@ -520,6 +543,8 @@ export interface ActivityItem {
   old_value: string;
   new_value: string;
   timestamp: string;
+  readiness_delta?: number | null;
+  risk_delta?:      number | null;
 }
 
 export interface OverdueItem {
