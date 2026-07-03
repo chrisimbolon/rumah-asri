@@ -38,6 +38,7 @@ from rest_framework.test import APITestCase
 from apps.authentication.models import CustomUser
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.projects.models import (
+    PortfolioSnapshot,
     Project,
     ProjectRequirementStatus,
     RequirementComment,
@@ -1126,3 +1127,128 @@ class LivePulseAndEventStreamTests(APITestCase):
             project_ids_in_feed,
             "Org A's project events must not appear in Org B's recent-activity feed",
         )
+
+# SPRINT 18 - Portfolio Intelligence Hub (CEO Bloomberg View)
+class PortfolioIntelligenceTests(APITestCase):
+    """
+    Sprint 18: Portfolio Intelligence Hub isolation + correctness.
+
+    Covers:
+    - Tenant isolation: Dev B cannot read Dev A's portfolio intelligence
+    - Metrics computed correctly from project data
+    - snapshot_portfolio_daily management command writes correct values
+    """
+
+    def setUp(self):
+        # ── Org A — victim ──────────────────────────────────────────
+        self.org_a = Organization.objects.create(name="Asri Sprint18")
+        self.dev_a = CustomUser.objects.create_user(
+            email="dev.a.s18@test.id", password="pass12345!",
+            full_name="Dev A S18", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_a, user=self.dev_a, role="owner", is_active=True,
+        )
+        # Two projects for Org A
+        self.project_a1 = Project.objects.create(
+            organization=self.org_a, name="Cluster A1 S18", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),  # overdue
+            target_budget=16_000_000_000,
+        )
+        self.project_a2 = Project.objects.create(
+            organization=self.org_a, name="Cluster A2 S18", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2026, 1, 1), end_date=date(2027, 12, 31),  # not overdue
+            target_budget=20_000_000_000,
+        )
+
+        # ── Org B — attacker ─────────────────────────────────────────
+        self.org_b = Organization.objects.create(name="Griya Sprint18")
+        self.dev_b = CustomUser.objects.create_user(
+            email="dev.b.s18@test.id", password="pass12345!",
+            full_name="Dev B S18", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_b, user=self.dev_b, role="owner", is_active=True,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    # ── Isolation ─────────────────────────────────────────────
+
+    def test_dev_b_cannot_read_dev_a_portfolio_intelligence(self):
+        """
+        Sprint 18: /portfolio-intelligence/ must return only Org B's
+        data when Dev B queries it. Dev A's project counts/metrics
+        must never appear in Dev B's response.
+        """
+        self._login_as(self.dev_b)
+        resp = self.client.get("/api/projects/portfolio-intelligence/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        # Dev B has no projects — should see zeros, not Org A's data
+        self.assertEqual(
+            resp.data["current"]["total_projects"], 0,
+            "Dev B should see 0 projects, not Org A's project count"
+        )
+
+    # ── Correctness ───────────────────────────────────────────
+
+    def test_portfolio_intelligence_computes_metrics_correctly(self):
+        """
+        Sprint 18: current metrics must accurately reflect the
+        actual project state for the org.
+        """
+        self._login_as(self.dev_a)
+        resp = self.client.get("/api/projects/portfolio-intelligence/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["success"])
+
+        current = resp.data["current"]
+        # 2 projects for Org A
+        self.assertEqual(current["total_projects"], 2)
+        # delayed_count: only project_a1 has end_date in the past
+        self.assertGreaterEqual(current["delayed_count"], 1)
+        # revenue_protected: both projects are in CONSTRUCTION (active)
+        # = 16B + 20B = 36B (or close to it depending on Rupiah conversion)
+        self.assertGreater(current["revenue_protected"], 0)
+        # avg_readiness should be a valid percentage
+        self.assertGreaterEqual(current["avg_readiness"], 0)
+        self.assertLessEqual(current["avg_readiness"], 100)
+        # top_at_risk should be a list
+        self.assertIsInstance(resp.data["top_at_risk"], list)
+        # has_history: false until snapshot_portfolio_daily runs
+        self.assertFalse(resp.data["has_history"])
+        # week_delta: null until snapshot history exists
+        self.assertIsNone(resp.data["week_delta"])
+
+    # ── Management command ────────────────────────────────────
+
+    def test_snapshot_portfolio_daily_writes_correct_values(self):
+        """
+        Sprint 18: the management command must write a PortfolioSnapshot
+        row with correct values for Org A's projects.
+        """
+        from apps.projects.models import PortfolioSnapshot
+        from django.core.management import call_command
+
+        # Verify no snapshot exists before running
+        self.assertEqual(
+            PortfolioSnapshot.objects.filter(organization=self.org_a).count(), 0
+        )
+
+        # Run the management command
+        call_command("snapshot_portfolio_daily", verbosity=0)
+
+        # Verify snapshot was written for Org A
+        snap = PortfolioSnapshot.objects.filter(
+            organization=self.org_a,
+            snapped_at=date.today(),
+        ).first()
+        self.assertIsNotNone(snap, "PortfolioSnapshot should exist after running command")
+        self.assertEqual(snap.total_projects, 2)
+        self.assertGreater(snap.revenue_protected, 0)
+        # avg_readiness should be between 0 and 100
+        self.assertGreaterEqual(snap.avg_readiness, 0)
+        self.assertLessEqual(snap.avg_readiness, 100)

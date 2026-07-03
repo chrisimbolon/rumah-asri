@@ -595,6 +595,45 @@ class ReadinessSnapshot(models.Model):
     def __str__(self):
         return f"{self.project.name} — {self.snapped_at}: score={self.score}"
 
+# SPRINT 18 - Portfolio Intelligence Hub (CEO Bloomberg View)
+class PortfolioSnapshot(models.Model):
+    """
+    Sprint 18: Daily portfolio-level intelligence snapshot per organization.
+    One row per org per day — written by management command
+    `snapshot_portfolio_daily` (run via cron or manually).
+
+    Used by PortfolioIntelligenceView to compute week-over-week deltas.
+    Without history (first run), week_delta returns None — honest!
+
+    Fields:
+      avg_readiness     — average readiness score across all org projects
+      critical_count    — projects with blocking_count > 0
+      high_risk_count   — projects with risk_level == "high"
+      delayed_count     — projects past end_date, not yet completed
+      revenue_protected — sum of target_budget across active projects (Rupiah)
+    """
+    organization    = models.ForeignKey(
+        "organizations.Organization",
+        on_delete=models.CASCADE,
+        related_name="portfolio_snapshots",
+    )
+    snapped_at      = models.DateField(default=date.today, db_index=True)
+    total_projects  = models.IntegerField(default=0)
+    avg_readiness   = models.FloatField(default=0.0)
+    critical_count  = models.IntegerField(default=0)
+    high_risk_count = models.IntegerField(default=0)
+    delayed_count   = models.IntegerField(default=0)
+    revenue_protected = models.BigIntegerField(default=0)
+
+    class Meta:
+        verbose_name        = "Portfolio Snapshot"
+        verbose_name_plural = "Portfolio Snapshots"
+        ordering            = ["-snapped_at"]
+        unique_together     = [["organization", "snapped_at"]]
+
+    def __str__(self):
+        return f"{self.organization.name} — {self.snapped_at}: avg_readiness={self.avg_readiness}%"
+
 
 # =============================================================================
 # Project — Sprint 7: org members helper + overdue alerts

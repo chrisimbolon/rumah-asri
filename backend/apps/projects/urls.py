@@ -1,7 +1,7 @@
 # =============================================================================
 # backend/apps/projects/urls.py
-# Sprint 17: adds /pulse/ and /recent-activity/ endpoints.
-# All Sprint 1-16 URLs preserved — additive only.
+# Sprint 18: adds /portfolio-intelligence/ endpoint.
+# All Sprint 1-17 URLs preserved — additive only.
 # =============================================================================
 from django.urls import path
 
@@ -9,6 +9,7 @@ from .views import (
     AssignRequirementView,
     EvidenceEligibleVerifiersView,
     MyActionsView,
+    PortfolioIntelligenceView,          # Sprint 18
     ProjectActivityView,
     ProjectAdvanceView,
     ProjectDecisionEngineView,
@@ -20,10 +21,10 @@ from .views import (
     ProjectOrgMembersView,
     ProjectPortfolioView,
     ProjectReadinessHistoryView,
-    ProjectRecentActivityView,          # Sprint 17
+    ProjectRecentActivityView,
     ProjectRequirementUpdateView,
     ProjectRiskForecastView,
-    ProjectPulseView,                   # Sprint 17
+    ProjectPulseView,
     RequirementCommentView,
     RequirementEvidenceVerifyView,
     RequirementEvidenceView,
@@ -43,6 +44,11 @@ urlpatterns = [
     path("recent-activity/",
          ProjectRecentActivityView.as_view(),
          name="project-recent-activity"),
+
+    # ── Sprint 18: Portfolio Intelligence Hub ─────────────────
+    path("portfolio-intelligence/",
+         PortfolioIntelligenceView.as_view(),
+         name="project-portfolio-intelligence"),
 
     # ── List + create ──────────────────────────────────────────
     path("",

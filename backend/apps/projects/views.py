@@ -1207,3 +1207,149 @@ class ProjectRecentActivityView(TenantScopedAPIView):
             "count":   len(events),
             "results": events,
         })
+    
+# SPRINT 18 - Portfolio Intelligence Hub (CEO Bloomberg View)
+class PortfolioIntelligenceView(TenantScopedAPIView):
+    """
+    Sprint 18: Bloomberg-style portfolio intelligence for the CEO executive view.
+
+    GET /api/projects/portfolio-intelligence/
+
+    Response:
+      {
+        "success":     true,
+        "current": {
+          "total_projects":    3,
+          "avg_readiness":     60.0,
+          "critical_count":    1,
+          "high_risk_count":   0,
+          "delayed_count":     2,
+          "revenue_protected": 46000000000
+        },
+        "week_delta": {
+          "avg_readiness":   4.0,   (positive = improved)
+          "critical_count": -1,     (negative = improved)
+          "high_risk_count": 0,
+          "delayed_count":   0
+        },                          (null if no PortfolioSnapshot history yet)
+        "top_at_risk": [
+          {
+            "id":           "uuid",
+            "name":         "Perumahan Asri Cluster A",
+            "readiness":    40,
+            "risk_level":   "medium",
+            "risk_display": "Sedang",
+            "blocking":     1,
+            "next_action":  "Kontraktor"
+          }
+        ],
+        "has_history": false   (true after snapshot_portfolio_daily runs)
+      }
+
+    Design:
+    - Current metrics computed LIVE from Project properties — always accurate.
+    - week_delta from PortfolioSnapshot (7 days ago) — null on first run.
+      Honest, never hallucinated. Run `snapshot_portfolio_daily` to populate.
+    - top_at_risk: worst 3 projects by readiness with blockers/risk.
+    - Tenant isolation via get_queryset() (Project.objects.for_user).
+    - revenue_protected = sum(target_budget) for non-completed active projects.
+    """
+    model = Project
+
+    ACTIVE_STAGES = ("selesai", "serah_terima")  # exclude from revenue/delay count
+
+    def get(self, request):
+        from datetime import date, timedelta
+        from apps.projects.models import PortfolioSnapshot
+
+        projects = list(self.get_queryset())
+        today    = date.today()
+
+        # ── Empty org — return zeros ──────────────────────────────
+        if not projects:
+            return Response({
+                "success":     True,
+                "current":     {
+                    "total_projects": 0, "avg_readiness": 0,
+                    "critical_count": 0, "high_risk_count": 0,
+                    "delayed_count": 0, "revenue_protected": 0,
+                },
+                "week_delta":  None,
+                "top_at_risk": [],
+                "has_history": False,
+            })
+
+        # ── Current state (always live) ───────────────────────────
+        total           = len(projects)
+        readiness_sum   = sum(p.readiness_score for p in projects)
+        avg_readiness   = round(readiness_sum / total, 1) if total else 0.0
+        critical_count  = sum(1 for p in projects if p.blocking_count > 0)
+        high_risk_count = sum(1 for p in projects if p.risk_level == "high")
+        delayed_count   = sum(
+            1 for p in projects
+            if p.end_date
+            and p.end_date < today
+            and p.stage not in self.ACTIVE_STAGES
+        )
+        revenue_protected = int(sum(
+            float(p.target_budget)
+            for p in projects
+            if p.target_budget and p.stage not in self.ACTIVE_STAGES
+        ))
+
+        current = {
+            "total_projects":    total,
+            "avg_readiness":     avg_readiness,
+            "critical_count":    critical_count,
+            "high_risk_count":   high_risk_count,
+            "delayed_count":     delayed_count,
+            "revenue_protected": revenue_protected,
+        }
+
+        # ── Week delta from PortfolioSnapshot ─────────────────────
+        week_delta  = None
+        has_history = False
+
+        org_id = projects[0].organization_id if projects else None
+        if org_id:
+            last_week  = today - timedelta(days=7)
+            week_snap  = PortfolioSnapshot.objects.filter(
+                organization_id=org_id,
+                snapped_at__lte=last_week,
+            ).order_by("-snapped_at").first()
+
+            if week_snap:
+                has_history = True
+                week_delta  = {
+                    "avg_readiness":   round(avg_readiness - week_snap.avg_readiness, 1),
+                    "critical_count":  critical_count  - week_snap.critical_count,
+                    "high_risk_count": high_risk_count - week_snap.high_risk_count,
+                    "delayed_count":   delayed_count   - week_snap.delayed_count,
+                }
+
+        # ── Top at-risk projects (worst 3 by readiness + blockers) ──
+        at_risk = sorted(
+            [p for p in projects if p.blocking_count > 0 or p.risk_level in ("high", "medium")],
+            key=lambda p: p.readiness_score,
+        )[:3]
+
+        top_at_risk = [
+            {
+                "id":           str(p.id),
+                "name":         p.name,
+                "readiness":    p.readiness_score,
+                "risk_level":   p.risk_level,
+                "risk_display": p.risk_level_display,
+                "blocking":     p.blocking_count,
+                "next_action":  p.next_action,
+            }
+            for p in at_risk
+        ]
+
+        return Response({
+            "success":     True,
+            "current":     current,
+            "week_delta":  week_delta,
+            "top_at_risk": top_at_risk,
+            "has_history": has_history,
+        })
