@@ -3,6 +3,7 @@
 // === frontend/app/dashboard/projects/page.tsx 
 // Sprint 9: Next Actions Assistant
 //  Sprint 11: Visual Dependency Graph + Portfolio Scale
+//  Sprint 17 : Live Event Stream + Readiness Momentum - IS implemented here
 // ================================================
 
 import {
