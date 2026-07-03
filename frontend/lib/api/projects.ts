@@ -440,6 +440,42 @@ export interface RequirementUpdateResponse {
   intelligence: IntelligenceSummary;
 }
 
+// Sprint 17: Live pulse ────────────────────────────────────────
+export interface PulseEvent {
+  id:              string;
+  action:          string;
+  message:         string;
+  actor:           string;
+  subject:         string;
+  readiness_delta: number | null;
+  risk_delta:      number | null;
+  timestamp:       string;
+}
+
+export interface PulseResponse {
+  project_id:            string;
+  has_updates:           boolean;
+  readiness_score:       number;
+  readiness_delta_today: number | null;
+  risk_score:            number;
+  blocking_count:        number;
+  new_events:            PulseEvent[];
+  checked_at:            string;
+}
+
+// Sprint 17: Cross-project recent activity feed ────────────────
+export interface RecentActivityItem {
+  id:              string;
+  action:          string;
+  message:         string;
+  actor:           string;
+  subject:         string;
+  project_id:      string;
+  project_name:    string;
+  readiness_delta: number | null;
+  timestamp:       string;
+}
+
 
 // ── Project — UNCHANGED ───────────────────────────────────────
 
@@ -796,6 +832,17 @@ export const projectsApi = {
       `/api/projects/${id}/risk-forecast/?days=${days}`
     );
     return data;
+  },
+
+    async getPulse(id: string, since?: string): Promise<PulseResponse> {
+    const params = since ? `?since=${encodeURIComponent(since)}` : "";
+    const { data } = await api.get(`/api/projects/${id}/pulse/${params}`);
+    return data;
+  },
+
+  async getRecentActivity(limit = 10): Promise<{ count: number; results: RecentActivityItem[] }> {
+    const { data } = await api.get(`/api/projects/recent-activity/?limit=${limit}`);
+    return { count: data.count, results: data.results };
   },
 
 };
