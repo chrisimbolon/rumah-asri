@@ -1,7 +1,6 @@
 # =============================================================================
 # === backend/apps/assistant/views.py ===
 # Sprint 15: Business Assistant — conversational AI for project intelligence.
-#
 # Architecture:
 # - LLM as PRESENTER, never data source. All data from existing models.
 # - classify_question() routes question → fetches only relevant data.
