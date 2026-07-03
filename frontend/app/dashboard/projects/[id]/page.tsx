@@ -1523,9 +1523,10 @@ function WorkspaceTable({
 }
 
 function DependencyGraphPanel({ projectId }: { projectId: string }) {
-  const [graph,    setGraph]    = useState<DependencyGraph | null>(null);
-  const [loading,  setLoading]  = useState(true);
-  const [expanded, setExpanded] = useState(false);
+  const [graph,          setGraph]          = useState<DependencyGraph | null>(null);
+  const [loading,        setLoading]        = useState(true);
+  const [expanded,       setExpanded]       = useState(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);  // Sprint 16
 
   useEffect(() => {
     projectsApi.getDependencyGraph(projectId)
@@ -1534,7 +1535,7 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
       .finally(() => setLoading(false));
   }, [projectId]);
 
-  // ── Status colour helpers ────────────────────────────────
+  // ── Status colour helpers (unchanged from Sprint 11) ─────
   const nodeColor = (node: DependencyNode): string => {
     if (node.status === "completed")           return "var(--color-success)";
     if (node.status === "menunggu_verifikasi") return "var(--color-accent)";
@@ -1570,9 +1571,7 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
 
   if (!graph || graph.nodes.length === 0) return null;
 
-  // ── Topological sort → column assignment ─────────────────
-  // Each node gets a column = max(prereq_columns) + 1. Nodes with no prerequisites are in column 0.
-
+  // ── Topological sort (unchanged from Sprint 11) ────────────────
   const incomingEdges = new Map<string, string[]>();
   graph.nodes.forEach(n => incomingEdges.set(n.id, []));
   graph.edges.forEach(e => {
@@ -1595,7 +1594,6 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
   };
   graph.nodes.forEach(n => assignCol(n.id));
 
-  // Group nodes by column, maintain original order within column
   const colGroups = new Map<number, string[]>();
   graph.nodes.forEach(n => {
     const col = columns.get(n.id) ?? 0;
@@ -1604,14 +1602,13 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
   });
   const numCols = Math.max(...Array.from(columns.values())) + 1;
 
-  // ── Node positions ────────────────────────────────────────
   const NODE_W  = 152;
   const NODE_H  = 58;
   const COL_GAP = 56;
   const ROW_GAP = 14;
 
-  const nodeMap    = new Map(graph.nodes.map(n => [n.id, n]));
-  const positions  = new Map<string, { x: number; y: number }>();
+  const nodeMap   = new Map(graph.nodes.map(n => [n.id, n]));
+  const positions = new Map<string, { x: number; y: number }>();
 
   for (let col = 0; col < numCols; col++) {
     const nodesInCol = colGroups.get(col) ?? [];
@@ -1627,9 +1624,16 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
   const svgW    = numCols * (NODE_W + COL_GAP) - COL_GAP + 24;
   const svgH    = maxRows * (NODE_H + ROW_GAP) - ROW_GAP + 16;
 
+  // Sprint 16: selected node for detail panel
+  const selectedNode = selectedNodeId ? nodeMap.get(selectedNodeId) : null;
+
+  const handleNodeClick = (nodeId: string) => {
+    setSelectedNodeId(prev => prev === nodeId ? null : nodeId);
+  };
+
   return (
     <div className="card" style={{ marginBottom: 16 }}>
-      {/* ── Header ── */}
+      {/* ── Header (unchanged) ── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
@@ -1637,6 +1641,8 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
           </div>
           <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>
             Apa yang bergantung pada apa — tahap {graph.stage_display}
+            {/* Sprint 16 hint */}
+            <span style={{ marginLeft: 8, opacity: 0.6 }}>· Klik node untuk detail</span>
           </div>
         </div>
         <button
@@ -1646,14 +1652,14 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
         </button>
       </div>
 
-      {/* ── Legend ── */}
+      {/* ── Legend (unchanged) ── */}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 12 }}>
         {[
-          { color: "var(--color-success)", label: "Selesai"    },
-          { color: "var(--color-warning)", label: "Diproses"   },
-          { color: "var(--color-accent)",  label: "Review"     },
-          { color: "var(--color-danger)",  label: "Memblokir"  },
-          { color: "var(--color-ink-3)",   label: "Terkunci"   },
+          { color: "var(--color-success)", label: "Selesai"   },
+          { color: "var(--color-warning)", label: "Diproses"  },
+          { color: "var(--color-accent)",  label: "Review"    },
+          { color: "var(--color-danger)",  label: "Memblokir" },
+          { color: "var(--color-ink-3)",   label: "Terkunci"  },
         ].map(({ color, label }) => (
           <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
             <div style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: color }} />
@@ -1662,29 +1668,38 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
         ))}
       </div>
 
-      {/* ── Collapsed: pill chain ── */}
+      {/* ── Collapsed: pill chain — NOW CLICKABLE ── */}
       {!expanded && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          {graph.nodes.map((node, i) => {
-            const color = nodeColor(node);
-            const bg    = nodeBg(node);
-            const icon  = nodeIcon(node);
+          {graph.nodes.map((node) => {
+            const color    = nodeColor(node);
+            const bg       = nodeBg(node);
+            const icon     = nodeIcon(node);
+            const isSelected = selectedNodeId === node.id;
             return (
               <div key={node.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{
-                  padding: "5px 11px", borderRadius: 999,
-                  backgroundColor: bg,
-                  border: `1.5px solid ${color}44`,
-                  fontSize: 11, fontWeight: 600, color,
-                  display: "flex", alignItems: "center", gap: 5,
-                }}>
+                {/* Sprint 16: clickable pill */}
+                <div
+                  onClick={() => handleNodeClick(node.id)}
+                  style={{
+                    padding: "5px 11px", borderRadius: 999,
+                    backgroundColor: bg,
+                    border: isSelected
+                      ? `2px solid ${color}`
+                      : `1.5px solid ${color}44`,
+                    fontSize: 11, fontWeight: 600, color,
+                    display: "flex", alignItems: "center", gap: 5,
+                    cursor: "pointer",
+                    transform: isSelected ? "scale(1.04)" : "scale(1)",
+                    transition: "all 0.15s",
+                    boxShadow: isSelected ? `0 0 0 3px ${color}22` : "none",
+                  }}>
                   <span style={{ fontSize: 12 }}>{icon}</span>
                   {node.name}
                   {node.is_mandatory && (
                     <span style={{ fontSize: 9, opacity: 0.7 }}>{node.weight_pct}%</span>
                   )}
                 </div>
-                {/* Only show arrow if there's an edge FROM this node */}
                 {graph.edges.some(e => e.from === node.id) && (
                   <span style={{ color: "var(--color-ink-3)", fontSize: 14, lineHeight: 1 }}>→</span>
                 )}
@@ -1694,26 +1709,20 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
         </div>
       )}
 
-      {/* ── Expanded: SVG graph ── */}
+      {/* ── Expanded: SVG graph — nodes NOW CLICKABLE ── */}
       {expanded && (
         <div style={{ overflowX: "auto", paddingBottom: 4 }}>
-          <svg
-            width={svgW}
-            height={svgH + 8}
-            style={{ display: "block", minWidth: svgW }}
-          >
-            {/* ── Edges ── */}
+          <svg width={svgW} height={svgH + 8} style={{ display: "block", minWidth: svgW }}>
+            {/* Edges (unchanged) */}
             {graph.edges.map((edge, i) => {
               const from = positions.get(edge.from);
               const to   = positions.get(edge.to);
               if (!from || !to) return null;
-
               const x1 = from.x + NODE_W + 10;
               const y1 = from.y + NODE_H / 2 + 5;
               const x2 = to.x + 10;
               const y2 = to.y + NODE_H / 2 + 5;
               const cx  = x1 + (x2 - x1) * 0.55;
-
               const toNode   = nodeMap.get(edge.to);
               const fromNode = nodeMap.get(edge.from);
               const edgeColor =
@@ -1722,17 +1731,13 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
                 fromNode?.status === "completed" ? "var(--color-success)" :
                                                   "rgba(14,13,11,0.18)";
               const isDashed = !!toNode?.is_dependency_blocked;
-
               return (
                 <g key={`edge-${i}`}>
                   <path
                     d={`M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`}
-                    fill="none"
-                    stroke={edgeColor}
-                    strokeWidth={1.5}
+                    fill="none" stroke={edgeColor} strokeWidth={1.5}
                     strokeDasharray={isDashed ? "4 3" : undefined}
                   />
-                  {/* Arrowhead */}
                   <polygon
                     points={`${x2},${y2} ${x2 - 7},${y2 - 4} ${x2 - 7},${y2 + 4}`}
                     fill={edgeColor}
@@ -1741,77 +1746,56 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
               );
             })}
 
-            {/* ── Nodes ── */}
+            {/* Nodes — Sprint 16: clickable via onClick on <g> */}
             {graph.nodes.map((node) => {
-              const pos   = positions.get(node.id);
+              const pos  = positions.get(node.id);
               if (!pos) return null;
-
-              const color = nodeColor(node);
-              const bg    = nodeBg(node);
-              const icon  = nodeIcon(node);
-              const px    = pos.x + 10;
-              const py    = pos.y + 5;
-              // Truncate long names for SVG text
+              const color      = nodeColor(node);
+              const bg         = nodeBg(node);
+              const icon       = nodeIcon(node);
+              const isSelected = selectedNodeId === node.id;
+              const px         = pos.x + 10;
+              const py         = pos.y + 5;
               const displayName = node.name.length > 17
-                ? node.name.slice(0, 15) + "…"
-                : node.name;
+                ? node.name.slice(0, 15) + "…" : node.name;
 
               return (
-                <g key={`node-${node.id}`} transform={`translate(${px}, ${py})`}>
-                  {/* Node rectangle */}
+                <g
+                  key={`node-${node.id}`}
+                  transform={`translate(${px}, ${py})`}
+                  onClick={() => handleNodeClick(node.id)}
+                  style={{ cursor: "pointer" }}
+                >
                   <rect
-                    width={NODE_W}
-                    height={NODE_H}
-                    rx={8}
+                    width={NODE_W} height={NODE_H} rx={8}
                     fill={bg}
-                    stroke={color}
-                    strokeWidth={node.is_blocking ? 2 : 1.5}
+                    stroke={isSelected ? color : `${color}99`}
+                    strokeWidth={isSelected ? 2.5 : 1.5}
                   />
-                  {/* Status icon */}
-                  <text
-                    x={12}
-                    y={NODE_H / 2}
-                    fontSize={15}
-                    dominantBaseline="middle"
-                    textAnchor="start"
-                  >
+                  {/* Selection glow */}
+                  {isSelected && (
+                    <rect width={NODE_W} height={NODE_H} rx={8}
+                      fill="none" stroke={color} strokeWidth={4} opacity={0.15}
+                    />
+                  )}
+                  <text x={12} y={NODE_H / 2} fontSize={15} dominantBaseline="middle">
                     {icon}
                   </text>
-                  {/* Requirement name */}
-                  <text
-                    x={32}
-                    y={NODE_H / 2 - (node.is_mandatory ? 7 : 0)}
-                    fontSize={11}
-                    fontWeight={600}
-                    fill={color}
-                    dominantBaseline="middle"
-                  >
+                  <text x={32} y={NODE_H / 2 - (node.is_mandatory ? 7 : 0)}
+                    fontSize={11} fontWeight={600} fill={color} dominantBaseline="middle">
                     {displayName}
                   </text>
-                  {/* Weight badge (mandatory only) */}
                   {node.is_mandatory && (
-                    <text
-                      x={32}
-                      y={NODE_H / 2 + 9}
-                      fontSize={9}
-                      fill={color}
-                      dominantBaseline="middle"
-                      opacity={0.65}
-                    >
+                    <text x={32} y={NODE_H / 2 + 9}
+                      fontSize={9} fill={color} dominantBaseline="middle" opacity={0.65}>
                       bobot {node.weight_pct}%
-                      {node.is_blocking    ? " · ⚡ memblokir" :
+                      {node.is_blocking ? " · ⚡ memblokir" :
                        node.status === "completed" ? " · selesai" : ""}
                     </text>
                   )}
-                  {/* Optional label */}
                   {!node.is_mandatory && (
-                    <text
-                      x={32}
-                      y={NODE_H / 2 + 9}
-                      fontSize={9}
-                      fill="var(--color-ink-3)"
-                      dominantBaseline="middle"
-                    >
+                    <text x={32} y={NODE_H / 2 + 9}
+                      fontSize={9} fill="var(--color-ink-3)" dominantBaseline="middle">
                       opsional
                     </text>
                   )}
@@ -1819,6 +1803,103 @@ function DependencyGraphPanel({ projectId }: { projectId: string }) {
               );
             })}
           </svg>
+        </div>
+      )}
+
+      {/* ── Sprint 16: Node detail panel ── */}
+      {selectedNode && (
+        <div style={{
+          marginTop: 12, padding: "12px 14px", borderRadius: 10,
+          backgroundColor: nodeBg(selectedNode),
+          border: `1.5px solid ${nodeColor(selectedNode)}44`,
+          position: "relative",
+        }}>
+          {/* Close button */}
+          <button
+            onClick={() => setSelectedNodeId(null)}
+            style={{
+              position: "absolute", top: 8, right: 8,
+              background: "none", border: "none", cursor: "pointer",
+              fontSize: 14, color: "var(--color-ink-3)", lineHeight: 1,
+            }}>
+            ✕
+          </button>
+
+          {/* Node title */}
+          <div style={{
+            fontSize: 13, fontWeight: 700,
+            color: nodeColor(selectedNode), marginBottom: 8,
+          }}>
+            {nodeIcon(selectedNode)} {selectedNode.name}
+            <span style={{
+              marginLeft: 8, fontSize: 9, fontWeight: 600,
+              padding: "2px 7px", borderRadius: 999,
+              backgroundColor: `${nodeColor(selectedNode)}22`,
+              color: nodeColor(selectedNode),
+            }}>
+              {selectedNode.status_display}
+            </span>
+          </div>
+
+          {/* Detail rows */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {/* Block reason */}
+            {selectedNode.block_reason && (
+              <div style={{ display: "flex", gap: 8, fontSize: 11, color: "var(--color-ink)" }}>
+                <span style={{ color: "var(--color-ink-3)", minWidth: 60, flexShrink: 0 }}>Alasan</span>
+                <span style={{ fontWeight: 600, color: "var(--color-danger)" }}>
+                  {selectedNode.block_reason}
+                </span>
+              </div>
+            )}
+            {/* Owner */}
+            <div style={{ display: "flex", gap: 8, fontSize: 11, color: "var(--color-ink)" }}>
+              <span style={{ color: "var(--color-ink-3)", minWidth: 60, flexShrink: 0 }}>Pemilik</span>
+              <span>
+                {selectedNode.assigned_to_name
+                  ? `👤 ${selectedNode.assigned_to_name}`
+                  : <span style={{ color: "var(--color-ink-3)", fontStyle: "italic" }}>Belum ditugaskan</span>
+                }
+              </span>
+            </div>
+            {/* ETA */}
+            <div style={{ display: "flex", gap: 8, fontSize: 11, color: "var(--color-ink)" }}>
+              <span style={{ color: "var(--color-ink-3)", minWidth: 60, flexShrink: 0 }}>ETA</span>
+              <span>~{selectedNode.est_minutes} menit</span>
+            </div>
+            {/* Impact */}
+            {selectedNode.is_mandatory && selectedNode.status !== "completed" && (
+              <div style={{ display: "flex", gap: 8, fontSize: 11, color: "var(--color-ink)" }}>
+                <span style={{ color: "var(--color-ink-3)", minWidth: 60, flexShrink: 0 }}>Dampak</span>
+                <span style={{ fontWeight: 700, color: "var(--color-success)" }}>
+                  +{selectedNode.weight_pct}% kesiapan jika selesai
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* CTA button */}
+          {selectedNode.status !== "completed" && (
+            <button
+              onClick={() => {
+                document
+                  .getElementById("requirements-card")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                setSelectedNodeId(null);
+              }}
+              style={{
+                marginTop: 10, width: "100%",
+                padding: "8px", borderRadius: 7, border: "none",
+                backgroundColor: nodeColor(selectedNode), color: "white",
+                fontSize: 11, fontWeight: 700, cursor: "pointer",
+                transition: "opacity 0.15s",
+              }}
+              onMouseEnter={e => (e.currentTarget.style.opacity = "0.88")}
+              onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+            >
+              Ambil Tindakan →
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -2093,6 +2174,50 @@ function ActivityTimelinePanel({ projectId }: { projectId: string }) {
                       </span>
                     </div>
                   )}
+
+                  {/* Sprint 16: Cause & Effect badges */}
+                  {(item.readiness_delta != null || item.risk_delta != null) && (
+                    <div style={{
+                      display: "flex", gap: 6, marginTop: 5,
+                      flexWrap: "wrap",
+                    }}>
+                      {/* Readiness delta badge */}
+                      {item.readiness_delta != null && item.readiness_delta !== 0 && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 700,
+                          padding: "2px 8px", borderRadius: 999,
+                          backgroundColor: item.readiness_delta > 0
+                            ? "var(--color-success-light)"
+                            : "var(--color-danger-light)",
+                          color: item.readiness_delta > 0
+                            ? "var(--color-success)"
+                            : "var(--color-danger)",
+                        }}>
+                          {item.readiness_delta > 0 ? "↑" : "↓"} Kesiapan{" "}
+                          {item.readiness_delta > 0 ? "+" : ""}
+                          {item.readiness_delta}%
+                        </span>
+                      )}
+                      {/* Risk delta badge — note: risk DECREASING is GOOD (green) */}
+                      {item.risk_delta != null && item.risk_delta !== 0 && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 700,
+                          padding: "2px 8px", borderRadius: 999,
+                          backgroundColor: item.risk_delta < 0
+                            ? "var(--color-success-light)"
+                            : "var(--color-danger-light)",
+                          color: item.risk_delta < 0
+                            ? "var(--color-success)"
+                            : "var(--color-danger)",
+                        }}>
+                          {item.risk_delta < 0 ? "↓" : "↑"} Risiko{" "}
+                          {item.risk_delta > 0 ? "+" : ""}
+                          {item.risk_delta}
+                        </span>
+                      )}
+                    </div>
+                  )}
+              
                   <div style={{
                     fontSize: 10, color: "var(--color-ink-3)", marginTop: 3,
                   }}>
