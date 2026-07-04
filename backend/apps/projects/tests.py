@@ -1252,3 +1252,120 @@ class PortfolioIntelligenceTests(APITestCase):
         # avg_readiness should be between 0 and 100
         self.assertGreaterEqual(snap.avg_readiness, 0)
         self.assertLessEqual(snap.avg_readiness, 100)
+
+# =============================================================================
+# BUGFIX — blocking_count / stage_can_advance integrity
+# =============================================================================
+class StageAdvancementIntegrityTests(APITestCase):
+    """
+    Regression suite for a bug found via prod screenshots (Cluster C):
+    a mandatory requirement sitting in AWAITING_VERIFICATION (evidence
+    uploaded, not yet verified) was NOT counted as blocking — letting
+    blocking_count report 0, can_advance report True, and the Decision
+    Engine banner falsely declare "Semua requirement wajib sudah selesai!"
+
+    Root cause: blocking_count only checked for PENDING/IN_PROGRESS,
+    silently excluding AWAITING_VERIFICATION from the blocking check.
+
+    Covers:
+    - Model-level: blocking_count / can_advance correctness at each status
+    - API-level: /requirements/<id>/ PUT response reflects the same truth
+    - Tenant isolation: unaffected by this bug, but re-confirmed here
+    """
+
+    def setUp(self):
+        # ── Shared mandatory requirement ─────────────────────────────
+        self.req, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Kontraktor Integrity Check",
+            defaults={"is_mandatory": True, "weight": 60},
+        )
+
+        # ── Org A — victim ────────────────────────────────────────────
+        self.org_a = Organization.objects.create(name="Asri Sentosa Integrity")
+        self.dev_a = CustomUser.objects.create_user(
+            email="dev.a.integrity@test.id", password="pass12345!",
+            full_name="Dev A Integrity", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_a, user=self.dev_a, role="owner", is_active=True,
+        )
+        self.project = Project.objects.create(
+            organization=self.org_a, name="Cluster Integrity", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.req_status = ProjectRequirementStatus.objects.create(
+            project=self.project,
+            requirement=self.req,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    # ── Model-level correctness ─────────────────────────────────────
+
+    def test_awaiting_verification_counts_as_blocking(self):
+        """
+        THE regression test. Uploading evidence (→ AWAITING_VERIFICATION)
+        must NOT clear a mandatory requirement's blocking status.
+        """
+        self.req_status.mark_awaiting_verification(user=self.dev_a)
+
+        self.assertEqual(
+            self.project.blocking_count, 1,
+            "AWAITING_VERIFICATION requirement must still count as blocking"
+        )
+        self.assertFalse(
+            self.project.can_advance,
+            "Project must not be advanceable while evidence is unverified"
+        )
+
+    def test_pending_requirement_blocks(self):
+        """Control case: PENDING must always block (sanity check)."""
+        self.assertEqual(self.project.blocking_count, 1)
+        self.assertFalse(self.project.can_advance)
+
+    def test_in_progress_requirement_blocks(self):
+        """Control case: IN_PROGRESS must always block (sanity check)."""
+        self.req_status.status = ProjectRequirementStatus.Status.IN_PROGRESS
+        self.req_status.save()
+        self.assertEqual(self.project.blocking_count, 1)
+        self.assertFalse(self.project.can_advance)
+
+    def test_completed_requirement_does_not_block(self):
+        """Control case: only COMPLETED actually clears the block."""
+        self.req_status.mark_completed(user=self.dev_a)
+        self.assertEqual(self.project.blocking_count, 0)
+        self.assertTrue(self.project.can_advance)
+
+    # ── API-level correctness ───────────────────────────────────────
+
+    def test_stage_can_advance_false_in_api_response_when_awaiting_verification(self):
+        """
+        The /requirements/<id>/ PUT response's impact.stage_can_advance
+        must be False when the update results in AWAITING_VERIFICATION —
+        this is the exact field the frontend's Decision Engine banner
+        and Sprint 20's feedback loop both trust.
+        """
+        self._login_as(self.dev_a)
+        resp = self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}/",
+            {"status": "menunggu_verifikasi"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(
+            resp.data["impact"]["stage_can_advance"],
+            "API must not report stage_can_advance=True for unverified evidence"
+        )
+
+    def test_stage_can_advance_true_in_api_response_when_completed(self):
+        """Control case at the API level: COMPLETED does allow advancement."""
+        self._login_as(self.dev_a)
+        resp = self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}/",
+            {"status": "completed"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["impact"]["stage_can_advance"])
