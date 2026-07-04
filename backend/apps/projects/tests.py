@@ -1602,3 +1602,181 @@ class EvidenceUploadImpactCaptureTests(APITestCase):
         latest_log = self.req_status.audit_logs.first()
         self.assertIsNotNone(latest_log.readiness_before)
         self.assertIsNotNone(latest_log.readiness_after)
+
+
+# =============================================================================
+# BUGFIX — Sprint 16 delta capture gap, part 2: evidence verify/approve
+# =============================================================================
+class EvidenceVerificationImpactCaptureTests(APITestCase):
+    """
+    Sprint 16 gap, part 2 — found while explaining why a fresh evidence
+    upload showed no badge (that part was CORRECT — a PENDING→
+    AWAITING_VERIFICATION transition has a genuine zero delta, since
+    only COMPLETED counts toward readiness and blocking_count doesn't
+    change either). Tracing that led here: RequirementEvidenceVerifyView
+    .put() — the approve/reject endpoint — never captured readiness_
+    before/after or risk_before/after. This is actually the MORE
+    important gap of the two: approving evidence is what fires
+    mark_completed() and genuinely moves readiness up / risk down, so
+    it's the one event where Cause & Effect badges should reliably be
+    non-zero and visible.
+
+    Covers:
+    - Approving evidence captures a genuine, non-zero impact
+    - BOTH audit logs approve() creates (COMPLETED + EVIDENCE_APPROVED)
+      get patched, not just whichever is "latest"
+    - activity_timeline() surfaces the delta for the approval event
+    - Rejecting evidence still legitimately produces zero delta
+      (status never reaches COMPLETED) — guards against a future
+      change that accidentally treats rejection like completion
+    - Self-verify guard is untouched by this fix
+    """
+
+    def setUp(self):
+        self.req, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Kontraktor Verify Impact",
+            defaults={"is_mandatory": True, "weight": 60},
+        )
+        self.org = Organization.objects.create(name="Asri Sentosa Verify Impact")
+        self.uploader = CustomUser.objects.create_user(
+            email="uploader.verifyimpact@test.id", password="pass12345!",
+            full_name="Uploader Verify Impact", role="developer",
+        )
+        self.verifier = CustomUser.objects.create_user(
+            email="verifier.verifyimpact@test.id", password="pass12345!",
+            full_name="Verifier Verify Impact", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.uploader, role="owner", is_active=True,
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.verifier, role="member", is_active=True,
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster Verify Impact", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.req_status = ProjectRequirementStatus.objects.create(
+            project=self.project,
+            requirement=self.req,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def _upload_evidence(self):
+        self._login_as(self.uploader)
+        resp = self.client.post(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}/evidence/",
+            {"file_url": "https://example.com/kontrak.pdf"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        return self.req_status.evidence.filter(is_latest=True).first().id
+
+    def test_approving_evidence_captures_nonzero_impact(self):
+        """
+        THE regression test. Approving evidence (the real cause &
+        effect moment) must record a genuine, non-zero readiness/risk
+        delta — not leave the fields None like before.
+        """
+        evidence_id = self._upload_evidence()
+
+        self._login_as(self.verifier)
+        resp = self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}"
+            f"/evidence/{evidence_id}/verify/",
+            {"action": "approve"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        latest_log = self.req_status.audit_logs.first()
+        self.assertIsNotNone(latest_log.readiness_before)
+        self.assertIsNotNone(latest_log.readiness_after)
+        self.assertGreater(
+            latest_log.readiness_after, latest_log.readiness_before,
+            "Approving the only mandatory requirement should raise readiness"
+        )
+
+    def test_approving_evidence_patches_both_audit_logs(self):
+        """
+        approve() creates TWO audit logs (COMPLETED, then
+        EVIDENCE_APPROVED) — both must carry the impact fields, not
+        just whichever one happens to be 'latest'.
+        """
+        evidence_id = self._upload_evidence()
+
+        self._login_as(self.verifier)
+        self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}"
+            f"/evidence/{evidence_id}/verify/",
+            {"action": "approve"}, format="json",
+        )
+
+        recent_logs = list(self.req_status.audit_logs.order_by("-changed_at")[:2])
+        actions = {log.action for log in recent_logs}
+        self.assertIn("completed", actions)
+        self.assertIn("evidence_approved", actions)
+        for log in recent_logs:
+            self.assertIsNotNone(
+                log.readiness_before,
+                f"'{log.action}' log must also carry impact data"
+            )
+
+    def test_activity_timeline_shows_delta_for_approval_event(self):
+        """
+        The real prod payoff: the Activity Timeline entry for the
+        approval must carry a non-null, non-zero readiness_delta —
+        this is what finally makes the badge appear on screen.
+        """
+        evidence_id = self._upload_evidence()
+
+        self._login_as(self.verifier)
+        self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}"
+            f"/evidence/{evidence_id}/verify/",
+            {"action": "approve"}, format="json",
+        )
+
+        resp = self.client.get(f"/api/projects/{self.project.id}/activity/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        latest = resp.data["results"][0]
+        self.assertIn("readiness_delta", latest)
+        self.assertIsNotNone(latest["readiness_delta"])
+        self.assertNotEqual(
+            latest["readiness_delta"], 0,
+            "A completed mandatory requirement must show a real delta"
+        )
+
+    def test_rejecting_evidence_still_works_correctly(self):
+        """
+        Control case: rejection doesn't complete the requirement, so a
+        zero delta here is CORRECT — guards against a future change
+        accidentally treating rejection like completion.
+        """
+        evidence_id = self._upload_evidence()
+
+        self._login_as(self.verifier)
+        resp = self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}"
+            f"/evidence/{evidence_id}/verify/",
+            {"action": "reject", "notes": "Dokumen tidak lengkap"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.req_status.refresh_from_db()
+        self.assertEqual(self.req_status.status, ProjectRequirementStatus.Status.IN_PROGRESS)
+
+    def test_uploader_still_cannot_verify_own_evidence(self):
+        """Sanity check: this fix must not touch the self-verify guard."""
+        evidence_id = self._upload_evidence()
+
+        self._login_as(self.uploader)
+        resp = self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}"
+            f"/evidence/{evidence_id}/verify/",
+            {"action": "approve"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.data["error_type"], "cannot_verify")

@@ -521,6 +521,16 @@ class RequirementEvidenceVerifyView(TenantScopedAPIView):
         if not can_verify:
             return Response({"success": False, "message": reason, "error_type": "cannot_verify"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # ── Sprint 16 fix: capture BEFORE state ─────────────────
+        # This is the moment that actually matters most for Cause &
+        # Effect badges — approving evidence is what fires
+        # mark_completed() and genuinely moves readiness/risk. It had
+        # the exact same gap as the upload endpoint: never wired in.
+        from django.utils import timezone
+        readiness_before = project.readiness_score
+        risk_before      = project._get_risk_data()["score"]
+        snapshot_cutoff  = timezone.now()
+
         project.snapshot_readiness()
 
         try:
@@ -534,6 +544,32 @@ class RequirementEvidenceVerifyView(TenantScopedAPIView):
             return Response({"success": False, "message": str(e), "error_type": "dependency_blocked"}, status=status.HTTP_400_BAD_REQUEST)
 
         project.snapshot_risk()
+
+        # ── Sprint 16 fix: capture AFTER state + patch every log this
+        # action created. approve() creates TWO audit logs (COMPLETED,
+        # then EVIDENCE_APPROVED) — patch both, not just the latest,
+        # so the badge isn't lost depending on which line the frontend
+        # happens to render.
+        readiness_after = project.readiness_score
+        risk_after      = project._get_risk_data()["score"]
+        try:
+            new_logs = list(req_status.audit_logs.filter(
+                changed_at__gte=snapshot_cutoff,
+                readiness_before__isnull=True,
+            ))
+            for log in new_logs:
+                log.readiness_before = readiness_before
+                log.readiness_after  = readiness_after
+                log.risk_before      = risk_before
+                log.risk_after       = risk_after
+            if new_logs:
+                RequirementAudit.objects.bulk_update(
+                    new_logs,
+                    ["readiness_before", "readiness_after", "risk_before", "risk_after"],
+                )
+        except Exception:
+            pass
+
         return Response({
             "success":      True,
             "message":      message,
