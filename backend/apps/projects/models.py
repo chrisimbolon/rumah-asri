@@ -1091,9 +1091,9 @@ class Project(TenantScopedModel):
         for r in requirements:
             s = statuses.get(str(r.id))
             if not s or s.status in (
-                ProjectRequirementStatus.Status.PENDING, 
+                ProjectRequirementStatus.Status.PENDING,
                 ProjectRequirementStatus.Status.IN_PROGRESS,
-                ProjectRequirementStatus.Status.AWAITING_VERIFICATION,
+                ProjectRequirementStatus.Status.AWAITING_VERIFICATION,   # ← fix: evidence uploaded ≠ verified
             ):
                 if not self._has_unmet_prerequisites(r, statuses):
                     blocking += 1
@@ -1539,6 +1539,23 @@ class Project(TenantScopedModel):
 
         # ── All clear — nothing to recommend ─────────────────────
         if not candidates:
+            # UX-polish fix: name what's actually happening instead of a
+            # vague "nothing available" when a mandatory item is simply
+            # sitting with a verifier (evidence uploaded, not yet reviewed).
+            awaiting_verification = [
+                req["name"] for req in items
+                if req["is_mandatory"] and req["status"] == "menunggu_verifikasi"
+            ]
+            if intel["blocking_count"] == 0:
+                message = "Semua requirement wajib sudah selesai! 🎉"
+            elif awaiting_verification:
+                message = f"Menunggu verifikasi: {', '.join(awaiting_verification)}"
+            else:
+                # Defensive fallback — kept in case future logic reopens
+                # a path where blocking_count > 0 with no candidates and
+                # nothing awaiting verification.
+                message = "Tidak ada tindakan tersedia saat ini."
+
             return {
                 "has_recommendations": False,
                 "all_clear":           intel["blocking_count"] == 0,
@@ -1546,11 +1563,7 @@ class Project(TenantScopedModel):
                 "alternatives":        [],
                 "current_readiness":   intel["readiness_score"],
                 "projected_readiness": intel["readiness_score"],
-                "message":             (
-                    "Semua requirement wajib sudah selesai! 🎉"
-                    if intel["blocking_count"] == 0
-                    else "Tidak ada tindakan tersedia saat ini."
-                ),
+                "message":             message,
             }
 
         # ── Sort by priority score — highest first ────────────────
