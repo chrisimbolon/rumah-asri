@@ -1469,6 +1469,7 @@ class DecisionEngineAwaitingVerificationMessageTests(APITestCase):
             resp.data["message"], "Semua requirement wajib sudah selesai! 🎉"
         )
 
+
 # =============================================================================
 # BUGFIX — Sprint 16 delta capture gap in the evidence upload endpoint
 # =============================================================================

@@ -430,6 +430,15 @@ class RequirementEvidenceView(TenantScopedAPIView):
             existing_latest.superseded_by = evidence
             existing_latest.save(update_fields=["is_latest", "superseded_by", "updated_at"])
 
+        # ── Sprint 16 fix: capture BEFORE state ─────────────────
+        # (mirrors the working pattern already used in
+        # ProjectRequirementUpdateView.put() — evidence upload was
+        # the one status-changing path that never wired this in,
+        # which is why Cause & Effect delta badges never rendered
+        # for "mengunggah bukti" events on prod)
+        readiness_before = project.readiness_score
+        risk_before      = project._get_risk_data()["score"]
+
         # Update requirement status
         try:
             if req_status.status == ProjectRequirementStatus.Status.IN_PROGRESS:
@@ -451,6 +460,23 @@ class RequirementEvidenceView(TenantScopedAPIView):
         except ValueError as e:
             evidence.delete()
             return Response({"success": False, "message": str(e), "error_type": "dependency_blocked"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Sprint 16 fix: capture AFTER state + patch latest log ──
+        readiness_after = project.readiness_score
+        risk_after      = project._get_risk_data()["score"]
+        try:
+            latest_log = req_status.audit_logs.first()   # ordered by -changed_at
+            if latest_log and latest_log.readiness_before is None:
+                latest_log.readiness_before = readiness_before
+                latest_log.readiness_after  = readiness_after
+                latest_log.risk_before      = risk_before
+                latest_log.risk_after       = risk_after
+                latest_log.save(update_fields=[
+                    "readiness_before", "readiness_after",
+                    "risk_before",      "risk_after",
+                ])
+        except Exception:
+            pass
 
         version_msg = f" (v{next_version})" if next_version > 1 else ""
         return Response({
