@@ -1369,3 +1369,102 @@ class StageAdvancementIntegrityTests(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertTrue(resp.data["impact"]["stage_can_advance"])
+
+
+# =============================================================================
+# UX-POLISH FIX — Decision Engine "awaiting verification" message
+# =============================================================================
+class DecisionEngineAwaitingVerificationMessageTests(APITestCase):
+    """
+    UX-polish fix (same session as the blocking_count bug): when a
+    mandatory requirement is AWAITING_VERIFICATION and nothing else is
+    actionable, the Decision Engine message must name what's actually
+    happening ("Menunggu verifikasi: X") instead of the vague
+    "Tidak ada tindakan tersedia saat ini." — which reads like nothing
+    is happening when in fact something is, just not by the developer.
+
+    Covers:
+    - Single item awaiting verification → named in the message
+    - Multiple items awaiting verification → all named, comma-separated
+    - all_clear / has_recommendations behavior unchanged (message-only fix)
+    - Fully COMPLETED → original celebratory message unaffected
+    """
+
+    def setUp(self):
+        self.req, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Rencana Kerja Msg",
+            defaults={"is_mandatory": True, "weight": 40},
+        )
+        self.req2, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Site Plan Msg",
+            defaults={"is_mandatory": True, "weight": 20},
+        )
+
+        self.org = Organization.objects.create(name="Asri Sentosa Msg")
+        self.dev = CustomUser.objects.create_user(
+            email="dev.msg@test.id", password="pass12345!",
+            full_name="Dev Msg", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.dev, role="owner", is_active=True,
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster Msg", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.status1 = ProjectRequirementStatus.objects.create(
+            project=self.project, requirement=self.req,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+        self.status2 = ProjectRequirementStatus.objects.create(
+            project=self.project, requirement=self.req2,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def test_message_names_the_requirement_awaiting_verification(self):
+        """Single item awaiting verification → named explicitly."""
+        self.status1.mark_awaiting_verification(user=self.dev)
+        self.status2.mark_completed(user=self.dev)
+
+        self._login_as(self.dev)
+        resp = self.client.get(f"/api/projects/{self.project.id}/decision/")
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["all_clear"])
+        self.assertFalse(resp.data["has_recommendations"])
+        self.assertIn("Rencana Kerja Msg", resp.data["message"])
+        self.assertNotEqual(
+            resp.data["message"], "Tidak ada tindakan tersedia saat ini.",
+            "Message must name the pending item, not stay generic"
+        )
+
+    def test_message_names_all_requirements_awaiting_verification(self):
+        """Multiple items awaiting verification → all named."""
+        self.status1.mark_awaiting_verification(user=self.dev)
+        self.status2.mark_awaiting_verification(user=self.dev)
+
+        self._login_as(self.dev)
+        resp = self.client.get(f"/api/projects/{self.project.id}/decision/")
+
+        self.assertIn("Rencana Kerja Msg", resp.data["message"])
+        self.assertIn("Site Plan Msg", resp.data["message"])
+
+    def test_all_clear_message_unaffected_when_truly_complete(self):
+        """Control case: the original celebratory message still fires
+        correctly when there's genuinely nothing left to verify."""
+        self.status1.mark_completed(user=self.dev)
+        self.status2.mark_completed(user=self.dev)
+
+        self._login_as(self.dev)
+        resp = self.client.get(f"/api/projects/{self.project.id}/decision/")
+
+        self.assertTrue(resp.data["all_clear"])
+        self.assertEqual(
+            resp.data["message"], "Semua requirement wajib sudah selesai! 🎉"
+        )
