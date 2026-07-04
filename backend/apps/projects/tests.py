@@ -1468,3 +1468,136 @@ class DecisionEngineAwaitingVerificationMessageTests(APITestCase):
         self.assertEqual(
             resp.data["message"], "Semua requirement wajib sudah selesai! 🎉"
         )
+
+# =============================================================================
+# BUGFIX — Sprint 16 delta capture gap in the evidence upload endpoint
+# =============================================================================
+class EvidenceUploadImpactCaptureTests(APITestCase):
+    """
+    Sprint 16 gap found via prod screenshot comparison: the evidence
+    upload endpoint (RequirementEvidenceView.post()) was the one
+    status-changing code path that never captured readiness_before/
+    after or risk_before/after — meaning "mengunggah bukti" events
+    NEVER got Cause & Effect delta badges on prod, even though the
+    frontend rendering code was 100% correct and complete.
+
+    Root cause: only ProjectRequirementUpdateView.put() wired in the
+    before/after snapshot pattern; mark_awaiting_verification() (called
+    from the evidence upload flow) and the evidence resubmission log
+    call never did.
+
+    Covers:
+    - First-time evidence upload → impact fields captured on the log
+    - Resubmission after rejection → impact fields captured too
+    - activity_timeline() reflects the delta for an evidence-upload event
+    """
+
+    def setUp(self):
+        self.req, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Kontraktor Evidence Impact",
+            defaults={"is_mandatory": True, "weight": 60},
+        )
+        self.org = Organization.objects.create(name="Asri Sentosa Evidence Impact")
+        self.dev = CustomUser.objects.create_user(
+            email="dev.evimpact@test.id", password="pass12345!",
+            full_name="Dev Evidence Impact", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.dev, role="owner", is_active=True,
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster Evidence Impact", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.req_status = ProjectRequirementStatus.objects.create(
+            project=self.project,
+            requirement=self.req,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def test_first_time_evidence_upload_captures_impact(self):
+        """
+        THE regression test. Uploading evidence for the first time
+        (PENDING → AWAITING_VERIFICATION) must produce an audit log
+        with readiness_before/after and risk_before/after populated —
+        not left as None.
+        """
+        self._login_as(self.dev)
+        resp = self.client.post(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}/evidence/",
+            {"file_url": "https://example.com/kontrak.pdf"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+        latest_log = self.req_status.audit_logs.first()
+        self.assertIsNotNone(latest_log)
+        self.assertIsNotNone(
+            latest_log.readiness_before,
+            "readiness_before must be captured on evidence upload, not left None"
+        )
+        self.assertIsNotNone(
+            latest_log.readiness_after,
+            "readiness_after must be captured on evidence upload, not left None"
+        )
+        self.assertIsNotNone(latest_log.risk_before)
+        self.assertIsNotNone(latest_log.risk_after)
+
+    def test_activity_timeline_shows_delta_for_evidence_upload_event(self):
+        """
+        The exact prod symptom: the Activity Timeline entry for
+        "mengunggah bukti untuk X" must carry a real readiness_delta,
+        not silently fall back to None (which hides the badge on the
+        frontend, since the badge only renders when the delta is
+        non-null and non-zero).
+        """
+        self._login_as(self.dev)
+        self.client.post(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}/evidence/",
+            {"file_url": "https://example.com/kontrak.pdf"}, format="json",
+        )
+
+        resp = self.client.get(f"/api/projects/{self.project.id}/activity/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertGreater(len(resp.data["results"]), 0)
+
+        latest = resp.data["results"][0]
+        self.assertEqual(latest["action"], "evidence_uploaded")
+        self.assertIn("readiness_delta", latest)
+        self.assertIsNotNone(
+            latest["readiness_delta"],
+            "readiness_delta must not be None for an evidence-upload event "
+            "— this is exactly why delta badges never rendered on prod"
+        )
+
+    def test_resubmission_after_rejection_also_captures_impact(self):
+        """
+        Control case: the OTHER branch inside the evidence view (re-
+        upload after a rejection, IN_PROGRESS → AWAITING_VERIFICATION)
+        must capture impact fields too, not just the first-upload path.
+        """
+        self._login_as(self.dev)
+        # First upload via the real endpoint
+        self.client.post(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}/evidence/",
+            {"file_url": "https://example.com/kontrak-v1.pdf"}, format="json",
+        )
+        # Simulate a rejection putting it back to IN_PROGRESS
+        self.req_status.refresh_from_db()
+        self.req_status.status = ProjectRequirementStatus.Status.IN_PROGRESS
+        self.req_status.save(update_fields=["status"])
+
+        # Resubmission — hits the other branch inside the evidence view
+        resp = self.client.post(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}/evidence/",
+            {"file_url": "https://example.com/kontrak-v2.pdf"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+        latest_log = self.req_status.audit_logs.first()
+        self.assertIsNotNone(latest_log.readiness_before)
+        self.assertIsNotNone(latest_log.readiness_after)
