@@ -80,7 +80,6 @@ export interface RequirementEvidence {
   verifier_name:        string;
   verified_at:          string | null;
   verifier_notes:       string;
-  // Sprint 8: version tracking
   version_number:       number;
   version_label:        string;
   is_latest:            boolean;
