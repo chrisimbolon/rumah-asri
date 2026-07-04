@@ -4,6 +4,7 @@
 // All Sprint 1 types preserved — additive only.
 //  Sprint 9: Next Actions Assistant
 // Sprint 14: Risk Forecast 
+//  Sprint 16 : implemented here
 //  Sprint 17 : Live Event Stream + Readiness Momentum - IS implemented here
 // ==========================================================================
 import api from "@/lib/api";
