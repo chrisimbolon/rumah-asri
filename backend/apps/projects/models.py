@@ -1090,7 +1090,11 @@ class Project(TenantScopedModel):
         blocking = 0
         for r in requirements:
             s = statuses.get(str(r.id))
-            if not s or s.status in (ProjectRequirementStatus.Status.PENDING, ProjectRequirementStatus.Status.IN_PROGRESS):
+            if not s or s.status in (
+                ProjectRequirementStatus.Status.PENDING, 
+                ProjectRequirementStatus.Status.IN_PROGRESS,
+                ProjectRequirementStatus.Status.AWAITING_VERIFICATION,
+            ):
                 if not self._has_unmet_prerequisites(r, statuses):
                     blocking += 1
         return blocking
