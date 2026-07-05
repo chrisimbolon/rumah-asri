@@ -4,7 +4,6 @@
 // All Sprint 1 types preserved — additive only.
 //  Sprint 9: Next Actions Assistant
 // Sprint 14: Risk Forecast 
-//  Sprint 16 : implemented here
 //  Sprint 17 : Live Event Stream + Readiness Momentum - IS implemented here
 // ==========================================================================
 import api from "@/lib/api";
@@ -80,6 +79,7 @@ export interface RequirementEvidence {
   verifier_name:        string;
   verified_at:          string | null;
   verifier_notes:       string;
+  // Sprint 8: version tracking
   version_number:       number;
   version_label:        string;
   is_latest:            boolean;
@@ -511,6 +511,21 @@ export interface PortfolioIntelligence {
   has_history: boolean;
 }
 
+// Sprint 19: cross-project Calendar — mirrors ProjectCalendarView's
+// response exactly. due_date, is_overdue, days_until_due, and
+// assigned_to have existed on ProjectRequirementStatus since Sprint 7.
+export interface CalendarEvent {
+  id:               string;
+  requirement_name: string;
+  project_id:       string;
+  project_name:     string;
+  due_date:         string;
+  status:           string;
+  is_overdue:       boolean;
+  days_until_due:   number;
+  assigned_to_name: string | null;
+}
+
 // ── Project — UNCHANGED ───────────────────────────────────────
 
 export interface Project {
@@ -882,6 +897,12 @@ export const projectsApi = {
   async getPortfolioIntelligence(): Promise<PortfolioIntelligence> {
     const { data } = await api.get("/api/projects/portfolio-intelligence/");
     return data;
+  },
+
+  // Sprint 19: standalone Calendar page
+  async getCalendar(): Promise<{ count: number; results: CalendarEvent[] }> {
+    const { data } = await api.get("/api/projects/calendar/");
+    return { count: data.count, results: data.results };
   },
 
 };
