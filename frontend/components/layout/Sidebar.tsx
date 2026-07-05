@@ -1,13 +1,22 @@
 "use client";
 // ===============================================
 // frontend/components/layout/Sidebar.tsx
+// Sprint 19: Command Center rename + new "Eksekusi" group.
+//
+// Note: the full roadmap nav (separate Readiness / Risk & Forecast /
+// Dependencies / Requirements / Decision Engine / Activity Feed pages)
+// is intentionally NOT wired in yet — those pages don't exist as
+// routes yet. Wiring them now would just be dead links. "Eksekusi"
+// starts with Kalender (real, built, tested) and is designed to grow
+// as Tasks & Actions / Decision Engine get their own pages next,
+// without needing another sidebar rewrite.
 // ===============================================
 
 import { useAuth } from "@/context/AuthContext";
 import { organizationsApi } from "@/lib/api/organizations";
 import { cn } from "@/lib/utils";
 import {
-  BarChart2, Bell, Building2, ChevronLeft,
+  BarChart2, Bell, Building2, Calendar, ChevronLeft,
   CreditCard, FileText, FolderOpen, Home, LayoutDashboard,
   LogOut, Settings, Shield, TrendingUp, UserCheck, Users,
 } from "lucide-react";
@@ -20,7 +29,7 @@ const NAV_DEVELOPER = [
   {
     group: "Ikhtisar",
     items: [
-      { href: "/dashboard", icon: LayoutDashboard, label: "Dasbor" },
+      { href: "/dashboard", icon: LayoutDashboard, label: "Command Center" },
     ],
   },
   {
@@ -29,6 +38,15 @@ const NAV_DEVELOPER = [
       { href: "/dashboard/projects",     icon: FolderOpen, label: "Semua Proyek" },
       { href: "/dashboard/units",        icon: Home,       label: "Unit" },
       { href: "/dashboard/construction", icon: TrendingUp, label: "Progres Konstruksi" },
+    ],
+  },
+  {
+    // Sprint 19: new group, starts with Kalender. Tasks & Actions and
+    // Decision Engine (standalone) will join here once those pages
+    // exist — this group is built to grow, not a final shape yet.
+    group: "Eksekusi",
+    items: [
+      { href: "/dashboard/calendar", icon: Calendar, label: "Kalender" },
     ],
   },
   {
