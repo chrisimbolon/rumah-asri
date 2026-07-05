@@ -526,6 +526,24 @@ export interface CalendarEvent {
   assigned_to_name: string | null;
 }
 
+// Sprint 20: shape returned by the three requirement-changing
+// endpoints (status update, evidence upload, evidence verify) — the
+// "feedback loop" data. readiness/risk before/after/delta and
+// stage_can_advance existed since the Sprint 16 bug hunt; newly_unlocked
+// and the dynamic message are new in Sprint 20.
+export interface RequirementImpact {
+  readiness_before:  number;
+  readiness_after:   number;
+  readiness_delta:   number;
+  risk_before:       number;
+  risk_after:        number;
+  risk_delta:        number;
+  stage_can_advance: boolean;
+  newly_unlocked:    string[];
+  message:           string;
+}
+
+
 // ── Project — UNCHANGED ───────────────────────────────────────
 
 export interface Project {
@@ -798,12 +816,12 @@ export const projectsApi = {
     projectId: string,
     reqStatusId: string,
     payload: { status: ReqStatus; notes?: string }
-  ): Promise<IntelligenceSummary> {
+  ): Promise<{ intelligence: IntelligenceSummary; impact: RequirementImpact }> {
     const { data } = await api.put(
       `/api/projects/${projectId}/requirements/${reqStatusId}/`,
       payload
     );
-    return data.intelligence;
+    return { intelligence: data.intelligence, impact: data.impact };
   },
 
   async getPortfolio(): Promise<PortfolioRow[]> {
@@ -923,7 +941,7 @@ export const evidenceApi = {
     projectId: string,
     reqStatusId: string,
     payload: { file?: File; file_url?: string; notes?: string }
-  ): Promise<{ evidence: RequirementEvidence; intelligence: IntelligenceSummary }> {
+  ): Promise<{ evidence: RequirementEvidence; intelligence: IntelligenceSummary; impact: RequirementImpact }> {
     const formData = new FormData();
     if (payload.file)     formData.append("file",     payload.file);
     if (payload.file_url) formData.append("file_url", payload.file_url);
@@ -934,7 +952,7 @@ export const evidenceApi = {
       formData,
       { headers: { "Content-Type": "multipart/form-data" } }
     );
-    return { evidence: data.evidence, intelligence: data.intelligence };
+    return { evidence: data.evidence, intelligence: data.intelligence, impact: data.impact };
   },
 
   async verify(
@@ -943,12 +961,12 @@ export const evidenceApi = {
     evidenceId: string,
     action: "approve" | "reject",
     notes?: string
-  ): Promise<{ evidence: RequirementEvidence; intelligence: IntelligenceSummary }> {
+  ): Promise<{ evidence: RequirementEvidence; intelligence: IntelligenceSummary; impact: RequirementImpact }> {
     const { data } = await api.put(
       `/api/projects/${projectId}/requirements/${reqStatusId}/evidence/${evidenceId}/verify/`,
       { action, notes: notes ?? "" }
     );
-    return { evidence: data.evidence, intelligence: data.intelligence };
+    return { evidence: data.evidence, intelligence: data.intelligence, impact: data.impact };
   },
 
   async getEligibleVerifiers(
