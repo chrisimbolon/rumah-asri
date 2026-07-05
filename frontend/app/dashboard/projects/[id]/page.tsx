@@ -79,28 +79,132 @@ import {
   XAxis, YAxis,
 } from "recharts";
 
+// ── Sprint 20: shared count-up hook ────────────────────────────
+// Animates a displayed integer from its previous value to a new
+// target over `durationMs`, using requestAnimationFrame with an
+// ease-out cubic curve (fast start, gentle settle — feels more
+// "alive" than a linear count). Used by both the readiness gauge
+// and the risk score panel so a completed action visibly counts up
+// instead of snapping instantly to the new number.
+function useCountUp(target: number, durationMs = 1200): number {
+  const [display, setDisplay] = useState(target);
+  const fromRef = useRef(target);
+
+  useEffect(() => {
+    const from = fromRef.current;
+    const to   = target;
+    if (from === to) return;
+
+    let frameId: number;
+    const startTime = performance.now();
+
+    const tick = (now: number) => {
+      const elapsed  = now - startTime;
+      const progress = Math.min(elapsed / durationMs, 1);
+      const eased    = 1 - Math.pow(1 - progress, 3);   // ease-out cubic
+      setDisplay(Math.round(from + (to - from) * eased));
+      if (progress < 1) {
+        frameId = requestAnimationFrame(tick);
+      } else {
+        fromRef.current = to;
+      }
+    };
+
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
+  }, [target, durationMs]);
+
+  return display;
+}
+
 // ── Circular readiness gauge ──────────────────────────────────
 function ReadinessGauge({ score }: { score: number }) {
+  const displayScore = useCountUp(score, 1200);
+  const prevScoreRef = useRef(score);
+  const [pulsing, setPulsing] = useState(false);
+
+  // Sprint 20: brief green flash when readiness improves. Pure CSS
+  // transition trick (no @keyframes needed, no globals.css access
+  // required) — flip a boxShadow on instantly via state, then flip
+  // it back off almost immediately after; the `transition` property
+  // makes the "back to off" animate smoothly, producing a flash-and-
+  // fade look with zero external stylesheet changes.
+  useEffect(() => {
+    const increased = score > prevScoreRef.current;
+    prevScoreRef.current = score;
+    if (increased) {
+      setPulsing(true);
+      const t = setTimeout(() => setPulsing(false), 30);
+      return () => clearTimeout(t);
+    }
+  }, [score]);
+
   const radius        = 36;
   const circumference = 2 * Math.PI * radius;
-  const offset        = circumference - (score / 100) * circumference;
+  const offset        = circumference - (displayScore / 100) * circumference;
   const color =
-    score >= 80 ? "var(--color-success)" :
-    score >= 50 ? "var(--color-warning)" :
+    displayScore >= 80 ? "var(--color-success)" :
+    displayScore >= 50 ? "var(--color-warning)" :
                   "var(--color-danger)";
   return (
-    <div style={{ position: "relative", width: 100, height: 100, flexShrink: 0 }}>
+    <div style={{
+      position: "relative", width: 100, height: 100, flexShrink: 0,
+      borderRadius: "50%",
+      boxShadow: pulsing ? "0 0 0 10px var(--color-success-light)" : "0 0 0 0px rgba(0,0,0,0)",
+      transition: "box-shadow 0.8s ease-out",
+    }}>
       <svg width="100" height="100" style={{ transform: "rotate(-90deg)" }}>
         <circle cx="50" cy="50" r={radius} fill="none" stroke="rgba(14,13,11,0.08)" strokeWidth="8" />
         <circle cx="50" cy="50" r={radius} fill="none" stroke={color} strokeWidth="8"
           strokeDasharray={circumference} strokeDashoffset={offset}
-          strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.5s ease" }} />
+          strokeLinecap="round" style={{ transition: "stroke-dashoffset 1.2s ease-out, stroke 0.3s" }} />
       </svg>
       <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-        <span style={{ fontSize: 20, fontWeight: 800, color, lineHeight: 1 }}>{score}%</span>
+        <span style={{ fontSize: 20, fontWeight: 800, color, lineHeight: 1 }}>{displayScore}%</span>
         <span style={{ fontSize: 9, color: "var(--color-ink-3)", marginTop: 2 }}>KESIAPAN</span>
       </div>
     </div>
+  );
+}
+
+// ── Sprint 20: animated risk score number ─────────────────────
+// Same count-up + pulse treatment as ReadinessGauge, but as its own
+// tiny component (not inlined in the main page body) — the main
+// component can have `intel === null` during early renders, and
+// hooks can't safely sit before that null-check. Mounting this only
+// once real data exists (same pattern ReadinessGauge already uses)
+// sidesteps the problem entirely, and avoids a fake "count up from
+// zero" animation firing on first page load.
+function RiskScoreBadge({ score }: { score: number }) {
+  const displayScore = useCountUp(score, 1200);
+  const prevScoreRef = useRef(score);
+  const [pulse, setPulse] = useState<"up" | "down" | null>(null);
+
+  useEffect(() => {
+    const prev = prevScoreRef.current;
+    prevScoreRef.current = score;
+    if (score < prev) {
+      setPulse("down");
+      const t = setTimeout(() => setPulse(null), 30);
+      return () => clearTimeout(t);
+    } else if (score > prev) {
+      setPulse("up");
+      const t = setTimeout(() => setPulse(null), 30);
+      return () => clearTimeout(t);
+    }
+  }, [score]);
+
+  return (
+    <span style={{
+      display: "inline-block", padding: "1px 6px", borderRadius: 999,
+      boxShadow:
+        pulse === "down" ? "0 0 0 5px var(--color-success-light)" :
+        pulse === "up"   ? "0 0 0 5px var(--color-danger-light)"  :
+                            "0 0 0 0px rgba(0,0,0,0)",
+      transition: "box-shadow 0.8s ease-out",
+    }}>
+      {displayScore} / 100
+    </span>
   );
 }
 
@@ -1087,9 +1191,33 @@ function RiskExplanationPanel({
   intel: IntelligenceSummary;
 }) {
   const [expanded, setExpanded] = useState(false);
+
+  // Sprint 20: count-up + directional pulse. Must be called
+  // unconditionally, before the early return below, per rules of
+  // hooks — risk decreasing is a good outcome (green pulse), risk
+  // increasing is worth flagging too (amber/danger pulse), no pulse
+  // when unchanged.
+  const displayRiskScore = useCountUp(intel.risk_score, 1200);
+  const prevRiskRef      = useRef(intel.risk_score);
+  const [riskPulse, setRiskPulse] = useState<"up" | "down" | null>(null);
+
+  useEffect(() => {
+    const prev = prevRiskRef.current;
+    prevRiskRef.current = intel.risk_score;
+    if (intel.risk_score < prev) {
+      setRiskPulse("down");
+      const t = setTimeout(() => setRiskPulse(null), 30);
+      return () => clearTimeout(t);
+    } else if (intel.risk_score > prev) {
+      setRiskPulse("up");
+      const t = setTimeout(() => setRiskPulse(null), 30);
+      return () => clearTimeout(t);
+    }
+  }, [intel.risk_score]);
+
   if (!intel.risk_factors || intel.risk_factors.length === 0) return null;
 
-  const scoreMeta = getRiskScoreMeta(intel.risk_score);
+  const scoreMeta = getRiskScoreMeta(displayRiskScore);
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(14,13,11,0.06)" }}>
@@ -1100,7 +1228,7 @@ function RiskExplanationPanel({
             Mengapa risiko ini?
           </span>
           <span style={{ fontSize: 12, fontWeight: 800, padding: "2px 10px", borderRadius: 999, color: scoreMeta.color, backgroundColor: scoreMeta.bg }}>
-            {intel.risk_score} / 100
+            {displayRiskScore} / 100
           </span>
           {intel.risk_since && (
             <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
@@ -1116,15 +1244,22 @@ function RiskExplanationPanel({
       </div>
 
       {/* Score bar — always visible */}
-      <div style={{ padding: "8px 12px", backgroundColor: "var(--color-paper-2)", borderRadius: 8, marginBottom: expanded ? 10 : 0 }}>
+      <div style={{
+        padding: "8px 12px", backgroundColor: "var(--color-paper-2)", borderRadius: 8, marginBottom: expanded ? 10 : 0,
+        boxShadow:
+          riskPulse === "down" ? "0 0 0 6px var(--color-success-light)" :
+          riskPulse === "up"   ? "0 0 0 6px var(--color-danger-light)"  :
+                                  "0 0 0 0px rgba(0,0,0,0)",
+        transition: "box-shadow 0.8s ease-out",
+      }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
           <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>Risk Score</span>
           <span style={{ fontSize: 11, fontWeight: 700, color: scoreMeta.color }}>{scoreMeta.label}</span>
         </div>
         <div style={{ height: 6, backgroundColor: "rgba(14,13,11,0.08)", borderRadius: 3, overflow: "hidden" }}>
           <div style={{
-            width: `${intel.risk_score}%`, height: "100%", borderRadius: 3,
-            backgroundColor: scoreMeta.color, transition: "width 0.5s",
+            width: `${displayRiskScore}%`, height: "100%", borderRadius: 3,
+            backgroundColor: scoreMeta.color, transition: "width 1.2s ease-out",
           }} />
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
@@ -1132,7 +1267,7 @@ function RiskExplanationPanel({
             {intel.risk_factors.length} faktor aktif
           </span>
           <span style={{ fontSize: 10, fontWeight: 700, color: scoreMeta.color }}>
-            {intel.risk_score} pts
+            {displayRiskScore} pts
           </span>
         </div>
       </div>
@@ -2274,7 +2409,7 @@ export default function ProjectDetailPage() {
               <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>Tingkat Risiko</div>
               {intel.risk_reasons && intel.risk_reasons.length > 0 && (
                 <div style={{ fontSize: 12, fontWeight: 700, color: riskMeta.color, marginTop: 4 }}>
-                  {intel.risk_score} / 100
+                  <RiskScoreBadge score={intel.risk_score} />
                 </div>
               )}
             </div>
