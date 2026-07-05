@@ -1932,3 +1932,216 @@ class ProjectCalendarTests(APITestCase):
         resp = self.client.get("/api/projects/calendar/")
         ids = {item["id"] for item in resp.data["results"]}
         self.assertEqual(ids, {str(self.status_b.id)})
+
+
+# =============================================================================
+# Sprint 20 — Readiness Momentum + Decision Engine Feedback Loop (backend)
+# =============================================================================
+class RequirementUpdateFeedbackLoopTests(APITestCase):
+    """
+    Sprint 20: the "dopamine sprint" backend. Most of the underlying
+    delta capture (readiness/risk before/after, stage_can_advance)
+    already existed since the Sprint 16 bug hunt — this adds the two
+    genuinely new pieces the roadmap actually asked for: newly_unlocked
+    and a dynamic, impact-aware celebratory message.
+
+    Covers:
+    - Completing a requirement that unblocks a real downstream
+      dependent lists it in newly_unlocked
+    - Completing a requirement with no dependents leaves it empty
+    - Celebratory message fires (name + unlocked + stage-ready) when
+      completing the last blocker
+    - Non-completing status changes keep the message generic — no
+      false celebration
+    """
+
+    def setUp(self):
+        self.req_first, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Rencana Kerja Feedback", defaults={"is_mandatory": True, "weight": 100},
+        )
+        self.req_second, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Kontraktor Feedback", defaults={"is_mandatory": True, "weight": 0},
+        )
+        self.req_second.prerequisites.add(self.req_first)
+
+        self.req_isolated, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Isolated Feedback", defaults={"is_mandatory": True, "weight": 0},
+        )
+
+        self.org = Organization.objects.create(name="Asri Sentosa Feedback")
+        self.dev = CustomUser.objects.create_user(
+            email="dev.feedback@test.id", password="pass12345!",
+            full_name="Dev Feedback", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.dev, role="owner", is_active=True,
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster Feedback", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.status_first = ProjectRequirementStatus.objects.create(
+            project=self.project, requirement=self.req_first,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+        self.status_second = ProjectRequirementStatus.objects.create(
+            project=self.project, requirement=self.req_second,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+        self.status_isolated = ProjectRequirementStatus.objects.create(
+            project=self.project, requirement=self.req_isolated,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def test_newly_unlocked_lists_the_downstream_requirement(self):
+        """Completing the prerequisite unlocks its real dependent."""
+        self._login_as(self.dev)
+        resp = self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.status_first.id}/",
+            {"status": "completed"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn("Kontraktor Feedback", resp.data["impact"]["newly_unlocked"])
+
+    def test_newly_unlocked_empty_when_nothing_downstream(self):
+        """Completing a requirement with no dependents unlocks nothing."""
+        self._login_as(self.dev)
+        resp = self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.status_isolated.id}/",
+            {"status": "completed"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["impact"]["newly_unlocked"], [])
+
+    def test_celebratory_message_when_stage_can_advance(self):
+        """
+        Completing the only remaining blocker produces the full
+        celebratory sentence: name + unlocked + stage-ready — exactly
+        the "Kontraktor selesai! ... Tahap siap dilanjutkan. 🎉" shape
+        from the roadmap spec.
+        """
+        self.status_first.mark_completed(user=self.dev)
+        self.status_isolated.mark_completed(user=self.dev)
+
+        self._login_as(self.dev)
+        resp = self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.status_second.id}/",
+            {"status": "completed"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        msg = resp.data["impact"]["message"]
+        self.assertIn("Kontraktor Feedback selesai!", msg)
+        self.assertIn("Tahap siap dilanjutkan", msg)
+
+    def test_generic_message_for_non_completing_status_change(self):
+        """
+        Marking something in_progress (not completed) keeps the
+        message generic — no false celebration, no phantom unlocks.
+        """
+        self._login_as(self.dev)
+        resp = self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.status_first.id}/",
+            {"status": "in_progress"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertNotIn("selesai", resp.data["impact"]["message"])
+        self.assertEqual(resp.data["impact"]["newly_unlocked"], [])
+
+
+class EvidenceEndpointsImpactSchemaTests(APITestCase):
+    """
+    Sprint 20: evidence upload + verify endpoints now also return
+    'impact' with the same shape as ProjectRequirementUpdateView.
+    Previously both endpoints captured readiness/risk deltas
+    internally (Sprint 16 fix) but never surfaced them in the API
+    response — meaning the Sprint 20 frontend feedback loop would've
+    stayed completely silent for the two actions people actually use
+    every day (upload evidence, approve/reject evidence), only ever
+    firing for the rarely-used direct status-update endpoint.
+    """
+
+    def setUp(self):
+        self.req, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Kontraktor Impact Schema", defaults={"is_mandatory": True, "weight": 60},
+        )
+        self.org = Organization.objects.create(name="Asri Sentosa Impact Schema")
+        self.uploader = CustomUser.objects.create_user(
+            email="uploader.impactschema@test.id", password="pass12345!",
+            full_name="Uploader Impact Schema", role="developer",
+        )
+        self.verifier = CustomUser.objects.create_user(
+            email="verifier.impactschema@test.id", password="pass12345!",
+            full_name="Verifier Impact Schema", role="developer",
+        )
+        OrganizationMembership.objects.create(organization=self.org, user=self.uploader, role="owner", is_active=True)
+        OrganizationMembership.objects.create(organization=self.org, user=self.verifier, role="member", is_active=True)
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster Impact Schema", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.req_status = ProjectRequirementStatus.objects.create(
+            project=self.project, requirement=self.req,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def test_evidence_upload_response_includes_impact(self):
+        self._login_as(self.uploader)
+        resp = self.client.post(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}/evidence/",
+            {"file_url": "https://example.com/kontrak.pdf"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertIn("impact", resp.data)
+        self.assertIn("readiness_delta", resp.data["impact"])
+        self.assertIn("newly_unlocked", resp.data["impact"])
+        self.assertEqual(resp.data["impact"]["newly_unlocked"], [])
+
+    def test_evidence_approval_response_includes_impact_with_real_delta(self):
+        self._login_as(self.uploader)
+        self.client.post(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}/evidence/",
+            {"file_url": "https://example.com/kontrak.pdf"}, format="json",
+        )
+        evidence_id = self.req_status.evidence.filter(is_latest=True).first().id
+
+        self._login_as(self.verifier)
+        resp = self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}"
+            f"/evidence/{evidence_id}/verify/",
+            {"action": "approve"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn("impact", resp.data)
+        self.assertGreater(resp.data["impact"]["readiness_delta"], 0)
+        self.assertIn("selesai!", resp.data["impact"]["message"])
+
+    def test_evidence_rejection_response_includes_impact_with_zero_delta(self):
+        self._login_as(self.uploader)
+        self.client.post(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}/evidence/",
+            {"file_url": "https://example.com/kontrak.pdf"}, format="json",
+        )
+        evidence_id = self.req_status.evidence.filter(is_latest=True).first().id
+
+        self._login_as(self.verifier)
+        resp = self.client.put(
+            f"/api/projects/{self.project.id}/requirements/{self.req_status.id}"
+            f"/evidence/{evidence_id}/verify/",
+            {"action": "reject", "notes": "kurang jelas"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn("impact", resp.data)
+        self.assertEqual(resp.data["impact"]["readiness_delta"], 0)
+        self.assertEqual(resp.data["impact"]["newly_unlocked"], [])

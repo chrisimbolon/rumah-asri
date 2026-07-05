@@ -138,6 +138,14 @@ class ProjectRequirementUpdateView(TenantScopedAPIView):
         readiness_before = project.readiness_score
         risk_before      = project._get_risk_data()["score"]
 
+        # ── Sprint 20: snapshot which requirements are dependency-
+        # blocked BEFORE the change, so we can tell which ones just
+        # got unlocked as a side effect of this specific action.
+        requirements_before = {
+            r["id"]: r["is_dependency_blocked"]
+            for r in project.get_intelligence_summary()["requirements"]
+        }
+
         project.snapshot_readiness()   # existing — unchanged
 
         try:
@@ -190,11 +198,39 @@ class ProjectRequirementUpdateView(TenantScopedAPIView):
         risk_delta      = risk_after - risk_before
 
         intel = project.get_intelligence_summary()
+        stage_can_advance = intel["blocking_count"] == 0
+
+        # ── Sprint 20: newly_unlocked — requirements that were
+        # dependency-blocked before this action and aren't anymore.
+        # Only meaningful when completing something (other status
+        # changes don't clear prerequisites for anything downstream).
+        newly_unlocked = []
+        if new_status == ProjectRequirementStatus.Status.COMPLETED:
+            newly_unlocked = [
+                r["name"] for r in intel["requirements"]
+                if requirements_before.get(r["id"]) is True
+                and not r["is_dependency_blocked"]
+            ]
+
+        # ── Sprint 20: dynamic, impact-aware message ("the dopamine
+        # sprint" — the co-founders wanted the platform to feel alive
+        # when an action changes reality, not just report a generic
+        # 'updated' confirmation).
+        if new_status == ProjectRequirementStatus.Status.COMPLETED:
+            parts = [f"{req_status.requirement.name} selesai!"]
+            if newly_unlocked:
+                parts.append(f"{', '.join(newly_unlocked)} sekarang terbuka.")
+            if stage_can_advance:
+                parts.append("Tahap siap dilanjutkan. 🎉")
+            impact_message = " ".join(parts)
+        else:
+            impact_message = f"Requirement '{req_status.requirement.name}' diperbarui"
 
         return Response({
             "success": True,
             "message": f"Requirement '{req_status.requirement.name}' diperbarui",
             # Sprint 16: impact data in response for frontend feedback loop
+            # Sprint 20: + newly_unlocked, + impact-specific message
             "impact": {
                 "readiness_before":  readiness_before,
                 "readiness_after":   readiness_after,
@@ -202,7 +238,9 @@ class ProjectRequirementUpdateView(TenantScopedAPIView):
                 "risk_before":       risk_before,
                 "risk_after":        risk_after,
                 "risk_delta":        risk_delta,
-                "stage_can_advance": intel["blocking_count"] == 0,
+                "stage_can_advance": stage_can_advance,
+                "newly_unlocked":    newly_unlocked,
+                "message":           impact_message,
             },
             "intelligence": intel,
         })
@@ -478,14 +516,36 @@ class RequirementEvidenceView(TenantScopedAPIView):
         except Exception:
             pass
 
+        # ── Sprint 20: surface impact in the response too — this
+        # data was already being captured (Sprint 16 fix), just never
+        # returned. Without this, the frontend feedback loop would
+        # only ever animate for the rarely-used direct status-update
+        # endpoint and stay silent for the endpoint people actually
+        # use every day (uploading evidence).
+        # newly_unlocked is always empty here: uploading evidence
+        # moves a requirement to AWAITING_VERIFICATION, never
+        # COMPLETED, so nothing downstream can unlock from this
+        # action specifically — that only happens on verify/approve.
+        intel = project.get_intelligence_summary()
         version_msg = f" (v{next_version})" if next_version > 1 else ""
         return Response({
             "success":         True,
             "message":         f"Bukti untuk '{req_status.requirement.name}' berhasil diunggah{version_msg}",
             "evidence":        RequirementEvidenceSerializer(evidence, context={"request": request}).data,
-            "intelligence":    project.get_intelligence_summary(),
+            "intelligence":    intel,
             "version_number":  next_version,
             "is_resubmission": next_version > 1,
+            "impact": {
+                "readiness_before":  readiness_before,
+                "readiness_after":   readiness_after,
+                "readiness_delta":   readiness_after - readiness_before,
+                "risk_before":       risk_before,
+                "risk_after":        risk_after,
+                "risk_delta":        risk_after - risk_before,
+                "stage_can_advance": intel["blocking_count"] == 0,
+                "newly_unlocked":    [],
+                "message":           f"Bukti untuk '{req_status.requirement.name}' diunggah — menunggu verifikasi",
+            },
         }, status=status.HTTP_201_CREATED)
 
 
@@ -531,6 +591,15 @@ class RequirementEvidenceVerifyView(TenantScopedAPIView):
         risk_before      = project._get_risk_data()["score"]
         snapshot_cutoff  = timezone.now()
 
+        # ── Sprint 20: snapshot dependency-blocked state BEFORE the
+        # action, same as ProjectRequirementUpdateView — only approve()
+        # can complete a requirement and unlock anything downstream;
+        # reject() never does.
+        requirements_before = {
+            r["id"]: r["is_dependency_blocked"]
+            for r in project.get_intelligence_summary()["requirements"]
+        }
+
         project.snapshot_readiness()
 
         try:
@@ -570,11 +639,45 @@ class RequirementEvidenceVerifyView(TenantScopedAPIView):
         except Exception:
             pass
 
+        intel = project.get_intelligence_summary()
+        stage_can_advance = intel["blocking_count"] == 0
+
+        # ── Sprint 20: newly_unlocked, only meaningful on approve
+        # (reject never completes anything, so nothing can unlock)
+        newly_unlocked = []
+        if action == "approve":
+            newly_unlocked = [
+                r["name"] for r in intel["requirements"]
+                if requirements_before.get(r["id"]) is True
+                and not r["is_dependency_blocked"]
+            ]
+
+        if action == "approve":
+            parts = [f"Bukti v{evidence.version_number} disetujui — {req_status.requirement.name} selesai!"]
+            if newly_unlocked:
+                parts.append(f"{', '.join(newly_unlocked)} sekarang terbuka.")
+            if stage_can_advance:
+                parts.append("Tahap siap dilanjutkan. 🎉")
+            impact_message = " ".join(parts)
+        else:
+            impact_message = message   # reject: keep the existing plain message
+
         return Response({
             "success":      True,
             "message":      message,
             "evidence":     RequirementEvidenceSerializer(evidence, context={"request": request}).data,
-            "intelligence": project.get_intelligence_summary(),
+            "intelligence": intel,
+            "impact": {
+                "readiness_before":  readiness_before,
+                "readiness_after":   readiness_after,
+                "readiness_delta":   readiness_after - readiness_before,
+                "risk_before":       risk_before,
+                "risk_after":        risk_after,
+                "risk_delta":        risk_after - risk_before,
+                "stage_can_advance": stage_can_advance,
+                "newly_unlocked":    newly_unlocked,
+                "message":           impact_message,
+            },
         })
 
 
