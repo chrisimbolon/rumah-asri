@@ -208,6 +208,87 @@ function RiskScoreBadge({ score }: { score: number }) {
   );
 }
 
+// ── Sprint 20: celebratory / informational feedback banner ────
+// Fixed-position toast, shows impact.message from the most recent
+// requirement action. Celebratory styling (green, 🎉, longer visible)
+// only when something genuinely worth celebrating happened — stage
+// unlocked, a dependent freed, or readiness genuinely moved up.
+// Plain informational styling (grey, ℹ️, shorter) otherwise, so this
+// never feels like nagging for routine status changes.
+function FeedbackBanner({
+  impact,
+  visible,
+  onDismiss,
+}: {
+  impact:    RequirementImpact | null;
+  visible:   boolean;
+  onDismiss: () => void;
+}) {
+  if (!impact) return null;
+
+  const isCelebratory =
+    impact.stage_can_advance ||
+    impact.newly_unlocked.length > 0 ||
+    impact.readiness_delta > 0;
+
+  return (
+    <div
+      style={{
+        position: "fixed", top: 70, right: 24, zIndex: 500,
+        maxWidth: 420,
+        backgroundColor: isCelebratory ? "var(--color-success-light)" : "var(--color-paper-2)",
+        border: `1px solid ${isCelebratory ? "var(--color-success)" : "rgba(14,13,11,0.12)"}`,
+        borderRadius: 10,
+        padding: "14px 16px",
+        boxShadow: "0 10px 30px rgba(14,13,11,0.15)",
+        display: "flex", alignItems: "flex-start", gap: 10,
+        opacity: visible ? 1 : 0,
+        transform: visible ? "translateY(0)" : "translateY(-12px)",
+        pointerEvents: visible ? "auto" : "none",
+        transition: "opacity 0.35s ease, transform 0.35s ease",
+      }}
+    >
+      <span style={{ fontSize: 18, flexShrink: 0 }}>
+        {isCelebratory ? "🎉" : "ℹ️"}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", lineHeight: 1.4 }}>
+          {impact.message}
+        </div>
+        {(impact.readiness_delta !== 0 || impact.risk_delta !== 0) && (
+          <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+            {impact.readiness_delta !== 0 && (
+              <span style={{
+                fontSize: 11, fontWeight: 700,
+                color: impact.readiness_delta > 0 ? "var(--color-success)" : "var(--color-danger)",
+              }}>
+                {impact.readiness_delta > 0 ? "↑" : "↓"} Kesiapan {Math.abs(impact.readiness_delta)}%
+              </span>
+            )}
+            {impact.risk_delta !== 0 && (
+              <span style={{
+                fontSize: 11, fontWeight: 700,
+                color: impact.risk_delta < 0 ? "var(--color-success)" : "var(--color-danger)",
+              }}>
+                {impact.risk_delta > 0 ? "↑" : "↓"} Risiko {Math.abs(impact.risk_delta)}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      <button
+        onClick={onDismiss}
+        style={{
+          background: "none", border: "none", cursor: "pointer",
+          color: "var(--color-ink-3)", padding: 2, flexShrink: 0,
+        }}
+      >
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
 // ── Stage pipeline ────────────────────────────────────────────
 function StagePipeline({ stage }: { stage: ProjectStage }) {
   const stages: { key: ProjectStage; label: string }[] = [
@@ -2304,10 +2385,26 @@ export default function ProjectDetailPage() {
   // Sprint 20 steps; for now this just makes sure the data actually
   // arrives here instead of being silently discarded like before.
   const [lastImpact, setLastImpact] = useState<RequirementImpact | null>(null);
+  // Sprint 20: banner visibility + auto-dismiss timer. Celebratory
+  // moments stay up a bit longer (6s) than routine updates (3s) —
+  // worth lingering on a "stage ready!" moment, not on "status
+  // changed to in_progress".
+  const [showBanner, setShowBanner] = useState(false);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleRequirementUpdated = (newIntel: IntelligenceSummary, impact?: RequirementImpact) => {
     setIntel(newIntel);
-    if (impact) setLastImpact(impact);
+    if (impact) {
+      setLastImpact(impact);
+      setShowBanner(true);
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+      const isCelebratory =
+        impact.stage_can_advance || impact.newly_unlocked.length > 0 || impact.readiness_delta > 0;
+      bannerTimerRef.current = setTimeout(
+        () => setShowBanner(false),
+        isCelebratory ? 6000 : 3000
+      );
+    }
     projectsApi.get(id).then(setProject).catch(() => {});
   };
 
@@ -2337,6 +2434,14 @@ export default function ProjectDetailPage() {
 
   return (
     <div style={{ maxWidth: 960, margin: "0 auto" }}>
+
+      {/* ── Sprint 20: feedback banner — fixed position, floats
+          above everything, doesn't affect layout below ── */}
+      <FeedbackBanner
+        impact={lastImpact}
+        visible={showBanner}
+        onDismiss={() => setShowBanner(false)}
+      />
 
       {/* ── Back ── */}
       <Link href="/dashboard/projects" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--color-ink-3)", textDecoration: "none", marginBottom: 20 }}>
