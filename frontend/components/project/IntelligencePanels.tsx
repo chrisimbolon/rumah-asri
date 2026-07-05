@@ -10,20 +10,45 @@
 // each fetches its own data independently.
 // =============================================================================
 
-import { useEffect, useState } from "react";
 import {
-  projectsApi,
+  DecisionEngine,
   DependencyGraph,
   DependencyNode,
-  DecisionEngine,
+  projectsApi,
   RiskForecast,
 } from "@/lib/api/projects";
+import { useEffect, useState } from "react";
 
-export function DependencyGraphPanel({ projectId }: { projectId: string }) {
+export function DependencyGraphPanel({
+  projectId,
+  newlyUnlockedNames = [],
+}: {
+  projectId: string;
+  // Sprint 20: names of requirements that just got unblocked by the
+  // most recent action (from impact.newly_unlocked). Optional and
+  // defaults to empty — fully backward compatible with every other
+  // place this shared panel is already used (e.g. Command Center's
+  // "Fokus Hari Ini", which doesn't pass this at all).
+  newlyUnlockedNames?: string[];
+}) {
   const [graph,          setGraph]          = useState<DependencyGraph | null>(null);
   const [loading,        setLoading]        = useState(true);
   const [expanded,       setExpanded]       = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  // Sprint 20: brief "Unlocked" flash for nodes named in
+  // newlyUnlockedNames. Self-clearing after 3s so this component owns
+  // its own animation lifetime — the parent's impact state can keep
+  // persisting after that without leaving a node glowing forever.
+  const [flashingNames, setFlashingNames] = useState<string[]>([]);
+  const unlockedKey = newlyUnlockedNames.join("|");
+  useEffect(() => {
+    if (newlyUnlockedNames.length === 0) return;
+    setFlashingNames(newlyUnlockedNames);
+    const t = setTimeout(() => setFlashingNames([]), 3000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unlockedKey]);
 
   useEffect(() => {
     projectsApi.getDependencyGraph(projectId)
@@ -173,6 +198,7 @@ export function DependencyGraphPanel({ projectId }: { projectId: string }) {
             const bg       = nodeBg(node);
             const icon     = nodeIcon(node);
             const isSelected = selectedNodeId === node.id;
+            const isFlashing = flashingNames.includes(node.name);
             return (
               <div key={node.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {/* Sprint 16: clickable pill */}
@@ -187,12 +213,19 @@ export function DependencyGraphPanel({ projectId }: { projectId: string }) {
                     fontSize: 11, fontWeight: 600, color,
                     display: "flex", alignItems: "center", gap: 5,
                     cursor: "pointer",
-                    transform: isSelected ? "scale(1.04)" : "scale(1)",
-                    transition: "all 0.15s",
-                    boxShadow: isSelected ? `0 0 0 3px ${color}22` : "none",
+                    transform: isSelected ? "scale(1.04)" : isFlashing ? "scale(1.06)" : "scale(1)",
+                    transition: "border 0.15s, box-shadow 0.8s ease-out, transform 0.8s ease-out",
+                    boxShadow: isFlashing
+                      ? "0 0 0 6px var(--color-success-light)"
+                      : isSelected ? `0 0 0 3px ${color}22` : "none",
                   }}>
                   <span style={{ fontSize: 12 }}>{icon}</span>
                   {node.name}
+                  {isFlashing && (
+                    <span style={{ fontSize: 9, fontWeight: 800, color: "var(--color-success)" }}>
+                      🔓 Terbuka
+                    </span>
+                  )}
                   {node.is_mandatory && (
                     <span style={{ fontSize: 9, opacity: 0.7 }}>{node.weight_pct}%</span>
                   )}
@@ -251,6 +284,7 @@ export function DependencyGraphPanel({ projectId }: { projectId: string }) {
               const bg         = nodeBg(node);
               const icon       = nodeIcon(node);
               const isSelected = selectedNodeId === node.id;
+              const isFlashing = flashingNames.includes(node.name);
               const px         = pos.x + 10;
               const py         = pos.y + 5;
               const displayName = node.name.length > 17
@@ -275,6 +309,14 @@ export function DependencyGraphPanel({ projectId }: { projectId: string }) {
                       fill="none" stroke={color} strokeWidth={4} opacity={0.15}
                     />
                   )}
+                  {/* Sprint 20: "Unlocked" flash glow — same technique
+                      as the selection glow above, green, temporary */}
+                  {isFlashing && (
+                    <rect width={NODE_W} height={NODE_H} rx={8}
+                      fill="none" stroke="var(--color-success)" strokeWidth={5} opacity={0.4}
+                      style={{ transition: "opacity 2.5s ease-out" }}
+                    />
+                  )}
                   <text x={12} y={NODE_H / 2} fontSize={15} dominantBaseline="middle">
                     {icon}
                   </text>
@@ -294,6 +336,12 @@ export function DependencyGraphPanel({ projectId }: { projectId: string }) {
                     <text x={32} y={NODE_H / 2 + 9}
                       fontSize={9} fill="var(--color-ink-3)" dominantBaseline="middle">
                       opsional
+                    </text>
+                  )}
+                  {isFlashing && (
+                    <text x={NODE_W - 10} y={12} fontSize={9} fontWeight={800}
+                      fill="var(--color-success)" textAnchor="end">
+                      🔓 Terbuka
                     </text>
                   )}
                 </g>
