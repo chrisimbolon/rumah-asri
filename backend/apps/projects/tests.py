@@ -1780,3 +1780,155 @@ class EvidenceVerificationImpactCaptureTests(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(resp.data["error_type"], "cannot_verify")
+
+
+# =============================================================================
+# Sprint 19 — Cross-project Calendar endpoint
+# =============================================================================
+class ProjectCalendarTests(APITestCase):
+    """
+    Sprint 19: standalone Calendar page backend. Cross-project view of
+    every requirement with a due_date set, across the user's org only.
+    No migration — due_date, is_overdue, days_until_due, and
+    assigned_to have existed since Sprint 7.
+
+    Covers:
+    - Returns requirements with due dates, sorted chronologically
+    - Excludes requirements without a due_date
+    - Includes COMPLETED items too (frontend styles them, backend
+      doesn't hide history)
+    - is_overdue / days_until_due reflect the real Sprint 7 properties
+    - assigned_to_name resolves correctly (or null when unassigned)
+    - Tenant isolation: Org B never sees Org A's calendar items
+    """
+
+    def setUp(self):
+        self.req1, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Kontraktor Calendar", defaults={"is_mandatory": True, "weight": 60},
+        )
+        self.req2, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.CONSTRUCTION,
+            name="Rencana Kerja Calendar", defaults={"is_mandatory": True, "weight": 40},
+        )
+        self.req3, _ = StageRequirement.objects.get_or_create(
+            stage=StageRequirement.Stage.PERMITS,
+            name="No Due Date Calendar", defaults={"is_mandatory": False, "weight": 10},
+        )
+
+        # ── Org A ─────────────────────────────────────────────
+        self.org_a = Organization.objects.create(name="Asri Sentosa Calendar A")
+        self.dev_a = CustomUser.objects.create_user(
+            email="dev.calendar.a@test.id", password="pass12345!",
+            full_name="Dev Calendar A", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_a, user=self.dev_a, role="owner", is_active=True,
+        )
+        self.project_a = Project.objects.create(
+            organization=self.org_a, name="Cluster Calendar A", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+
+        self.status_future = ProjectRequirementStatus.objects.create(
+            project=self.project_a, requirement=self.req1,
+            status=ProjectRequirementStatus.Status.IN_PROGRESS,
+            due_date=date.today() + timedelta(days=5),
+            assigned_to=self.dev_a,
+        )
+        self.status_overdue = ProjectRequirementStatus.objects.create(
+            project=self.project_a, requirement=self.req2,
+            status=ProjectRequirementStatus.Status.PENDING,
+            due_date=date.today() - timedelta(days=3),
+        )
+        self.status_no_due = ProjectRequirementStatus.objects.create(
+            project=self.project_a, requirement=self.req3,
+            status=ProjectRequirementStatus.Status.PENDING,
+        )
+
+        # ── Org B — isolation control ───────────────────────────
+        self.org_b = Organization.objects.create(name="Org B Calendar")
+        self.dev_b = CustomUser.objects.create_user(
+            email="dev.calendar.b@test.id", password="pass12345!",
+            full_name="Dev Calendar B", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_b, user=self.dev_b, role="owner", is_active=True,
+        )
+        self.project_b = Project.objects.create(
+            organization=self.org_b, name="Cluster Calendar B", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.status_b = ProjectRequirementStatus.objects.create(
+            project=self.project_b, requirement=self.req1,
+            status=ProjectRequirementStatus.Status.PENDING,
+            due_date=date.today() + timedelta(days=2),
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def test_returns_only_requirements_with_due_date(self):
+        self._login_as(self.dev_a)
+        resp = self.client.get("/api/projects/calendar/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {item["id"] for item in resp.data["results"]}
+        self.assertIn(str(self.status_future.id), ids)
+        self.assertIn(str(self.status_overdue.id), ids)
+        self.assertNotIn(str(self.status_no_due.id), ids)
+
+    def test_sorted_chronologically(self):
+        self._login_as(self.dev_a)
+        resp = self.client.get("/api/projects/calendar/")
+        due_dates = [item["due_date"] for item in resp.data["results"]]
+        self.assertEqual(due_dates, sorted(due_dates))
+
+    def test_overdue_flagged_correctly(self):
+        self._login_as(self.dev_a)
+        resp = self.client.get("/api/projects/calendar/")
+        overdue_item = next(i for i in resp.data["results"] if i["id"] == str(self.status_overdue.id))
+        future_item  = next(i for i in resp.data["results"] if i["id"] == str(self.status_future.id))
+        self.assertTrue(overdue_item["is_overdue"])
+        self.assertFalse(future_item["is_overdue"])
+        self.assertLess(overdue_item["days_until_due"], 0)
+        self.assertGreater(future_item["days_until_due"], 0)
+
+    def test_includes_assigned_to_name(self):
+        self._login_as(self.dev_a)
+        resp = self.client.get("/api/projects/calendar/")
+        assigned_item = next(i for i in resp.data["results"] if i["id"] == str(self.status_future.id))
+        self.assertEqual(assigned_item["assigned_to_name"], "Dev Calendar A")
+        unassigned_item = next(i for i in resp.data["results"] if i["id"] == str(self.status_overdue.id))
+        self.assertIsNone(unassigned_item["assigned_to_name"])
+
+    def test_completed_requirement_still_shown_but_not_overdue(self):
+        """
+        A completed requirement with a due date should still appear —
+        the frontend can style it (e.g. greyed out), but the backend
+        shouldn't silently erase it from history.
+        """
+        self.status_overdue.status = ProjectRequirementStatus.Status.COMPLETED
+        self.status_overdue.save(update_fields=["status"])
+
+        self._login_as(self.dev_a)
+        resp = self.client.get("/api/projects/calendar/")
+        ids = {item["id"] for item in resp.data["results"]}
+        self.assertIn(str(self.status_overdue.id), ids)
+
+        item = next(i for i in resp.data["results"] if i["id"] == str(self.status_overdue.id))
+        self.assertFalse(item["is_overdue"], "Completed items are never overdue")
+
+    def test_tenant_isolation_org_a_cannot_see_org_b(self):
+        """Org A's calendar must never include Org B's requirements."""
+        self._login_as(self.dev_a)
+        resp = self.client.get("/api/projects/calendar/")
+        ids = {item["id"] for item in resp.data["results"]}
+        self.assertNotIn(str(self.status_b.id), ids)
+
+    def test_tenant_isolation_org_b_sees_only_its_own(self):
+        self._login_as(self.dev_b)
+        resp = self.client.get("/api/projects/calendar/")
+        ids = {item["id"] for item in resp.data["results"]}
+        self.assertEqual(ids, {str(self.status_b.id)})

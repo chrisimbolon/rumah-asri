@@ -1269,7 +1269,79 @@ class ProjectRecentActivityView(TenantScopedAPIView):
             "count":   len(events),
             "results": events,
         })
-    
+
+
+class ProjectCalendarView(TenantScopedAPIView):
+    """
+    Sprint 19: Cross-project calendar — every requirement with a
+    due_date set, across ALL of the user's org projects. Powers the
+    standalone Calendar page in the new sidebar.
+
+    GET /api/projects/calendar/
+
+    Response:
+      {
+        "success": true,
+        "count":   2,
+        "results": [
+          {
+            "id":               "uuid",   (ProjectRequirementStatus id)
+            "requirement_name": "Kontraktor",
+            "project_id":       "uuid",
+            "project_name":     "Perumahan Asri Cluster A",
+            "due_date":         "2026-07-10",
+            "status":           "in_progress",
+            "is_overdue":       false,
+            "days_until_due":   5,
+            "assigned_to_name": "Budi Developer" | null
+          }
+        ]
+      }
+
+    Design:
+    - Reuses the exact tenant-scoping pattern already proven in
+      ProjectRecentActivityView above (self.get_queryset() →
+      Project.objects.for_user(user)).
+    - Shows ALL requirements with a due_date regardless of status —
+      including COMPLETED — so the frontend can style them (e.g.
+      greyed out) rather than the backend silently hiding history.
+    - is_overdue / days_until_due reuse the exact computed properties
+      that have existed on ProjectRequirementStatus since Sprint 7 —
+      no new logic, no new migration.
+    """
+    model = Project
+
+    def get(self, request):
+        org_projects = self.get_queryset()
+
+        statuses = ProjectRequirementStatus.objects.filter(
+            project__in=org_projects,
+            due_date__isnull=False,
+        ).select_related(
+            "requirement", "project", "assigned_to",
+        ).order_by("due_date")
+
+        events = []
+        for s in statuses:
+            events.append({
+                "id":               str(s.id),
+                "requirement_name": s.requirement.name,
+                "project_id":       str(s.project.id),
+                "project_name":     s.project.name,
+                "due_date":         s.due_date.isoformat(),
+                "status":           s.status,
+                "is_overdue":       s.is_overdue,
+                "days_until_due":   s.days_until_due,
+                "assigned_to_name": s.assigned_to.full_name if s.assigned_to else None,
+            })
+
+        return Response({
+            "success": True,
+            "count":   len(events),
+            "results": events,
+        })
+
+
 # SPRINT 18 - Portfolio Intelligence Hub (CEO Bloomberg View)
 class PortfolioIntelligenceView(TenantScopedAPIView):
     """
