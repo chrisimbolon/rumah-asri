@@ -7,35 +7,54 @@
 //   + Parallel stage (5A/5B) indicators on portfolio table + this has to be solved on with REAL DATA
 //   All original sections preserved — additive only.
 //  Sprint9: next actions assistant dashboard widget - is implemented at this stage
+//  Sprint 19: Command Center redesign.
+//    - Event Stream + Portfolio Intelligence Hub MOVED here from
+//      app/dashboard/projects/page.tsx (unchanged, just relocated —
+//      the roadmap wants these on the main dashboard, not the
+//      projects list page).
+//    - Added: Dependency Graph / Decision Engine / Risk Forecast for
+//      the single highest-priority project (top_at_risk[0] from
+//      Portfolio Intelligence) — per-project only versions exist,
+//      so this is one project's view, not a portfolio-wide aggregate.
+//    - Removed: old 6-card "Summary metrics" grid (superseded by
+//      Portfolio Intelligence Hub's 6 metrics, which include real
+//      week-over-week deltas).
+//    - Removed: mock "Log Aktivitas" section (LOG from mock-data) —
+//      Event Stream now covers this with real data; having both a
+//      real live feed AND a fake static one would be confusing.
+//    - AI Assistant panel from the roadmap mockup: intentionally
+//      skipped (Sprint 15 is still shelved).
 // =============================================================================
 
+import {
+  DecisionEnginePanel,
+  DependencyGraphPanel,
+  RiskForecastPanel,
+} from "@/components/project/IntelligencePanels";
 import { useAuth } from "@/context/AuthContext";
 import {
   ACTION_TYPE_META,
   ALERT_META,
   ActionItem,
   MyActionsResponse,
+  PortfolioAtRiskProject,
+  PortfolioIntelligence,
   PortfolioRow,
   Project,
   RISK_META,
+  RecentActivityItem,
   STAGE_META,
   TREND_META,
   projectsApi,
 } from "@/lib/api/projects";
-import { LOG, NOTIFIKASI } from "@/lib/mock-data";
+import { NOTIFIKASI } from "@/lib/mock-data";
 import {
-  Activity,
   AlertTriangle,
   ArrowRight,
-  BarChart2,
   Building2,
   CheckCircle2,
-  FolderOpen,
-  Home,
   Info,
   Loader2,
-  TrendingUp,
-  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -473,12 +492,477 @@ function ActionCard({ item, muted = false }: { item: ActionItem; muted?: boolean
     </Link>
   );
 }
+// ── Sprint 17: Dashboard Cross-Project Event Stream ───────────
+// Sprint 19: moved here from app/dashboard/projects/page.tsx — the
+// roadmap explicitly wants Event Stream as the FIRST thing on the
+// Command Center, not buried on the projects list page.
+function DashboardEventStream() {
+  const [events,      setEvents]      = useState<RecentActivityItem[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+
+  const fetchEvents = async () => {
+    try {
+      const data = await projectsApi.getRecentActivity(8);
+      setEvents(data.results);
+      setLastUpdated(
+        new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+      );
+    } catch {
+      // Silent failure
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchEvents();
+    const interval = setInterval(fetchEvents, 30_000);   // 30-second cadence
+    return () => clearInterval(interval);
+  }, []);
+
+  const actionIcon: Record<string, string> = {
+    completed:           "✅",
+    evidence_uploaded:   "📎",
+    evidence_approved:   "✓",
+    evidence_rejected:   "❌",
+    stage_advanced:      "🚀",
+    assigned:            "👤",
+    due_date_set:        "📅",
+    comment_added:       "💬",
+    updated:             "✏️",
+    created:             "🆕",
+  };
+
+  const relativeTime = (iso: string): string => {
+    const diff    = Date.now() - new Date(iso).getTime();
+    const minutes = Math.floor(diff / 60_000);
+    if (minutes < 1)   return "baru saja";
+    if (minutes < 60)  return `${minutes} mnt`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24)    return `${hours} jam`;
+    return `${Math.floor(hours / 24)} hari`;
+  };
+
+  if (loading) {
+    return (
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 8 }}>
+          Event Stream
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-ink-3)", padding: "8px 0" }}>
+          Memuat aktivitas terbaru...
+        </div>
+      </div>
+    );
+  }
+
+  if (events.length === 0) return null;
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      {/* Header */}
+      <div style={{
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between", marginBottom: 12,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
+            Event Stream
+          </div>
+          {/* Pulsing live dot */}
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <div style={{
+              width: 7, height: 7, borderRadius: "50%",
+              backgroundColor: "var(--color-success)",
+              boxShadow: "0 0 0 2px var(--color-success-light)",
+            }} />
+            <span style={{ fontSize: 10, color: "var(--color-success)", fontWeight: 600 }}>
+              Live
+            </span>
+          </div>
+          <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
+            Semua proyek
+          </span>
+        </div>
+        {lastUpdated && (
+          <span style={{ fontSize: 10, color: "var(--color-ink-3)" }}>
+            diperbarui {lastUpdated}
+          </span>
+        )}
+      </div>
+
+      {/* Events */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        {events.slice(0, 6).map((event, i) => (
+          <div key={event.id} style={{
+            display: "flex", gap: 10, alignItems: "flex-start",
+            padding: "7px 0",
+            borderBottom: i < Math.min(events.length, 6) - 1
+              ? "1px solid rgba(14,13,11,0.05)"
+              : "none",
+          }}>
+            {/* Icon */}
+            <div style={{
+              width: 20, height: 20, borderRadius: "50%",
+              backgroundColor: "var(--color-paper-2)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 10, flexShrink: 0,
+            }}>
+              {actionIcon[event.action] ?? "📋"}
+            </div>
+
+            {/* Message + project name */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontSize: 11, color: "var(--color-ink)", lineHeight: 1.3,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                {event.message}
+                {event.readiness_delta != null && event.readiness_delta !== 0 && (
+                  <span style={{
+                    marginLeft: 6, fontSize: 9, fontWeight: 700,
+                    color: event.readiness_delta > 0
+                      ? "var(--color-success)"
+                      : "var(--color-danger)",
+                  }}>
+                    {event.readiness_delta > 0 ? "+" : ""}{event.readiness_delta}%
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 1 }}>
+                {event.project_name}
+              </div>
+            </div>
+
+            {/* Relative time */}
+            <div style={{
+              fontSize: 10, color: "var(--color-ink-3)",
+              whiteSpace: "nowrap", flexShrink: 0,
+            }}>
+              {relativeTime(event.timestamp)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Sprint 18: Portfolio Intelligence Hub ─────────────────────
+// Sprint 19: moved here from app/dashboard/projects/page.tsx — this
+// IS the "executive overview" panel the Command Center mockup calls for.
+// Bloomberg-style executive view of the entire org's project portfolio.
+// 6 key metrics with week-over-week deltas (when snapshot history exists).
+// Top at-risk projects listed below.
+// Polls every 60 seconds — portfolio changes slowly.
+function PortfolioIntelligenceHub() {
+  const [intel,   setIntel]   = useState<PortfolioIntelligence | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = async () => {
+    try {
+      const data = await projectsApi.getPortfolioIntelligence();
+      setIntel(data);
+    } catch {
+      // Silent failure
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetch();
+    const interval = setInterval(fetch, 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Format Rupiah: 46000000000 → "Rp 46B"
+  const formatRupiah = (amount: number): string => {
+    if (amount >= 1_000_000_000) return `Rp ${(amount / 1_000_000_000).toFixed(0)}B`;
+    if (amount >= 1_000_000)     return `Rp ${(amount / 1_000_000).toFixed(0)}M`;
+    return `Rp ${amount.toLocaleString("id-ID")}`;
+  };
+
+  // Delta display: positive or negative with arrow + colour
+  const DeltaBadge = ({
+    value,
+    goodWhenPositive = true,
+  }: {
+    value: number;
+    goodWhenPositive?: boolean;
+  }) => {
+    if (value === 0) {
+      return (
+        <span style={{ fontSize: 9, color: "var(--color-ink-3)", fontWeight: 600 }}>
+          = stabil
+        </span>
+      );
+    }
+    const isGood  = goodWhenPositive ? value > 0 : value < 0;
+    const color   = isGood ? "var(--color-success)" : "var(--color-danger)";
+    const arrow   = value > 0 ? "↑" : "↓";
+    const display = `${arrow} ${Math.abs(value)}${goodWhenPositive ? "%" : ""} mnggu ini`;
+    return (
+      <span style={{ fontSize: 9, fontWeight: 700, color }}>
+        {display}
+      </span>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)", marginBottom: 8 }}>
+          Portfolio Intelligence
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-ink-3)" }}>
+          Menganalisis portofolio...
+        </div>
+      </div>
+    );
+  }
+
+  if (!intel) return null;
+
+  const { current, week_delta, top_at_risk, has_history } = intel;
+
+  // 6 Bloomberg metrics
+  const metrics = [
+    {
+      label:   "Total Proyek",
+      value:   String(current.total_projects),
+      delta:   null,
+      color:   "var(--color-info)",
+      icon:    "📁",
+    },
+    {
+      label:         "Rata² Kesiapan",
+      value:         `${current.avg_readiness}%`,
+      delta:         week_delta ? (
+        <DeltaBadge value={week_delta.avg_readiness} goodWhenPositive={true} />
+      ) : null,
+      color:
+        current.avg_readiness >= 80 ? "var(--color-success)" :
+        current.avg_readiness >= 50 ? "var(--color-warning)" :
+                                      "var(--color-danger)",
+      icon: "📈",
+    },
+    {
+      label:   "Kritis",
+      value:   String(current.critical_count),
+      delta:   week_delta ? (
+        <DeltaBadge value={week_delta.critical_count} goodWhenPositive={false} />
+      ) : null,
+      color:   current.critical_count > 0 ? "var(--color-danger)" : "var(--color-success)",
+      icon:    "⚡",
+    },
+    {
+      label:   "Risiko Tinggi",
+      value:   String(current.high_risk_count),
+      delta:   week_delta ? (
+        <DeltaBadge value={week_delta.high_risk_count} goodWhenPositive={false} />
+      ) : null,
+      color:   current.high_risk_count > 0 ? "var(--color-warning)" : "var(--color-success)",
+      icon:    "🔴",
+    },
+    {
+      label:   "Terlambat",
+      value:   String(current.delayed_count),
+      delta:   week_delta ? (
+        <DeltaBadge value={week_delta.delayed_count} goodWhenPositive={false} />
+      ) : null,
+      color:   current.delayed_count > 0 ? "var(--color-warning)" : "var(--color-success)",
+      icon:    "⏰",
+    },
+    {
+      label:   "Value Terlindungi",
+      value:   formatRupiah(current.revenue_protected),
+      delta:   null,
+      color:   "var(--color-accent)",
+      icon:    "💰",
+    },
+  ];
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      {/* Header */}
+      <div style={{
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between", marginBottom: 14,
+      }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-ink)" }}>
+            Portfolio Intelligence
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 2 }}>
+            {has_history
+              ? "Perbandingan 7 hari terakhir"
+              : "Data saat ini · Jalankan snapshot untuk melihat tren minggu ini"}
+          </div>
+        </div>
+      </div>
+
+      {/* 6 Bloomberg metrics */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(6, 1fr)",
+        gap: 8,
+        marginBottom: top_at_risk.length > 0 ? 16 : 0,
+      }}>
+        {metrics.map((m) => (
+          <div key={m.label} style={{
+            textAlign: "center",
+            padding: "10px 6px",
+            borderRadius: 8,
+            backgroundColor: "var(--color-paper-2)",
+          }}>
+            <div style={{ fontSize: 13, marginBottom: 4 }}>{m.icon}</div>
+            <div style={{
+              fontSize: 16, fontWeight: 800,
+              color: m.color, lineHeight: 1, marginBottom: 3,
+            }}>
+              {m.value}
+            </div>
+            <div style={{
+              fontSize: 9, color: "var(--color-ink-3)",
+              marginBottom: 3, lineHeight: 1.2,
+            }}>
+              {m.label}
+            </div>
+            {m.delta && (
+              <div>{m.delta}</div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Top at-risk mini-table */}
+      {top_at_risk.length > 0 && (
+        <div>
+          <div style={{
+            fontSize: 10, fontWeight: 700, color: "var(--color-ink-3)",
+            textTransform: "uppercase", letterSpacing: "0.06em",
+            marginBottom: 8,
+          }}>
+            Proyek Berisiko Tertinggi
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {top_at_risk.map((p: PortfolioAtRiskProject) => (
+              <div key={p.id} style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "7px 10px", borderRadius: 7,
+                backgroundColor: "var(--color-paper-2)",
+                cursor: "pointer",
+              }}
+              onClick={() => window.location.href = `/dashboard/projects/${p.id}`}
+              >
+                {/* Readiness bar */}
+                <div style={{ minWidth: 32, textAlign: "center" }}>
+                  <div style={{
+                    fontSize: 12, fontWeight: 800,
+                    color: p.readiness >= 80 ? "var(--color-success)" :
+                           p.readiness >= 50 ? "var(--color-warning)" :
+                                               "var(--color-danger)",
+                  }}>
+                    {p.readiness}%
+                  </div>
+                </div>
+                {/* Name */}
+                <div style={{ flex: 1, fontSize: 11, fontWeight: 600, color: "var(--color-ink)" }}>
+                  {p.name}
+                </div>
+                {/* Risk badge */}
+                <span style={{
+                  fontSize: 9, fontWeight: 700,
+                  padding: "2px 7px", borderRadius: 999,
+                  backgroundColor:
+                    p.risk_level === "high"   ? "var(--color-danger-light)"  :
+                    p.risk_level === "medium" ? "var(--color-warning-light)" :
+                                                "var(--color-success-light)",
+                  color:
+                    p.risk_level === "high"   ? "var(--color-danger)"  :
+                    p.risk_level === "medium" ? "var(--color-warning)" :
+                                                "var(--color-success)",
+                }}>
+                  {p.risk_display}
+                </span>
+                {/* Blocker badge */}
+                {p.blocking > 0 && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 700,
+                    color: "var(--color-danger)",
+                  }}>
+                    ⚡ {p.blocking} blokir
+                  </span>
+                )}
+                {/* Next action */}
+                {p.next_action && (
+                  <span style={{
+                    fontSize: 10, color: "var(--color-ink-3)",
+                    whiteSpace: "nowrap", maxWidth: 120,
+                    overflow: "hidden", textOverflow: "ellipsis",
+                  }}>
+                    → {p.next_action}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Sprint 19: highest-priority-project focus row ─────────────
+// Per your call: instead of a portfolio-wide (nonexistent) version
+// of Dependency Graph / Decision Engine / Risk Forecast, show these
+// three for whichever single project needs attention most — reusing
+// intel.top_at_risk[0] that Portfolio Intelligence already computes.
+function TopPriorityFocus({
+  projectId,
+  projectName,
+}: {
+  projectId:   string;
+  projectName: string;
+}) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{
+          fontSize: 11, fontWeight: 700, color: "var(--color-ink-3)",
+          textTransform: "uppercase", letterSpacing: "0.06em",
+        }}>
+          Fokus Hari Ini
+        </span>
+        <Link
+          href={`/dashboard/projects/${projectId}`}
+          style={{ fontSize: 12, fontWeight: 600, color: "var(--color-accent)", textDecoration: "none" }}
+        >
+          {projectName} →
+        </Link>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+        <DependencyGraphPanel projectId={projectId} />
+        <DecisionEnginePanel projectId={projectId} />
+        <RiskForecastPanel projectId={projectId} />
+      </div>
+    </div>
+  );
+}
 // ── Main dashboard ────────────────────────────────────────────
 export default function DashboardPage() {
   const { user } = useAuth();
   const [portfolio,  setPortfolio]  = useState<PortfolioRow[]>([]);
   const [projects,   setProjects]   = useState<Project[]>([]);
   const [loading,    setLoading]    = useState(true);
+  // Sprint 19: highest-priority project for the "Fokus Hari Ini" row.
+  // One-time fetch (not polled) — PortfolioIntelligenceHub already
+  // polls the same endpoint every 60s for its own display, so this
+  // stays independent on purpose rather than modifying that
+  // already-proven component's interface.
+  const [topProject, setTopProject] = useState<PortfolioAtRiskProject | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -494,21 +978,14 @@ export default function DashboardPage() {
         setProjects([]);
       })
       .finally(() => setLoading(false));
+
+    projectsApi.getPortfolioIntelligence()
+      .then((intel: PortfolioIntelligence) => setTopProject(intel.top_at_risk?.[0] ?? null))
+      .catch(() => setTopProject(null));
   }, []);
 
   // Derive summary stats
   const totalProyek   = portfolio.length;
-  const unitTerjual   = portfolio.reduce((s, p) => s + p.units_sold, 0);
-  const proyekAktif   = portfolio.filter((p) =>
-    ["konstruksi", "penjualan"].includes(p.stage)
-  ).length;
-  const unitTersedia  = portfolio.reduce(
-    (s, p) => s + (p.total_units - p.units_sold), 0
-  );
-  const avgReadiness  = portfolio.length
-    ? Math.round(portfolio.reduce((s, p) => s + p.readiness_score, 0) / portfolio.length)
-    : 0;
-  const highRiskCount = portfolio.filter((p) => p.risk_level === "high").length;
 
   // Sprint 1: count total alerts across all projects
   const totalAlerts   = projects.reduce((s, p) => s + (p.alerts?.length ?? 0), 0);
@@ -539,35 +1016,27 @@ export default function DashboardPage() {
       
       <NextActionsPanel />
 
-      {/* ── Summary metrics ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12, marginBottom: 24 }}>
-        {[
-          { label: "Total Proyek",   value: totalProyek,        sub: "proyek terdaftar",  icon: FolderOpen,    color: "var(--color-info)",    bg: "var(--color-info-light)"    },
-          { label: "Unit Terjual",   value: unitTerjual,        sub: `dari ${portfolio.reduce((s,p)=>s+p.total_units,0)} unit`, icon: Home, color: "var(--color-accent)", bg: "var(--color-accent-light)" },
-          { label: "Proyek Aktif",   value: proyekAktif,        sub: "sedang berjalan",   icon: BarChart2,     color: "var(--color-warning)", bg: "var(--color-warning-light)" },
-          { label: "Unit Tersedia",  value: unitTersedia,       sub: "siap dipasarkan",   icon: TrendingUp,    color: "var(--color-success)", bg: "var(--color-success-light)" },
-          { label: "Rata² Kesiapan", value: `${avgReadiness}%`, sub: "semua proyek",      icon: CheckCircle2,  color: "var(--color-success)", bg: "var(--color-success-light)" },
-          {
-            label: criticalCount > 0 ? "Alert Kritis" : "Risiko Tinggi",
-            value: criticalCount > 0 ? criticalCount : highRiskCount,
-            sub:   criticalCount > 0 ? "butuh tindakan segera" : "butuh perhatian",
-            icon:  criticalCount > 0 ? Zap : AlertTriangle,
-            color: (criticalCount > 0 || highRiskCount > 0) ? "var(--color-danger)" : "var(--color-success)",
-            bg:    (criticalCount > 0 || highRiskCount > 0) ? "var(--color-danger-light)" : "var(--color-success-light)",
-          },
-        ].map((s) => (
-          <div key={s.label} className="metric-card">
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
-              <div className="metric-label" style={{ fontSize: 10 }}>{s.label}</div>
-              <div style={{ width: 28, height: 28, borderRadius: 6, backgroundColor: s.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <s.icon size={13} style={{ color: s.color }} />
-              </div>
-            </div>
-            <div className="metric-value" style={{ fontSize: 22 }}>{s.value}</div>
-            <div className="metric-sub" style={{ fontSize: 10 }}>{s.sub}</div>
-          </div>
-        ))}
-      </div>
+      {/* ── Sprint 19: Event Stream — the FIRST thing after Next Actions.
+          Roadmap: "Event Stream moves to TOP LEFT — the first thing
+          you see. Not readiness score. Not risk number. The EVENT
+          that caused those numbers." ── */}
+      <DashboardEventStream />
+
+      {/* ── Sprint 19: highest-priority project focus row.
+          Dependency Graph / Decision Engine / Risk Forecast only
+          exist per-project (no portfolio-wide aggregate version),
+          so we show these for whichever project needs attention
+          most right now, per your call. ── */}
+      {topProject && (
+        <TopPriorityFocus projectId={topProject.id} projectName={topProject.name} />
+      )}
+
+      {/* ── Sprint 19: Portfolio Intelligence Hub — moved from
+          /dashboard/projects. This IS the "executive overview"
+          the roadmap calls for, and supersedes the old 6-card
+          Summary Metrics grid (same numbers, but with real
+          week-over-week deltas). ── */}
+      <PortfolioIntelligenceHub />
 
       {/* ── Portfolio Intelligence Table ── */}
       <div className="card" style={{ marginBottom: 20 }}>
@@ -680,52 +1149,34 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Bottom row — notifications + activity (unchanged) ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-
-        {/* Notifications */}
-        <div className="card">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-ink)" }}>Notifikasi</div>
-            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, backgroundColor: "var(--color-danger)", color: "white" }}>
-              {NOTIFIKASI.filter((n) => !n.dibaca).length} baru
-            </span>
-          </div>
-          {NOTIFIKASI.slice(0, 4).map((n) => {
-            const iconMap  = { info: Info, sukses: CheckCircle2, peringatan: AlertTriangle };
-            const colorMap = { info: "var(--color-info)", sukses: "var(--color-success)", peringatan: "var(--color-warning)" };
-            const Icon     = iconMap[n.tipe];
-            return (
-              <div key={n.id} style={{ display: "flex", gap: 10, marginBottom: 12, padding: "10px 12px", backgroundColor: n.dibaca ? "transparent" : "var(--color-paper-2)", borderRadius: 6 }}>
-                <Icon size={14} style={{ color: colorMap[n.tipe], marginTop: 1, flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 2 }}>{n.judul}</div>
-                  <div style={{ fontSize: 11, color: "var(--color-ink-3)", lineHeight: 1.4 }}>{n.pesan}</div>
-                  <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 4 }}>{n.waktu}</div>
-                </div>
-                {!n.dibaca && <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "var(--color-accent)", flexShrink: 0, marginTop: 4 }} />}
-              </div>
-            );
-          })}
+      {/* ── Notifications ──
+          Sprint 19: dropped the mock "Log Aktivitas" card that lived
+          alongside this — DashboardEventStream above now covers that
+          exact need with real data. Keeping a fake static log next to
+          a real live one would just be confusing. ── */}
+      <div className="card">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-ink)" }}>Notifikasi</div>
+          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, backgroundColor: "var(--color-danger)", color: "white" }}>
+            {NOTIFIKASI.filter((n) => !n.dibaca).length} baru
+          </span>
         </div>
-
-        {/* Activity log */}
-        <div className="card">
-          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-ink)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
-            <Activity size={14} /> Log Aktivitas
-          </div>
-          {LOG.map((l, i) => (
-            <div key={i} style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "var(--color-accent)", marginTop: 5, flexShrink: 0 }} />
-              <div>
-                <div style={{ fontSize: 12, color: "var(--color-ink)", lineHeight: 1.4 }}>
-                  <span style={{ fontWeight: 500 }}>{l.pengguna}</span> — {l.aksi}
-                </div>
-                <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 2 }}>{l.waktu}</div>
+        {NOTIFIKASI.slice(0, 4).map((n) => {
+          const iconMap  = { info: Info, sukses: CheckCircle2, peringatan: AlertTriangle };
+          const colorMap = { info: "var(--color-info)", sukses: "var(--color-success)", peringatan: "var(--color-warning)" };
+          const Icon     = iconMap[n.tipe];
+          return (
+            <div key={n.id} style={{ display: "flex", gap: 10, marginBottom: 12, padding: "10px 12px", backgroundColor: n.dibaca ? "transparent" : "var(--color-paper-2)", borderRadius: 6 }}>
+              <Icon size={14} style={{ color: colorMap[n.tipe], marginTop: 1, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 2 }}>{n.judul}</div>
+                <div style={{ fontSize: 11, color: "var(--color-ink-3)", lineHeight: 1.4 }}>{n.pesan}</div>
+                <div style={{ fontSize: 10, color: "var(--color-ink-3)", marginTop: 4 }}>{n.waktu}</div>
               </div>
+              {!n.dibaca && <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "var(--color-accent)", flexShrink: 0, marginTop: 4 }} />}
             </div>
-          ))}
-        </div>
+          );
+        })}
       </div>
     </div>
   );
