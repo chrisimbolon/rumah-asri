@@ -2653,7 +2653,11 @@ export default function ProjectDetailPage() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
 
         {/* Sprint 11: Dependency Graph */}
-        <DependencyGraphPanel projectId={project.id} />
+        <DependencyGraphPanel
+          key={refreshCounter}
+          projectId={project.id}
+          newlyUnlockedNames={lastImpact?.newly_unlocked ?? []}
+        />
 
         {/* ── Requirements ── */}
         <div className="card" id="requirements-card">
