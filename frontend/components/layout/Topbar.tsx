@@ -6,8 +6,12 @@ import { usePathname } from "next/navigation";
 
 // ── Page title map ─────────────────────────────────────────────
 // Rule: keys (URLs) = English, values (titles) = Bahasa Indonesia
+// Sprint 19: "/dashboard" renamed to match Sidebar's Command Center
+// rename, and "/dashboard/calendar" added (was missing entirely,
+// would've fallen through to the generic "Dashboard" fallback).
 const TITLES: Record<string, string> = {
-  "/dashboard":                    "Dasbor",
+  "/dashboard":                    "Command Center",
+  "/dashboard/calendar":           "Kalender",
   "/dashboard/projects":           "Semua Proyek",
   "/dashboard/units":              "Unit",
   "/dashboard/construction":       "Progres Konstruksi",
