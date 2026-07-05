@@ -2919,6 +2919,36 @@ export default function ProjectDetailPage() {
     if (intel) setLiveScore(intel.readiness_score);
   }, [intel?.readiness_score]);
 
+  // Sprint 17 fix: seed liveEvents with recent history on load.
+  // Previously liveEvents started as [] and sinceRef (inside
+  // useProjectPulse) initialized to page-load time — meaning the
+  // Event Stream panel could ONLY ever populate from a NEW event
+  // firing while this exact tab was already open and polling. On
+  // every normal fresh visit it silently rendered null (see
+  // EventStreamPanel's `if (events.length === 0) return null`),
+  // which is why it never once appeared across a full night of
+  // screenshot verification despite being correctly wired in.
+  useEffect(() => {
+    if (!project?.id) return;
+    projectsApi.getActivity(project.id, 5)
+      .then(res => {
+        const seeded: PulseEvent[] = res.results.map(item => ({
+          id:              item.id,
+          action:          item.action,
+          message:         item.message,
+          actor:           item.actor,
+          subject:         item.subject,
+          readiness_delta: item.readiness_delta ?? null,
+          risk_delta:      item.risk_delta ?? null,
+          timestamp:       item.timestamp,
+        }));
+        setLiveEvents(seeded);
+      })
+      .catch(() => {
+        // Silent failure — Event Stream just stays empty/hidden, no crash
+      });
+  }, [project?.id]);
+
   // Pulse handler — called every 15 seconds when updates arrive
   const handlePulseUpdate = useCallback((data: PulseResponse) => {
     setLiveScore(data.readiness_score);
