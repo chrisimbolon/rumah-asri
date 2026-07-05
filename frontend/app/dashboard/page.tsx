@@ -1,5 +1,5 @@
 "use client";
-// =============================================================================
+// ===================================================================================================
 // === frontend/app/dashboard/page.tsx ===
 // Sprint 1 upgrade:
 //   + Alerts ledger (critical/warning/info) from portfolio
@@ -24,7 +24,7 @@
 //      real live feed AND a fake static one would be confusing.
 //    - AI Assistant panel from the roadmap mockup: intentionally
 //      skipped (Sprint 15 is still shelved).
-// =============================================================================
+// ==============================================================================================
 
 import {
   DecisionEnginePanel,
