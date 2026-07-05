@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import {
   BarChart2, Bell, Building2, Calendar, ChevronLeft,
   CreditCard, FileText, FolderOpen, Home, LayoutDashboard,
-  LogOut, Settings, Shield, TrendingUp, UserCheck, Users,
+  LogOut, Settings, Shield, Target, TrendingUp, UserCheck, Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -41,11 +41,11 @@ const NAV_DEVELOPER = [
     ],
   },
   {
-    // Sprint 19: new group, starts with Kalender. Tasks & Actions and
-    // Decision Engine (standalone) will join here once those pages
-    // exist — this group is built to grow, not a final shape yet.
+    // Sprint 19: new group, started with Kalender, now growing.
+    // Decision Engine (standalone) will join here next.
     group: "Eksekusi",
     items: [
+      { href: "/dashboard/tasks",    icon: Target,   label: "Tugas & Tindakan" },
       { href: "/dashboard/calendar", icon: Calendar, label: "Kalender" },
     ],
   },
