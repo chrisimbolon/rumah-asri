@@ -12,6 +12,7 @@ from .views import (
     PortfolioIntelligenceView,          # Sprint 18
     ProjectActivityView,
     ProjectAdvanceView,
+    ProjectCalendarView,                # Sprint 19
     ProjectDecisionEngineView,
     ProjectDependencyGraphView,
     ProjectDetailView,
@@ -49,6 +50,11 @@ urlpatterns = [
     path("portfolio-intelligence/",
          PortfolioIntelligenceView.as_view(),
          name="project-portfolio-intelligence"),
+
+    # ── Sprint 19: Cross-project calendar ─────────────────────
+    path("calendar/",
+         ProjectCalendarView.as_view(),
+         name="project-calendar"),
 
     # ── List + create ──────────────────────────────────────────
     path("",
