@@ -32,6 +32,7 @@ import {
   ReadinessHistoryPoint,
   RequirementComment,
   RequirementEvidence,
+  RequirementImpact,
   RequirementItem,
   RISK_FACTOR_IMPACT_META,
   RISK_META,
@@ -145,7 +146,7 @@ function EvidenceUploadModal({
   req, projectId, onUploaded, onClose,
 }: {
   req: RequirementItem; projectId: string;
-  onUploaded: (intel: IntelligenceSummary) => void; onClose: () => void;
+  onUploaded: (intel: IntelligenceSummary, impact?: RequirementImpact) => void; onClose: () => void;
 }) {
   const [mode,   setMode]   = useState<"file" | "url">("url");
   const [fileUrl, setFileUrl] = useState("");
@@ -164,7 +165,7 @@ function EvidenceUploadModal({
         file_url: mode === "url"  ? fileUrl.trim() : undefined,
         notes:    notes.trim(),
       });
-      onUploaded(result.intelligence);
+      onUploaded(result.intelligence, result.impact);
     } catch { setError("Gagal mengunggah bukti"); }
     finally { setSaving(false); }
   };
@@ -230,7 +231,7 @@ function EvidenceItem({ ev, projectId, reqStatusId, onVerified, onResubmit }: {
   ev:           RequirementEvidence;
   projectId:    string;
   reqStatusId:  string;
-  onVerified:   (intel: IntelligenceSummary) => void;
+  onVerified:   (intel: IntelligenceSummary, impact?: RequirementImpact) => void;
   onResubmit:   () => void;   // Sprint 8: triggers re-upload modal
 }) {
   const [verifying,    setVerifying]    = useState(false);
@@ -244,7 +245,7 @@ function EvidenceItem({ ev, projectId, reqStatusId, onVerified, onResubmit }: {
     setVerifying(true);
     try {
       const result = await evidenceApi.verify(projectId, reqStatusId, ev.id, act, notes);
-      onVerified(result.intelligence);
+      onVerified(result.intelligence, result.impact);
     } catch (e: unknown) {
       console.error("Verify failed", e);
     } finally { setVerifying(false); setShowNotes(false); setAction(null); }
@@ -455,7 +456,7 @@ function RequirementRow({
 }: {
   req:       RequirementItem;
   projectId: string;
-  onUpdated: (intel: IntelligenceSummary) => void;
+  onUpdated: (intel: IntelligenceSummary, impact?: RequirementImpact) => void;
 }) {
   const [saving,          setSaving]          = useState(false);
   const [depError,        setDepError]        = useState<string | null>(null);
@@ -479,10 +480,10 @@ function RequirementRow({
     setSaving(true);
     setDepError(null);
     try {
-      const intel = await projectsApi.updateRequirement(
+      const { intelligence, impact } = await projectsApi.updateRequirement(
         projectId, req.status_id ?? req.id, { status: newStatus, notes }
       );
-      onUpdated(intel);
+      onUpdated(intelligence, impact);
     } catch (e: unknown) {
       // Sprint 4: catch dependency_blocked errors from API
       const err = e as { response?: { data?: { message?: string; error_type?: string } } };
@@ -507,15 +508,15 @@ function RequirementRow({
     setShowEvidence(!showEvidence);
   };
 
-  const handleEvidenceUploaded = (intel: IntelligenceSummary) => {
+  const handleEvidenceUploaded = (intel: IntelligenceSummary, impact?: RequirementImpact) => {
     setShowUploadModal(false);
     loadEvidence();
-    onUpdated(intel);
+    onUpdated(intel, impact);
   };
 
-  const handleEvidenceVerified = (intel: IntelligenceSummary) => {
+  const handleEvidenceVerified = (intel: IntelligenceSummary, impact?: RequirementImpact) => {
     loadEvidence();
-    onUpdated(intel);
+    onUpdated(intel, impact);
   };
 
   const loadComments = async () => {
@@ -2161,8 +2162,17 @@ export default function ProjectDetailPage() {
     } finally { setAdvancing(false); }
   };
 
-  const handleRequirementUpdated = (newIntel: IntelligenceSummary) => {
+  // Sprint 20: holds the most recent impact payload from any
+  // requirement-changing action (status update, evidence upload,
+  // evidence verify) — this is the plumbing step. The animation/
+  // banner/pulse consumers of this state are built in the next
+  // Sprint 20 steps; for now this just makes sure the data actually
+  // arrives here instead of being silently discarded like before.
+  const [lastImpact, setLastImpact] = useState<RequirementImpact | null>(null);
+
+  const handleRequirementUpdated = (newIntel: IntelligenceSummary, impact?: RequirementImpact) => {
     setIntel(newIntel);
+    if (impact) setLastImpact(impact);
     projectsApi.get(id).then(setProject).catch(() => {});
   };
 
