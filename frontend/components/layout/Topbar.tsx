@@ -11,6 +11,7 @@ import { usePathname } from "next/navigation";
 // would've fallen through to the generic "Dashboard" fallback).
 const TITLES: Record<string, string> = {
   "/dashboard":                    "Command Center",
+  "/dashboard/tasks":              "Tugas & Tindakan",
   "/dashboard/calendar":           "Kalender",
   "/dashboard/projects":           "Semua Proyek",
   "/dashboard/units":              "Unit",
