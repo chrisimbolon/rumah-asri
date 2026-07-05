@@ -18,10 +18,20 @@ import { ArrowRight, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-export function NextActionsPanel() {
+// Sprint 19 fix: previously this panel rendered identically wherever
+// it was used — same truncation (3 my_tasks + 2 unassigned), same
+// in-place "Lihat semua" toggle — on BOTH the Command Center AND the
+// standalone Tasks page. That made the standalone page a pointless
+// duplicate: same data, same cap, nothing you couldn't already see.
+//
+// Now: `teaser` (Command Center) caps at 3 items TOTAL and links out
+// to the real page instead of expanding in place. Full mode (the
+// Tasks page, teaser=false/default) shows everything, uncapped —
+// genuinely more than the preview, which is the whole point of
+// giving it its own page.
+export function NextActionsPanel({ teaser = false }: { teaser?: boolean }) {
   const [actions, setActions] = useState<MyActionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     projectsApi.getMyActions()
@@ -48,8 +58,21 @@ export function NextActionsPanel() {
     );
   }
 
-  const myTasksToShow   = showAll ? actions.my_tasks   : actions.my_tasks.slice(0, 3);
-  const unassignedToShow = showAll ? actions.unassigned : actions.unassigned.slice(0, 2);
+  let myTasksToShow: ActionItem[];
+  let unassignedToShow: ActionItem[];
+
+  if (teaser) {
+    // Cap at 3 TOTAL — a genuine preview, not a second full list.
+    myTasksToShow = actions.my_tasks.slice(0, 3);
+    const remainingSlots = Math.max(0, 3 - myTasksToShow.length);
+    unassignedToShow = actions.unassigned.slice(0, remainingSlots);
+  } else {
+    myTasksToShow    = actions.my_tasks;
+    unassignedToShow = actions.unassigned;
+  }
+
+  const shownCount = myTasksToShow.length + unassignedToShow.length;
+  const hasMore     = teaser && actions.total_actionable > shownCount;
 
   return (
     <div className="card" style={{ marginBottom: 16 }}>
@@ -62,12 +85,13 @@ export function NextActionsPanel() {
             {actions.my_tasks_count} tugas Anda · {actions.unassigned_count} belum ditugaskan
           </div>
         </div>
-        {actions.total_actionable > 5 && (
-          <button
-            onClick={() => setShowAll(!showAll)}
-            style={{ fontSize: 11, fontWeight: 600, color: "var(--color-accent)", background: "none", border: "none", cursor: "pointer" }}>
-            {showAll ? "Tampilkan lebih sedikit" : `Lihat semua (${actions.total_actionable})`}
-          </button>
+        {hasMore && (
+          <Link
+            href="/dashboard/tasks"
+            style={{ fontSize: 11, fontWeight: 600, color: "var(--color-accent)", textDecoration: "none" }}
+          >
+            Lihat semua tugas ({actions.total_actionable}) →
+          </Link>
         )}
       </div>
 
