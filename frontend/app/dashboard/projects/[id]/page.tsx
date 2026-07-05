@@ -1427,9 +1427,10 @@ function ParallelStageToggles({ project, onUpdated }: { project: Project; onUpda
 // Polls /pulse/?since=<timestamp> every 15 seconds, Silent on failure — polling is best-effort, never blocks the UI.
 // Returns cleanup function to stop polling on unmount.
 function useProjectPulse(
-  projectId:  string,
-  enabled:    boolean,
-  onUpdate:   (data: PulseResponse) => void,
+  projectId:      string,
+  enabled:        boolean,
+  onUpdate:       (data: PulseResponse) => void,
+  refreshSignal?: number,   // Sprint 20: bump this to force an immediate poll
 ) {
   const sinceRef    = useRef<string>(new Date().toISOString());
   const onUpdateRef = useRef(onUpdate);
@@ -1453,6 +1454,32 @@ function useProjectPulse(
     const interval = setInterval(poll, 15_000);   // 15-second cadence
     return () => clearInterval(interval);
   }, [projectId, enabled]);
+
+  // Sprint 20: immediate poll whenever refreshSignal changes — lets a
+  // completed action refresh Event Stream right away instead of
+  // waiting up to 15 seconds for the next scheduled tick. Separate
+  // effect (doesn't reset the interval above), and skips the very
+  // first mount-triggered fire so it doesn't double-poll on load.
+  const isFirstRefreshRef = useRef(true);
+  useEffect(() => {
+    if (!enabled || !projectId || refreshSignal === undefined) return;
+    if (isFirstRefreshRef.current) {
+      isFirstRefreshRef.current = false;
+      return;
+    }
+    (async () => {
+      try {
+        const data = await projectsApi.getPulse(projectId, sinceRef.current);
+        if (data.has_updates) {
+          sinceRef.current = data.checked_at;
+          onUpdateRef.current(data);
+        }
+      } catch {
+        // Silent failure
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshSignal]);
 }
 
 function ReadinessTrendPanel({
@@ -2315,6 +2342,41 @@ export default function ProjectDetailPage() {
       });
   }, [project?.id]);
 
+  // Sprint 20: holds the most recent impact payload from any
+  // requirement-changing action (status update, evidence upload,
+  // evidence verify).
+  const [lastImpact, setLastImpact] = useState<RequirementImpact | null>(null);
+  // Sprint 20: bumped on every impact-bearing action — Event Stream
+  // (via useProjectPulse's refreshSignal below) and Decision Engine
+  // (via React `key` remount) both watch this to refresh immediately
+  // instead of waiting for their own independent polling interval.
+  // Declared here, BEFORE useProjectPulse, since it's passed in as
+  // an argument a few lines down.
+  const [refreshCounter, setRefreshCounter] = useState(0);
+  // Sprint 20: banner visibility + auto-dismiss timer. Celebratory
+  // moments stay up a bit longer (6s) than routine updates (3s) —
+  // worth lingering on a "stage ready!" moment, not on "status
+  // changed to in_progress".
+  const [showBanner, setShowBanner] = useState(false);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleRequirementUpdated = (newIntel: IntelligenceSummary, impact?: RequirementImpact) => {
+    setIntel(newIntel);
+    if (impact) {
+      setLastImpact(impact);
+      setRefreshCounter((c) => c + 1);
+      setShowBanner(true);
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+      const isCelebratory =
+        impact.stage_can_advance || impact.newly_unlocked.length > 0 || impact.readiness_delta > 0;
+      bannerTimerRef.current = setTimeout(
+        () => setShowBanner(false),
+        isCelebratory ? 6000 : 3000
+      );
+    }
+    projectsApi.get(id).then(setProject).catch(() => {});
+  };
+
   // Pulse handler — called every 15 seconds when updates arrive
   const handlePulseUpdate = useCallback((data: PulseResponse) => {
     setLiveScore(data.readiness_score);
@@ -2330,7 +2392,7 @@ export default function ProjectDetailPage() {
   }, []);
 
   // Start polling (only when project is loaded)
-  useProjectPulse(project?.id ?? "", !!project, handlePulseUpdate);
+  useProjectPulse(project?.id ?? "", !!project, handlePulseUpdate, refreshCounter);
 
   const loadProject = async () => {
     try {
@@ -2376,36 +2438,6 @@ export default function ProjectDetailPage() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Gagal melanjutkan tahap");
     } finally { setAdvancing(false); }
-  };
-
-  // Sprint 20: holds the most recent impact payload from any
-  // requirement-changing action (status update, evidence upload,
-  // evidence verify) — this is the plumbing step. The animation/
-  // banner/pulse consumers of this state are built in the next
-  // Sprint 20 steps; for now this just makes sure the data actually
-  // arrives here instead of being silently discarded like before.
-  const [lastImpact, setLastImpact] = useState<RequirementImpact | null>(null);
-  // Sprint 20: banner visibility + auto-dismiss timer. Celebratory
-  // moments stay up a bit longer (6s) than routine updates (3s) —
-  // worth lingering on a "stage ready!" moment, not on "status
-  // changed to in_progress".
-  const [showBanner, setShowBanner] = useState(false);
-  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleRequirementUpdated = (newIntel: IntelligenceSummary, impact?: RequirementImpact) => {
-    setIntel(newIntel);
-    if (impact) {
-      setLastImpact(impact);
-      setShowBanner(true);
-      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
-      const isCelebratory =
-        impact.stage_can_advance || impact.newly_unlocked.length > 0 || impact.readiness_delta > 0;
-      bannerTimerRef.current = setTimeout(
-        () => setShowBanner(false),
-        isCelebratory ? 6000 : 3000
-      );
-    }
-    projectsApi.get(id).then(setProject).catch(() => {});
   };
 
   if (loading) {
@@ -2569,7 +2601,7 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Sprint 13: Decision Engine */}
-      <DecisionEnginePanel projectId={project.id} />
+      <DecisionEnginePanel key={refreshCounter} projectId={project.id} />
 
       {/* Sprint 14: Risk Forecast */}
       <RiskForecastPanel projectId={project.id} />
