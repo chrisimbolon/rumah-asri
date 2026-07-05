@@ -901,7 +901,7 @@ export default function DashboardPage() {
         </div>
       </div>
       
-      <NextActionsPanel />
+      <NextActionsPanel teaser />
 
       {/* ── Sprint 19: Event Stream — the FIRST thing after Next Actions.
           Roadmap: "Event Stream moves to TOP LEFT — the first thing
