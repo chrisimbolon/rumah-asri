@@ -13,5 +13,4 @@ Sentry.init({
 
 // Required by the v10 SDK to instrument page-to-page navigations
 // (silences the "ACTION REQUIRED" build warning) — tracks navigation
-// performance the same way tracesSampleRate tracks request performance.
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
