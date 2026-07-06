@@ -47,3 +47,21 @@ ALLOWED_HOSTS = [
     "localhost",        # Docker health check
     "127.0.0.1",        # Docker health check
 ]
+
+# ── Sprint 21.5: Sentry error monitoring ──────────────────────
+# Deliberately production-only, NOT in base.py — local dev exceptions
+# are just normal debugging noise and would burn through the free-tier
+# event quota fast. Guarded by an empty default: if SENTRY_DSN isn't
+# set in .env yet, this whole block is a silent no-op, nothing breaks.
+import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
+
+SENTRY_DSN = config("SENTRY_DSN", default="")
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[DjangoIntegration()],
+        traces_sample_rate=0.1,   # 10% perf tracing — plenty for our scale, keeps free-tier usage low
+        send_default_pii=False,  # don't send user PII by default
+        environment="production",
+    )
