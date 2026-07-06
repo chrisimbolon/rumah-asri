@@ -7,4 +7,5 @@ pillow==12.1.1
 psycopg2-binary==2.9.11
 PyJWT==2.12.1
 python-decouple==3.8
+sentry-sdk==2.64.0
 sqlparse==0.5.5
