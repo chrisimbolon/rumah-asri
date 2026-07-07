@@ -3,7 +3,15 @@
 // frontend/app/dashboard/payments/page.tsx 
 // ========================================
 /**
- * Payments tracker — wired to real payments API. - Payment has data on DB, but not via CRUD
+ * Payments tracker — wired to real payments API, both read AND write.
+ *
+ * Sprint 25: "Konfirmasi" now actually calls paymentsApi.update() to
+ * mark a payment "lunas" — previously every action button on this
+ * page had zero onClick at all (data displayed, but nothing could be
+ * changed). That's fixed for the one action that actually matters to
+ * AR (marking paid); WhatsApp reminders, PDF receipts, and exports
+ * are genuinely separate integrations, given honest "coming soon"
+ * feedback instead of silent dead clicks.
  *
  * Field mapping from mock → real API:
  *   pembeli      → buyer_name
@@ -86,6 +94,10 @@ export default function PaymentsPage() {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState<string | null>(null);
   const [activeTab,  setActiveTab]  = useState("semua");
+  // Sprint 25: tracks which specific row is mid-update, so only that
+  // row's button shows a spinner — same per-row pattern already used
+  // on the Units and Data Pembeli pages.
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   useEffect(() => {
     paymentsApi.list()
@@ -93,6 +105,29 @@ export default function PaymentsPage() {
       .catch(() => setError("Gagal memuat data pembayaran"))
       .finally(() => setLoading(false));
   }, []);
+
+  // Sprint 25: this is the fix — "Konfirmasi" previously had zero
+  // onClick at all. Marking a payment "lunas" here correctly flows
+  // through PUT /api/payments/<id>/, which triggers Payment.save()'s
+  // paid_at auto-sync on the backend.
+  const handleMarkPaid = async (payment: Payment) => {
+    setUpdatingId(payment.id);
+    try {
+      const updated = await paymentsApi.update(payment.id, { status: "lunas" });
+      setPayments((prev) => prev.map((p) => p.id === updated.id ? updated : p));
+    } catch {
+      alert("Gagal memperbarui status pembayaran");
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  // Sprint 25: WhatsApp reminders and PDF receipt generation are
+  // genuinely separate integrations, out of scope for this sprint —
+  // but a button that visibly does nothing is worse UX than one that
+  // honestly says "not yet." No more silent dead clicks.
+  const notYetImplemented = (feature: string) =>
+    alert(`${feature} belum tersedia — akan hadir di sprint mendatang.`);
 
   if (loading) {
     return (
@@ -127,7 +162,7 @@ export default function PaymentsPage() {
           <h1 className="page-title">Pelacak Pembayaran</h1>
           <p className="page-subtitle">Jadwal & status pembayaran semua unit</p>
         </div>
-        <button className="btn-ghost" style={{ flexShrink: 0 }}>
+        <button className="btn-ghost" style={{ flexShrink: 0 }} onClick={() => notYetImplemented("Ekspor Laporan")}>
           <Download size={14} /> Ekspor Laporan
         </button>
       </div>
@@ -165,7 +200,7 @@ export default function PaymentsPage() {
               Kirim pengingat WhatsApp atau hubungi pembeli langsung untuk menghindari denda keterlambatan.
             </div>
           </div>
-          <button className="btn-danger btn-sm" style={{ flexShrink: 0, marginLeft: "auto" }}>
+          <button className="btn-danger btn-sm" style={{ flexShrink: 0, marginLeft: "auto" }} onClick={() => notYetImplemented("Pengingat WhatsApp")}>
             <MessageSquare size={12} /> Kirim Pengingat
           </button>
         </div>
@@ -194,7 +229,7 @@ export default function PaymentsPage() {
               );
             })}
           </div>
-          <button className="btn-ghost btn-sm" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button className="btn-ghost btn-sm" style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={() => notYetImplemented("Filter lanjutan")}>
             <Filter size={12} /> Filter
           </button>
         </div>
@@ -249,9 +284,28 @@ export default function PaymentsPage() {
                   </div>
                 </td>
                 <td>
-                  {p.status === "menunggak"   && <button className="btn-danger btn-sm"  style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><MessageSquare size={11} /> Ingatkan</button>}
-                  {p.status === "menunggu"    && <button className="btn-success btn-sm" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><CheckCircle2  size={11} /> Konfirmasi</button>}
-                  {p.status === "lunas"       && <button className="btn-ghost btn-sm"   style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Download      size={11} /> Kuitansi</button>}
+                  {p.status === "menunggak" && (
+                    <button className="btn-danger btn-sm" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+                      onClick={() => notYetImplemented("Pengingat WhatsApp")}>
+                      <MessageSquare size={11} /> Ingatkan
+                    </button>
+                  )}
+                  {p.status === "menunggu" && (
+                    <button className="btn-success btn-sm" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+                      disabled={updatingId === p.id}
+                      onClick={() => handleMarkPaid(p)}>
+                      {updatingId === p.id
+                        ? <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} />
+                        : <CheckCircle2 size={11} />}
+                      Konfirmasi
+                    </button>
+                  )}
+                  {p.status === "lunas" && (
+                    <button className="btn-ghost btn-sm" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+                      onClick={() => notYetImplemented("Unduh kuitansi")}>
+                      <Download size={11} /> Kuitansi
+                    </button>
+                  )}
                   {(p.status === "akan_datang" || p.status === "proses_bank") && <span style={{ fontSize: 12, color: "var(--color-ink-3)" }}>—</span>}
                 </td>
               </tr>
@@ -273,7 +327,8 @@ export default function PaymentsPage() {
           </span>
           <div style={{ display: "flex", gap: 8 }}>
             {["KPR Summary", "Cash Summary", "Semua Kuitansi"].map((btn) => (
-              <button key={btn} className="btn-ghost btn-sm" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <button key={btn} className="btn-ghost btn-sm" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+                onClick={() => notYetImplemented(btn)}>
                 <Download size={11} /> {btn}
               </button>
             ))}
