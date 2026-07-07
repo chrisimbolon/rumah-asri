@@ -20,6 +20,20 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+// ── Sprint 22: legal forward transitions, mirroring Unit.VALID_TRANSITIONS
+// on the backend exactly. "tersedia→dipesan" and "dipesan→tersedia" are
+// already handled by the existing Booking/Cancel flow below — this map
+// only covers the three states that had ZERO UI at all until now:
+// dipesan→proses→terjual→serah_terima. Deliberately a fixed map, not a
+// free-form status dropdown — the UI should only ever be ABLE to offer
+// the one legal next step, not send a request the backend guard would
+// reject anyway.
+const NEXT_STATUS: Partial<Record<Unit["status"], { next: Unit["status"]; label: string }>> = {
+  dipesan: { next: "proses",       label: "Mulai Proses" },
+  proses:  { next: "terjual",      label: "Tandai Terjual" },
+  terjual: { next: "serah_terima", label: "Serah Terima" },
+};
+
 // ── Status badge ──────────────────────────────────────────────
 function StatusBadge({ status, display }: { status: Unit["status"]; display: string }) {
   const map: Record<Unit["status"], { color: string; bg: string }> = {
@@ -398,6 +412,9 @@ export default function UnitsPage() {
   const [search,     setSearch]     = useState("");
   const [showAdd,    setShowAdd]    = useState(false);
   const [bookingUnit, setBookingUnit] = useState<Unit | null>(null);
+  // Sprint 22: tracks which specific row is mid-transition, so only
+  // that row's button shows a spinner — not the whole table.
+  const [advancingId, setAdvancingId] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -480,6 +497,28 @@ export default function UnitsPage() {
   const handleUnitBooked = (updatedUnit: Unit) => {
     setUnits((prev) => prev.map((u) => u.id === updatedUnit.id ? updatedUnit : u));
     setBookingUnit(null);
+  };
+
+  // Sprint 22: advance a unit to the ONE legal next status. The button
+  // that calls this only ever renders for a status that has an entry
+  // in NEXT_STATUS, so illegal transitions aren't a UI possibility —
+  // but the backend guard (Unit.can_transition_to) is still the real
+  // source of truth, and its error message surfaces here if anything
+  // ever gets out of sync between the two.
+  const handleAdvance = async (u: Unit) => {
+    const transition = NEXT_STATUS[u.status];
+    if (!transition) return;
+    setAdvancingId(u.id);
+    try {
+      const updated = await unitsApi.update(u.id, { status: transition.next });
+      setUnits((prev) => prev.map((x) => x.id === updated.id ? updated : x));
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { errors?: Record<string, string[]> } } })
+        ?.response?.data?.errors;
+      alert(msg ? Object.values(msg).flat().join(", ") : "Gagal mengubah status unit");
+    } finally {
+      setAdvancingId(null);
+    }
   };
 
   if (loading) {
@@ -664,7 +703,7 @@ export default function UnitsPage() {
                 </td>
 
                 <td style={{ padding: "12px 14px" }}>
-                  <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     {u.status === "tersedia" && (
                       <button
                         className="btn-accent btn-sm"
@@ -691,8 +730,30 @@ export default function UnitsPage() {
                         Batalkan
                       </button>
                     )}
-                    {!["tersedia", "dipesan"].includes(u.status) && (
-                      <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>—</span>
+                    {/* Sprint 22: the piece that was completely missing —
+                        dipesan→proses, proses→terjual, terjual→serah_terima
+                        all had zero UI before this. Only the ONE legal
+                        next step is ever offered, mirroring the backend
+                        guard exactly. */}
+                    {NEXT_STATUS[u.status] && (
+                      <button
+                        className="btn-accent btn-sm"
+                        disabled={advancingId === u.id}
+                        onClick={() => handleAdvance(u)}
+                        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}
+                      >
+                        {advancingId === u.id ? (
+                          <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} />
+                        ) : (
+                          <TrendingUp size={11} />
+                        )}
+                        {NEXT_STATUS[u.status]!.label}
+                      </button>
+                    )}
+                    {u.status === "serah_terima" && (
+                      <span style={{ fontSize: 11, color: "var(--color-success)", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                        <CheckCircle2 size={11} /> Selesai
+                      </span>
                     )}
                   </div>
                 </td>
