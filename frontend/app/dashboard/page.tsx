@@ -19,9 +19,8 @@
 //    - Removed: old 6-card "Summary metrics" grid (superseded by
 //      Portfolio Intelligence Hub's 6 metrics, which include real
 //      week-over-week deltas).
-//    - Removed: mock "Log Aktivitas" section (LOG from mock-data) —
-//      Event Stream now covers this with real data; having both a
-//      real live feed AND a fake static one would be confusing.
+//    - Removed: mock "Log Aktivitas" section (LOG from mock-data) — Event Stream now covers this with real data; 
+//      having both a real live feed AND a fake static one would be confusing.
 //    - AI Assistant panel from the roadmap mockup: intentionally
 //      skipped (Sprint 15 is still shelved).
 // =============================================================================
