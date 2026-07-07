@@ -3,8 +3,8 @@
 // === frontend/app/dashboard/buyers/page.tsx ===
 // =============================================================================
 /**
- * Sprint 24: Data Pembeli — was a dead link (404) sitting in the
- * sidebar until now. Deliberately reuses GET /api/units/ entirely —
+ * Sprint 24: Data Pembeli — was a dead link (404) sitting in the sidebar until now. 
+ * Deliberately reuses GET /api/units/ entirely —
  * every field this page needs (buyer_name, buyer_email, the nested
  * booking with kpr_status/is_stalled) already exists there, fully
  * tenant-isolated and tested. No new backend endpoint, no new tests needed — this is presentation on top of proven data.
