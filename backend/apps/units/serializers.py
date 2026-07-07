@@ -15,14 +15,17 @@ class BookingSerializer(serializers.ModelSerializer):
     buyer_name   = serializers.CharField(source="buyer.full_name",  read_only=True)
     buyer_email  = serializers.CharField(source="buyer.email",      read_only=True)
     unit_number  = serializers.CharField(source="unit.unit_number", read_only=True)
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    status_display     = serializers.CharField(source="get_status_display", read_only=True)
+    kpr_status_display = serializers.CharField(source="get_kpr_status_display", read_only=True)
     is_expired   = serializers.BooleanField(read_only=True)
+    is_stalled   = serializers.BooleanField(read_only=True)
 
     class Meta:
         model  = Booking
         fields = [
             "id", "spr_number", "booking_fee",
             "booking_date", "expires_at", "is_expired",
+            "kpr_status", "kpr_status_display", "is_stalled",
             "payment_method", "bank",
             "status", "status_display", "notes",
             "buyer", "buyer_name", "buyer_email",
@@ -185,3 +188,15 @@ class BookingCancelSerializer(serializers.Serializer):
         required=False, allow_blank=True, default="",
         help_text="Alasan pembatalan (opsional)"
     )
+
+
+class BookingKPRUpdateSerializer(serializers.Serializer):
+    """
+    PUT /api/units/bookings/<id>/kpr/
+    Sprint 24: deliberately trimmed — a plain status field update, no
+    transition guard. Any valid KPRStatus choice is accepted in any
+    order (a rejected KPR reverting to "belum_diajukan" for reapplying
+    is a completely normal real-world case, unlike Unit's lifecycle
+    which genuinely has illegal jumps to prevent).
+    """
+    kpr_status = serializers.ChoiceField(choices=Booking.KPRStatus.choices)

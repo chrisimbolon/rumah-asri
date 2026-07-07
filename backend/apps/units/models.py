@@ -108,6 +108,26 @@ class Unit(TenantScopedModel):
 # Booking — records the pre-sales transaction
 # =============================================================================
 
+class BookingQuerySet(models.QuerySet):
+    """
+    Sprint 24: gives Booking a proper `.for_user()` manager, same
+    convenience TenantScopedModel-based models already have — without
+    needing Booking to actually inherit TenantScopedModel (a bigger,
+    more invasive change we don't need). This replaces the hand-rolled
+    inline tenant query that used to live only in BookingCancelView —
+    now BOTH BookingCancelView and the new BookingKPRUpdateView can use
+    the standard self.get_queryset()/self.get_object() pattern from
+    TenantScopedAPIView, same as every other view in this codebase.
+    """
+    def for_user(self, user):
+        if getattr(user, "role", None) == "super_admin":
+            return self
+        org_ids = user.memberships.filter(is_active=True).values_list(
+            "organization_id", flat=True
+        )
+        return self.filter(organization_id__in=org_ids)
+
+
 class Booking(models.Model):
     """
     Records a unit booking (pre-sale).
@@ -136,11 +156,27 @@ class Booking(models.Model):
         CONVERTED = "converted", "Dikonversi ke Penjualan"
         EXPIRED   = "expired",   "Kedaluwarsa"   # Sprint 23: auto-expired, distinct from a manual cancel
 
+    # Sprint 24: deliberately trimmed — just enough for the Decision
+    # Engine to reason about "this sale is stuck," NOT a full KPR
+    # document workflow (KTP/NPWP/slip gaji uploads etc). That's
+    # Mandep/Simadev's strength, not ours to rebuild.
+    class KPRStatus(models.TextChoices):
+        BELUM_DIAJUKAN = "belum_diajukan", "Belum Diajukan"
+        DIAJUKAN       = "diajukan",       "Diajukan"
+        DISETUJUI      = "disetujui",      "Disetujui"
+        AKAD           = "akad",           "Akad"
+
     # Sprint 23: default deposit window if the caller doesn't specify
     # one explicitly. 7 days is a reasonable starting default for the
     # Indonesian pre-sales "booking fee" convention — easy to override
     # per-request via BookingCreateSerializer's expiry_days field.
     DEFAULT_EXPIRY_DAYS = 7
+
+    # Sprint 24: if KPR hasn't moved past DIAJUKAN within this many
+    # days of the booking date, is_stalled starts flagging it. Just a
+    # signal — not wired into the Decision Engine yet, that's a
+    # heavier system and a deliberate scope boundary for this sprint.
+    STALL_THRESHOLD_DAYS = 5
 
     id          = models.UUIDField(
         primary_key=True,
@@ -196,6 +232,15 @@ class Booking(models.Model):
         help_text="KPR BCA / Cash / KPR Mandiri etc.",
     )
     bank           = models.CharField(max_length=50, blank=True, verbose_name="Bank")
+    # Sprint 24: lives here, not on a separate Buyer profile — this is
+    # a property of THIS sale's financing, not a permanent trait of
+    # the buyer as a person. No transition guard on purpose (trimmed
+    # scope): a plain status field is enough for now.
+    kpr_status     = models.CharField(
+        max_length=20, choices=KPRStatus.choices,
+        default=KPRStatus.BELUM_DIAJUKAN,
+        verbose_name="Status KPR",
+    )
 
     # ── Status ────────────────────────────────────────────────
     status      = models.CharField(
@@ -221,6 +266,10 @@ class Booking(models.Model):
     created_at  = models.DateTimeField(auto_now_add=True)
     updated_at  = models.DateTimeField(auto_now=True)
 
+    # Sprint 24: gives Booking.objects.for_user(user) — see
+    # BookingQuerySet above.
+    objects = BookingQuerySet.as_manager()
+
     class Meta:
         verbose_name        = "Booking"
         verbose_name_plural = "Bookings"
@@ -244,6 +293,23 @@ class Booking(models.Model):
             return False
         from django.utils import timezone
         return timezone.now() > self.expires_at
+
+    @property
+    def is_stalled(self):
+        """
+        Sprint 24: true if KPR hasn't progressed past DIAJUKAN within
+        STALL_THRESHOLD_DAYS of the booking date, on a still-ACTIVE
+        booking. A signal only, computed fresh on every access —
+        deliberately NOT wired into the Decision Engine yet (that's a
+        heavier system, out of scope for this sprint).
+        """
+        if self.status != self.BookingStatus.ACTIVE:
+            return False
+        if self.kpr_status in (self.KPRStatus.DISETUJUI, self.KPRStatus.AKAD):
+            return False
+        from django.utils import timezone
+        days_since_booking = (timezone.now().date() - self.booking_date).days
+        return days_since_booking >= self.STALL_THRESHOLD_DAYS
 
     @classmethod
     def generate_spr_number(cls, organization):

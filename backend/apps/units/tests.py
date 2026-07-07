@@ -508,3 +508,269 @@ class UnitAdvanceConvertsBookingTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         booking.refresh_from_db()
         self.assertEqual(booking.status, Booking.BookingStatus.CONVERTED)
+
+
+# =============================================================================
+# Sprint 24 — Buyer CRM Basics + KPR Status
+# =============================================================================
+class BookingKPRStatusTests(APITestCase):
+    """
+    Sprint 24: KPR status lives on Booking (this sale's financing
+    state), not on a separate Buyer profile — deliberately trimmed,
+    no transition guard (a rejected KPR reverting to "belum_diajukan"
+    to reapply is a normal real-world case, unlike Unit's lifecycle
+    which genuinely has illegal jumps worth preventing).
+    """
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Asri Sentosa KPR Status")
+        self.dev = CustomUser.objects.create_user(
+            email="dev.kprstatus@test.id", password="pass12345!",
+            full_name="Dev KPR Status", role="developer",
+        )
+        self.buyer = CustomUser.objects.create_user(
+            email="buyer.kprstatus@test.id", password="pass12345!",
+            full_name="Buyer KPR Status", role="buyer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.dev, role="owner", is_active=True,
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster KPR Status", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.unit = Unit.objects.create(
+            project=self.project, unit_number="A-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def _book_unit(self):
+        self._login_as(self.dev)
+        self.client.post(
+            f"/api/units/{self.unit.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000},
+            format="json",
+        )
+        return Booking.objects.get(unit=self.unit)
+
+    def test_new_booking_defaults_to_belum_diajukan(self):
+        booking = self._book_unit()
+        self.assertEqual(booking.kpr_status, Booking.KPRStatus.BELUM_DIAJUKAN)
+
+    def test_update_kpr_status_succeeds(self):
+        booking = self._book_unit()
+        self._login_as(self.dev)
+        resp = self.client.put(
+            f"/api/units/bookings/{booking.id}/kpr/",
+            {"kpr_status": "diajukan"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        booking.refresh_from_db()
+        self.assertEqual(booking.kpr_status, Booking.KPRStatus.DIAJUKAN)
+
+    def test_kpr_status_can_move_through_full_sequence(self):
+        booking = self._book_unit()
+        self._login_as(self.dev)
+        for new_status in ["diajukan", "disetujui", "akad"]:
+            resp = self.client.put(
+                f"/api/units/bookings/{booking.id}/kpr/",
+                {"kpr_status": new_status}, format="json",
+            )
+            self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        booking.refresh_from_db()
+        self.assertEqual(booking.kpr_status, Booking.KPRStatus.AKAD)
+
+    def test_kpr_status_can_revert_for_reapplication(self):
+        """No transition guard, by design — a rejected/reset KPR
+        reverting to belum_diajukan is a normal real-world case."""
+        booking = self._book_unit()
+        self._login_as(self.dev)
+        self.client.put(f"/api/units/bookings/{booking.id}/kpr/", {"kpr_status": "diajukan"}, format="json")
+        resp = self.client.put(
+            f"/api/units/bookings/{booking.id}/kpr/",
+            {"kpr_status": "belum_diajukan"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_invalid_kpr_status_rejected(self):
+        booking = self._book_unit()
+        self._login_as(self.dev)
+        resp = self.client.put(
+            f"/api/units/bookings/{booking.id}/kpr/",
+            {"kpr_status": "not_a_real_status"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_kpr_status_exposed_on_unit_detail(self):
+        booking = self._book_unit()
+        self._login_as(self.dev)
+        self.client.put(f"/api/units/bookings/{booking.id}/kpr/", {"kpr_status": "diajukan"}, format="json")
+        resp = self.client.get(f"/api/units/{self.unit.id}/")
+        self.assertEqual(resp.data["unit"]["booking"]["kpr_status"], "diajukan")
+
+
+class BookingStalledTests(APITestCase):
+    """
+    Sprint 24: is_stalled — a lightweight signal, computed fresh on
+    every access, deliberately NOT wired into the Decision Engine
+    (that's a heavier system, out of scope for this sprint).
+    """
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Asri Sentosa Stalled")
+        self.dev = CustomUser.objects.create_user(
+            email="dev.stalled@test.id", password="pass12345!",
+            full_name="Dev Stalled", role="developer",
+        )
+        self.buyer = CustomUser.objects.create_user(
+            email="buyer.stalled@test.id", password="pass12345!",
+            full_name="Buyer Stalled", role="buyer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.dev, role="owner", is_active=True,
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster Stalled", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.unit = Unit.objects.create(
+            project=self.project, unit_number="A-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def _book_unit(self, booking_date=None):
+        self._login_as(self.dev)
+        payload = {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000}
+        if booking_date:
+            payload["booking_date"] = str(booking_date)
+        self.client.post(f"/api/units/{self.unit.id}/book/", payload, format="json")
+        return Booking.objects.get(unit=self.unit)
+
+    def test_freshly_booked_is_not_stalled(self):
+        booking = self._book_unit()
+        self.assertFalse(booking.is_stalled)
+
+    def test_old_booking_with_no_kpr_progress_is_stalled(self):
+        old_date = date.today() - timedelta(days=Booking.STALL_THRESHOLD_DAYS + 1)
+        booking = self._book_unit(booking_date=old_date)
+        self.assertTrue(booking.is_stalled)
+
+    def test_disetujui_is_never_stalled_regardless_of_age(self):
+        old_date = date.today() - timedelta(days=30)
+        booking = self._book_unit(booking_date=old_date)
+        booking.kpr_status = Booking.KPRStatus.DISETUJUI
+        booking.save(update_fields=["kpr_status"])
+        self.assertFalse(booking.is_stalled)
+
+    def test_akad_is_never_stalled_regardless_of_age(self):
+        old_date = date.today() - timedelta(days=30)
+        booking = self._book_unit(booking_date=old_date)
+        booking.kpr_status = Booking.KPRStatus.AKAD
+        booking.save(update_fields=["kpr_status"])
+        self.assertFalse(booking.is_stalled)
+
+    def test_cancelled_booking_is_never_stalled(self):
+        old_date = date.today() - timedelta(days=30)
+        booking = self._book_unit(booking_date=old_date)
+        booking.status = Booking.BookingStatus.CANCELLED
+        booking.save(update_fields=["status"])
+        self.assertFalse(booking.is_stalled)
+
+
+class BookingTenantIsolationTests(APITestCase):
+    """
+    Sprint 24: proves the BookingCancelView refactor (hand-rolled
+    inline query → Booking.objects.for_user()) didn't quietly change
+    behavior — cross-org cancel and the new cross-org KPR update must
+    both still be correctly blocked, and the legitimate same-org path
+    must still work.
+    """
+
+    def setUp(self):
+        self.org_a = Organization.objects.create(name="Asri Sentosa Booking Isolation A")
+        self.org_b = Organization.objects.create(name="Org B Booking Isolation")
+
+        self.dev_a = CustomUser.objects.create_user(
+            email="dev.bookingisolation.a@test.id", password="pass12345!",
+            full_name="Dev Booking Isolation A", role="developer",
+        )
+        self.dev_b = CustomUser.objects.create_user(
+            email="dev.bookingisolation.b@test.id", password="pass12345!",
+            full_name="Dev Booking Isolation B", role="developer",
+        )
+        self.buyer = CustomUser.objects.create_user(
+            email="buyer.bookingisolation@test.id", password="pass12345!",
+            full_name="Buyer Booking Isolation", role="buyer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_a, user=self.dev_a, role="owner", is_active=True,
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org_b, user=self.dev_b, role="owner", is_active=True,
+        )
+
+        self.project_a = Project.objects.create(
+            organization=self.org_a, name="Cluster Booking Isolation A", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.unit_a = Unit.objects.create(
+            project=self.project_a, unit_number="A-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+
+        self.client.force_authenticate(user=self.dev_a)
+        self.client.post(
+            f"/api/units/{self.unit_a.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000},
+            format="json",
+        )
+        self.booking_a = Booking.objects.get(unit=self.unit_a)
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def test_org_b_cannot_cancel_org_a_booking(self):
+        self._login_as(self.dev_b)
+        resp = self.client.post(
+            f"/api/units/bookings/{self.booking_a.id}/cancel/",
+            {"reason": "test"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+        self.booking_a.refresh_from_db()
+        self.assertEqual(self.booking_a.status, Booking.BookingStatus.ACTIVE)
+
+    def test_org_b_cannot_update_org_a_booking_kpr_status(self):
+        self._login_as(self.dev_b)
+        resp = self.client.put(
+            f"/api/units/bookings/{self.booking_a.id}/kpr/",
+            {"kpr_status": "diajukan"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+        self.booking_a.refresh_from_db()
+        self.assertEqual(self.booking_a.kpr_status, Booking.KPRStatus.BELUM_DIAJUKAN)
+
+    def test_org_a_can_still_cancel_its_own_booking(self):
+        """Sanity check: the refactor didn't break the legitimate path."""
+        self._login_as(self.dev_a)
+        resp = self.client.post(
+            f"/api/units/bookings/{self.booking_a.id}/cancel/",
+            {"reason": "test"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_org_a_can_still_update_its_own_booking_kpr_status(self):
+        self._login_as(self.dev_a)
+        resp = self.client.put(
+            f"/api/units/bookings/{self.booking_a.id}/kpr/",
+            {"kpr_status": "diajukan"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)

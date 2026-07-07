@@ -24,6 +24,8 @@ from .models import Booking, Unit
 from .serializers import (
     BookingCancelSerializer,
     BookingCreateSerializer,
+    BookingKPRUpdateSerializer,
+    BookingSerializer,
     UnitCreateSerializer,
     UnitSerializer,
 )
@@ -200,7 +202,13 @@ class BookingCancelView(TenantScopedAPIView):
     POST /api/bookings/<id>/cancel/
     Cancels an active booking — restores unit to "tersedia".
     """
-    model = Unit  # for tenant scoping base
+    # Sprint 24: now scoped to Booking directly, using the standard
+    # self.get_object() pattern — the hand-rolled inline tenant query
+    # that used to live here is gone, replaced by Booking's new
+    # for_user() manager (see BookingQuerySet in models.py). Same
+    # pattern every other tenant-scoped view in this codebase already
+    # uses; this one just hadn't caught up yet.
+    model = Booking
 
     def post(self, request, booking_id):
         if request.user.role not in ("developer", "super_admin"):
@@ -209,21 +217,7 @@ class BookingCancelView(TenantScopedAPIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Verify booking belongs to this tenant
-        try:
-            booking = Booking.objects.select_related("unit", "buyer").get(
-                id=booking_id,
-                organization__in=request.user.memberships.filter(
-                    is_active=True
-                ).values_list("organization_id", flat=True)
-                if request.user.role != "super_admin"
-                else Booking.objects.values_list("organization_id", flat=True),
-            )
-        except Booking.DoesNotExist:
-            return Response(
-                {"success": False, "message": "Booking tidak ditemukan"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        booking = self.get_object(booking_id)
 
         if booking.status != Booking.BookingStatus.ACTIVE:
             return Response({
@@ -255,4 +249,41 @@ class BookingCancelView(TenantScopedAPIView):
             "success": True,
             "message": f"Booking {booking.spr_number} berhasil dibatalkan. Unit {unit.unit_number} kembali tersedia.",
             "unit":    UnitSerializer(unit).data,
+        })
+
+
+class BookingKPRUpdateView(TenantScopedAPIView):
+    """
+    PUT /api/units/bookings/<id>/kpr/
+    Sprint 24: updates a booking's KPR financing status. Deliberately
+    trimmed — a plain status field update, no transition guard (see
+    BookingKPRUpdateSerializer's docstring for why). Just enough for
+    a developer to track "where is this sale's financing at," and for
+    Booking.is_stalled to have something real to compute against.
+    """
+    model = Booking
+
+    def put(self, request, booking_id):
+        if request.user.role not in ("developer", "super_admin"):
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        booking = self.get_object(booking_id)
+
+        serializer = BookingKPRUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        booking.kpr_status = serializer.validated_data["kpr_status"]
+        booking.save(update_fields=["kpr_status", "updated_at"])
+
+        return Response({
+            "success": True,
+            "message": f"Status KPR {booking.spr_number} diperbarui menjadi {booking.get_kpr_status_display()}.",
+            "booking": BookingSerializer(booking).data,
         })
