@@ -391,8 +391,8 @@ function BookingModal({
               </div>
 
               {/* Sprint 23: deposit window — how many days before this
-                  booking auto-expires if never converted to a real
-                  sale. Defaults to 7, matching Booking.DEFAULT_EXPIRY_DAYS
+                  booking auto-expires if never converted to a real sale.
+                  Defaults to 7, matching Booking.DEFAULT_EXPIRY_DAYS
                   server-side, but adjustable per-booking here. */}
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 5 }}>
