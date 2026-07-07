@@ -7,12 +7,11 @@
  * sidebar until now. Deliberately reuses GET /api/units/ entirely —
  * every field this page needs (buyer_name, buyer_email, the nested
  * booking with kpr_status/is_stalled) already exists there, fully
- * tenant-isolated and tested. No new backend endpoint, no new tests
- * needed — this is presentation on top of proven data.
+ * tenant-isolated and tested. No new backend endpoint, no new tests needed — this is presentation on top of proven data.
  */
 
-import { rupiah } from "@/lib/mock-data";
 import { Booking, Unit, unitsApi } from "@/lib/api/units";
+import { rupiah } from "@/lib/mock-data";
 import {
   AlertTriangle, Loader2, Search, Users,
 } from "lucide-react";
