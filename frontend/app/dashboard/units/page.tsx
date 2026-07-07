@@ -51,6 +51,18 @@ function bookingCountdown(booking: Booking): { label: string; color: string } | 
   return                    { label: `⏳ ${daysLeft} hari lagi`, color: "var(--color-ink-3)"   };
 }
 
+// ── Sprint 24: KPR status color, read-only display on this page —
+// the actual editable control lives on the Data Pembeli page, so
+// this table doesn't need duplicate mutation logic.
+function kprStatusColor(kprStatus: Booking["kpr_status"]): string {
+  switch (kprStatus) {
+    case "akad":      return "var(--color-success)";
+    case "disetujui": return "var(--color-accent)";
+    case "diajukan":  return "var(--color-warning)";
+    default:          return "var(--color-ink-3)";
+  }
+}
+
 // ── Status badge ──────────────────────────────────────────────
 function StatusBadge({ status, display }: { status: Unit["status"]; display: string }) {
   const map: Record<Unit["status"], { color: string; bg: string }> = {
@@ -695,6 +707,12 @@ export default function UnitsPage() {
                       {u.booking && bookingCountdown(u.booking) && (
                         <div style={{ fontSize: 10, fontWeight: 700, marginTop: 2, color: bookingCountdown(u.booking)!.color }}>
                           {bookingCountdown(u.booking)!.label}
+                        </div>
+                      )}
+                      {u.booking && u.booking.status === "active" && (
+                        <div style={{ fontSize: 10, fontWeight: 600, marginTop: 2, color: kprStatusColor(u.booking.kpr_status) }}>
+                          🏦 KPR: {u.booking.kpr_status_display}
+                          {u.booking.is_stalled && " ⚠️"}
                         </div>
                       )}
                     </div>
