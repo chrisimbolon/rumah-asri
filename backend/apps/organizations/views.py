@@ -117,20 +117,16 @@ class BuyerListView(TenantScopedAPIView):
     def get_queryset(self):
         # Override — buyers don't belong to organizations
         # Return all active buyers
-        from apps.authentication.models import CustomUser
         return CustomUser.objects.filter(
             role="buyer", is_active=True
         ).order_by("full_name")
 
     def get(self, request):
         if request.user.role not in ("developer", "super_admin"):
-            from rest_framework import status as drf_status
-            from rest_framework.response import Response
             return Response(
                 {"success": False, "message": "Tidak memiliki izin"},
-                status=drf_status.HTTP_403_FORBIDDEN,
+                status=status.HTTP_403_FORBIDDEN,
             )
-        from rest_framework.response import Response
         buyers = self.get_queryset()
         return Response({
             "success": True,
