@@ -17,6 +17,10 @@ export interface Booking {
   // (always false right after creation anyway) — only the full
   // BookingSerializer used elsewhere (e.g. GET /units/<id>/) does.
   is_expired?:    boolean;
+  // Sprint 24: same reasoning applies here too.
+  kpr_status:         "belum_diajukan" | "diajukan" | "disetujui" | "akad";
+  kpr_status_display: string;
+  is_stalled?:        boolean;
   payment_method: string;
   bank:           string;
   status:         "active" | "cancelled" | "converted" | "expired";
@@ -114,5 +118,19 @@ export const unitsApi = {
       { reason: reason ?? "" }
     );
     return data.unit;
+  },
+
+  // Sprint 24: deliberately trimmed — a plain status update, no
+  // transition guard client-side either (matches the backend, which
+  // allows a KPR status to revert for reapplication).
+  async updateKPRStatus(
+    bookingId: string,
+    kprStatus: Booking["kpr_status"]
+  ): Promise<{ booking: Booking; message: string }> {
+    const { data } = await api.put(
+      `/api/units/bookings/${bookingId}/kpr/`,
+      { kpr_status: kprStatus }
+    );
+    return data;
   },
 };
