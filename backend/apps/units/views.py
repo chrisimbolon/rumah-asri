@@ -12,6 +12,8 @@ Endpoints:
   POST /api/units/<id>/book/    ← book a unit (pre-sale)
   POST /api/bookings/<id>/cancel/ ← cancel a booking
 """
+from datetime import timedelta
+
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -146,6 +148,12 @@ class UnitBookingView(TenantScopedAPIView):
         # Generate SPR number
         spr_number = Booking.generate_spr_number(org)
 
+        # Sprint 23: compute the deposit-window deadline. Measured from
+        # NOW (not booking_date), since that's when the clock on "pay
+        # up or lose the reservation" actually starts ticking.
+        expiry_days = data.get("expiry_days", Booking.DEFAULT_EXPIRY_DAYS)
+        expires_at  = timezone.now() + timedelta(days=expiry_days)
+
         # Create booking
         booking = Booking.objects.create(
             unit           = unit,
@@ -154,6 +162,7 @@ class UnitBookingView(TenantScopedAPIView):
             spr_number     = spr_number,
             booking_fee    = data["booking_fee"],
             booking_date   = data["booking_date"],
+            expires_at     = expires_at,
             payment_method = data.get("payment_method", ""),
             bank           = data.get("bank", ""),
             notes          = data.get("notes", ""),
@@ -176,6 +185,7 @@ class UnitBookingView(TenantScopedAPIView):
                 "spr_number":    booking.spr_number,
                 "booking_fee":   booking.booking_fee,
                 "booking_date":  str(booking.booking_date),
+                "expires_at":    booking.expires_at.isoformat() if booking.expires_at else None,
                 "payment_method": booking.payment_method,
                 "bank":          booking.bank,
                 "buyer_name":    buyer.full_name,

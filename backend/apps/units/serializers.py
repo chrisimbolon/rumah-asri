@@ -16,12 +16,14 @@ class BookingSerializer(serializers.ModelSerializer):
     buyer_email  = serializers.CharField(source="buyer.email",      read_only=True)
     unit_number  = serializers.CharField(source="unit.unit_number", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    is_expired   = serializers.BooleanField(read_only=True)
 
     class Meta:
         model  = Booking
         fields = [
             "id", "spr_number", "booking_fee",
-            "booking_date", "payment_method", "bank",
+            "booking_date", "expires_at", "is_expired",
+            "payment_method", "bank",
             "status", "status_display", "notes",
             "buyer", "buyer_name", "buyer_email",
             "unit_number", "created_at",
@@ -113,6 +115,23 @@ class UnitCreateSerializer(serializers.ModelSerializer):
                 new_price=new_price,
                 changed_by=getattr(request, "user", None),
             )
+
+        # Sprint 23: when a booked unit advances to "proses" (in
+        # progress), the underlying Booking has genuinely converted
+        # from a pending reservation into a real sale — keep
+        # Booking.status in sync so it never silently disagrees with
+        # Unit.status. instance.status here is still the OLD value
+        # (checked before super().update() applies the change below).
+        new_status = validated_data.get("status")
+        if (
+            new_status == Unit.Status.IN_PROGRESS
+            and instance.status == Unit.Status.BOOKED
+            and hasattr(instance, "booking")
+            and instance.booking.status == Booking.BookingStatus.ACTIVE
+        ):
+            instance.booking.status = Booking.BookingStatus.CONVERTED
+            instance.booking.save(update_fields=["status", "updated_at"])
+
         return super().update(instance, validated_data)
 
 
@@ -131,6 +150,13 @@ class BookingCreateSerializer(serializers.Serializer):
     booking_date   = serializers.DateField(
         default=date.today,
         help_text="Date of booking (defaults to today)"
+    )
+    # Sprint 23: how many days until this booking auto-expires if
+    # never converted to a real sale. Defaults to Booking.DEFAULT_EXPIRY_DAYS
+    # (7) — caller can override for a longer/shorter deposit window.
+    expiry_days    = serializers.IntegerField(
+        required=False, min_value=1, default=7,
+        help_text="Jumlah hari sebelum booking kedaluwarsa jika belum dikonversi (default 7 hari)"
     )
     payment_method = serializers.CharField(
         max_length=100, required=False, allow_blank=True, default=""

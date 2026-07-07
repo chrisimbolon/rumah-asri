@@ -134,6 +134,13 @@ class Booking(models.Model):
         ACTIVE    = "active",    "Aktif"
         CANCELLED = "cancelled", "Dibatalkan"
         CONVERTED = "converted", "Dikonversi ke Penjualan"
+        EXPIRED   = "expired",   "Kedaluwarsa"   # Sprint 23: auto-expired, distinct from a manual cancel
+
+    # Sprint 23: default deposit window if the caller doesn't specify
+    # one explicitly. 7 days is a reasonable starting default for the
+    # Indonesian pre-sales "booking fee" convention — easy to override
+    # per-request via BookingCreateSerializer's expiry_days field.
+    DEFAULT_EXPIRY_DAYS = 7
 
     id          = models.UUIDField(
         primary_key=True,
@@ -170,6 +177,16 @@ class Booking(models.Model):
         help_text="Uang tanda jadi / booking fee",
     )
     booking_date  = models.DateField(verbose_name="Tanggal Booking")
+    # Sprint 23: without a real deadline, a "dipesan" unit can sit
+    # reserved forever with zero pressure to actually pay — this is
+    # the field that gives the "sell first, build second" model real
+    # teeth. Nullable so existing/legacy bookings created before this
+    # field existed don't suddenly become "already expired."
+    expires_at    = models.DateTimeField(
+        null=True, blank=True,
+        verbose_name="Kedaluwarsa Pada",
+        help_text="Jika belum dikonversi sebelum tanggal ini, booking otomatis kedaluwarsa",
+    )
     notes         = models.TextField(blank=True, verbose_name="Catatan")
 
     # ── Payment method ────────────────────────────────────────
@@ -211,6 +228,22 @@ class Booking(models.Model):
 
     def __str__(self):
         return f"{self.spr_number} — {self.unit} — {self.buyer}"
+
+    @property
+    def is_expired(self):
+        """
+        Sprint 23: true if this booking is still ACTIVE but its
+        deadline has passed. Doesn't change any state by itself —
+        the expire_bookings management command is what actually acts
+        on this, on a schedule. Bookings with no expires_at set
+        (legacy data) never expire on their own.
+        """
+        if self.status != self.BookingStatus.ACTIVE:
+            return False
+        if self.expires_at is None:
+            return False
+        from django.utils import timezone
+        return timezone.now() > self.expires_at
 
     @classmethod
     def generate_spr_number(cls, organization):

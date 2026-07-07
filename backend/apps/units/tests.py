@@ -1,5 +1,7 @@
-from datetime import date
+from datetime import date, timedelta
 
+from django.core.management import call_command
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -7,7 +9,7 @@ from apps.authentication.models import CustomUser
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.projects.models import Project
 
-from .models import Unit, UnitPriceHistory
+from .models import Booking, Unit, UnitPriceHistory
 
 
 # =============================================================================
@@ -196,10 +198,12 @@ class UnitTenantIsolationTests(APITestCase):
     it earns its own explicit proof here too — not just an assumption
     that inheritance alone guarantees correctness.
 
-    Note: exact status code for cross-tenant access (403 vs 404) isn't
-    confirmed against apps/core/views.py directly — asserting "access
-    denied in some form" rather than a specific code, until that base
-    class is confirmed.
+    Confirmed against apps/core/views.py: TenantScopedAPIView.get_object()
+    only ever raises NotFound (404) — there's no 403 path in the shared
+    base class at all. The deliberately vague message ("Tidak ditemukan,
+    atau Anda tidak memiliki akses.") is a nice touch too — it never
+    reveals to an unauthorized caller whether the object exists in
+    someone else's org or doesn't exist anywhere at all.
     """
 
     def setUp(self):
@@ -253,13 +257,254 @@ class UnitTenantIsolationTests(APITestCase):
     def test_org_a_cannot_read_org_b_unit_directly(self):
         self._login_as(self.dev_a)
         resp = self.client.get(f"/api/units/{self.unit_b.id}/")
-        self.assertIn(resp.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_org_a_cannot_update_org_b_unit(self):
         self._login_as(self.dev_a)
         resp = self.client.put(
             f"/api/units/{self.unit_b.id}/", {"status": "dipesan"}, format="json",
         )
-        self.assertIn(resp.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
         self.unit_b.refresh_from_db()
         self.assertEqual(self.unit_b.status, Unit.Status.AVAILABLE)
+
+
+# =============================================================================
+# Sprint 23 — NUP & Booking Flow
+# =============================================================================
+class BookingCreationAndExpiryTests(APITestCase):
+    """
+    Sprint 23: without a real deadline, a "dipesan" unit could sit
+    reserved forever with zero pressure to pay the booking fee. This
+    covers both the deadline actually getting set on creation, and the
+    expire_bookings command correctly acting on it (and, just as
+    importantly, correctly leaving everything else alone).
+    """
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Asri Sentosa Booking Expiry")
+        self.dev = CustomUser.objects.create_user(
+            email="dev.bookingexpiry@test.id", password="pass12345!",
+            full_name="Dev Booking Expiry", role="developer",
+        )
+        self.buyer = CustomUser.objects.create_user(
+            email="buyer.bookingexpiry@test.id", password="pass12345!",
+            full_name="Buyer Booking Expiry", role="buyer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.dev, role="owner", is_active=True,
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster Booking Expiry", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.unit = Unit.objects.create(
+            project=self.project, unit_number="A-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def _book_unit(self, expiry_days=None):
+        payload = {
+            "buyer_id": str(self.buyer.id),
+            "booking_fee": 10_000_000,
+        }
+        if expiry_days is not None:
+            payload["expiry_days"] = expiry_days
+        self._login_as(self.dev)
+        return self.client.post(
+            f"/api/units/{self.unit.id}/book/", payload, format="json",
+        )
+
+    def test_booking_gets_a_default_expiry(self):
+        resp = self._book_unit()
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertIsNotNone(resp.data["booking"]["expires_at"])
+
+        booking = Booking.objects.get(unit=self.unit)
+        self.assertIsNotNone(booking.expires_at)
+        # Default is 7 days — allow a small tolerance for test execution time
+        expected = timezone.now() + timedelta(days=Booking.DEFAULT_EXPIRY_DAYS)
+        self.assertAlmostEqual(
+            booking.expires_at.timestamp(), expected.timestamp(), delta=10
+        )
+
+    def test_custom_expiry_days_respected(self):
+        resp = self._book_unit(expiry_days=14)
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+        booking = Booking.objects.get(unit=self.unit)
+        expected = timezone.now() + timedelta(days=14)
+        self.assertAlmostEqual(
+            booking.expires_at.timestamp(), expected.timestamp(), delta=10
+        )
+
+    def test_expire_bookings_command_reverts_unit_and_booking(self):
+        self._book_unit()
+        booking = Booking.objects.get(unit=self.unit)
+        # Force it into the past so the command actually finds it
+        booking.expires_at = timezone.now() - timedelta(days=1)
+        booking.save(update_fields=["expires_at"])
+
+        call_command("expire_bookings")
+
+        booking.refresh_from_db()
+        self.unit.refresh_from_db()
+        self.assertEqual(booking.status, Booking.BookingStatus.EXPIRED)
+        self.assertEqual(self.unit.status, Unit.Status.AVAILABLE)
+        self.assertIsNone(self.unit.buyer)
+
+    def test_expire_bookings_command_leaves_non_expired_bookings_alone(self):
+        self._book_unit(expiry_days=30)   # far in the future
+
+        call_command("expire_bookings")
+
+        booking = Booking.objects.get(unit=self.unit)
+        self.unit.refresh_from_db()
+        self.assertEqual(booking.status, Booking.BookingStatus.ACTIVE)
+        self.assertEqual(self.unit.status, Unit.Status.BOOKED)
+
+    def test_expire_bookings_command_ignores_already_cancelled(self):
+        self._book_unit()
+        booking = Booking.objects.get(unit=self.unit)
+        booking.status = Booking.BookingStatus.CANCELLED
+        booking.expires_at = timezone.now() - timedelta(days=1)
+        booking.save(update_fields=["status", "expires_at"])
+
+        call_command("expire_bookings")
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.BookingStatus.CANCELLED)
+
+    def test_expire_bookings_command_ignores_already_converted(self):
+        self._book_unit()
+        booking = Booking.objects.get(unit=self.unit)
+        booking.status = Booking.BookingStatus.CONVERTED
+        booking.expires_at = timezone.now() - timedelta(days=1)
+        booking.save(update_fields=["status", "expires_at"])
+
+        call_command("expire_bookings")
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.BookingStatus.CONVERTED)
+
+    def test_booking_with_no_expiry_never_auto_expires(self):
+        """Legacy-data safety: a booking created before this field
+        existed (expires_at=None) must never get swept up by the
+        command, however old it is."""
+        self._book_unit()
+        booking = Booking.objects.get(unit=self.unit)
+        booking.expires_at = None
+        booking.save(update_fields=["expires_at"])
+
+        call_command("expire_bookings")
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.BookingStatus.ACTIVE)
+
+    def test_is_expired_property(self):
+        self._book_unit()
+        booking = Booking.objects.get(unit=self.unit)
+        self.assertFalse(booking.is_expired)
+
+        booking.expires_at = timezone.now() - timedelta(days=1)
+        booking.save(update_fields=["expires_at"])
+        self.assertTrue(booking.is_expired)
+
+
+class UnitAdvanceConvertsBookingTests(APITestCase):
+    """
+    Sprint 23: closes the gap where advancing a Unit from dipesan to
+    proses never touched the Booking record at all — leaving a
+    "still ACTIVE" booking dangling for a sale that's already in
+    progress.
+    """
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Asri Sentosa Convert Booking")
+        self.dev = CustomUser.objects.create_user(
+            email="dev.convertbooking@test.id", password="pass12345!",
+            full_name="Dev Convert Booking", role="developer",
+        )
+        self.buyer = CustomUser.objects.create_user(
+            email="buyer.convertbooking@test.id", password="pass12345!",
+            full_name="Buyer Convert Booking", role="buyer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.dev, role="owner", is_active=True,
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster Convert Booking", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.unit = Unit.objects.create(
+            project=self.project, unit_number="A-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def test_advancing_to_proses_converts_active_booking(self):
+        self._login_as(self.dev)
+        self.client.post(
+            f"/api/units/{self.unit.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000},
+            format="json",
+        )
+        booking = Booking.objects.get(unit=self.unit)
+        self.assertEqual(booking.status, Booking.BookingStatus.ACTIVE)
+
+        resp = self.client.put(
+            f"/api/units/{self.unit.id}/", {"status": "proses"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.BookingStatus.CONVERTED)
+
+    def test_advancing_without_prior_booking_record_does_not_crash(self):
+        """
+        A unit can reach 'dipesan' via a direct manual PUT (not
+        necessarily through the /book/ endpoint) — so no Booking row
+        may exist at all. The conversion sync must handle that
+        gracefully, not raise Booking.DoesNotExist.
+        """
+        self._login_as(self.dev)
+        # Manually move to dipesan WITHOUT going through /book/ —
+        # legal per the transition guard, just skips booking creation.
+        resp = self.client.put(
+            f"/api/units/{self.unit.id}/", {"status": "dipesan"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(Booking.objects.filter(unit=self.unit).exists())
+
+        # Advancing further must not crash just because there's no booking
+        resp = self.client.put(
+            f"/api/units/{self.unit.id}/", {"status": "proses"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_advancing_does_not_touch_an_already_converted_booking(self):
+        """Idempotency: if somehow called twice, don't error or double-log."""
+        self._login_as(self.dev)
+        self.client.post(
+            f"/api/units/{self.unit.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000},
+            format="json",
+        )
+        self.client.put(f"/api/units/{self.unit.id}/", {"status": "proses"}, format="json")
+
+        booking = Booking.objects.get(unit=self.unit)
+        self.assertEqual(booking.status, Booking.BookingStatus.CONVERTED)
+        # Unit is now "proses" — advancing again isn't a valid
+        # transition anyway (proses -> proses is a no-op per the
+        # guard), confirming nothing weird happens on a repeat call.
+        resp = self.client.put(f"/api/units/{self.unit.id}/", {"status": "proses"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.BookingStatus.CONVERTED)
