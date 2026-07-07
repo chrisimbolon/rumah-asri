@@ -3,9 +3,7 @@
 // === frontend/app/dashboard/tasks/page.tsx ===
 // Sprint 19: standalone Tasks & Actions page. Thin wrapper around the
 // shared NextActionsPanel (extracted to components/dashboard/TaskPanels.tsx)
-// — same component already proven on the Command Center, given its own
-// dedicated home so it doesn't have to compete for space with Event
-// Stream, Portfolio Intelligence, and everything else on that page.
+// — same component already proven on the Command Center
 // =============================================================================
 
 import { NextActionsPanel } from "@/components/dashboard/TaskPanels";
