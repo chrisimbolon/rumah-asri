@@ -18,12 +18,6 @@ from apps.core.views import TenantScopedAPIView
 from .models import Payment
 from .serializers import PaymentCreateSerializer, PaymentSerializer
 
-# NOTE: PaymentCreateSerializer's `unit` field needs the same treatment as
-# UnitCreateSerializer.validate_project() above — add a validate_unit()
-# that checks unit.organization_id against the user's membership org_ids.
-# I wasn't given payments/serializers.py content, so I can't hand you the
-# literal diff, but the pattern is identical.
-
 
 class PaymentListView(TenantScopedAPIView):
     model = Payment

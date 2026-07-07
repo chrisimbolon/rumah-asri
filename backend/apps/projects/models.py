@@ -1170,16 +1170,27 @@ class Project(TenantScopedModel):
 
     @property
     def collection_efficiency(self):
+        """
+        Sprint 25: fixed two real bugs —
+        1. total_arrears now reuses Payment.is_overdue (the same
+           correct definition _get_overdue_payments_count already used)
+           instead of a separate "total_billed - total_settled" calc
+           that silently counted not-yet-due payments as arrears too.
+        2. The except-Exception fallback no longer lies and reports
+           "100% Sehat" when something actually broke — a financial
+           health indicator should never disguise a real error as good
+           news. Returns an explicit "unavailable" status instead.
+        """
         try:
             from apps.payments.models import Payment
             payments      = list(Payment.objects.filter(unit__project=self))
             total_billed  = sum(p.amount for p in payments)
             total_settled = sum(p.amount for p in payments if p.status == "lunas")
-            total_arrears = total_billed - total_settled
+            total_arrears = sum(p.amount for p in payments if p.is_overdue)
             efficiency    = round((total_settled / total_billed) * 100) if total_billed > 0 else 100
             return {"total_billed": int(total_billed), "total_settled": int(total_settled), "total_arrears": int(total_arrears), "efficiency_pct": efficiency, "status": "healthy" if efficiency >= 90 else "attention" if efficiency >= 70 else "critical", "status_display": "Sehat" if efficiency >= 90 else "Perlu Perhatian" if efficiency >= 70 else "Kritis"}
         except Exception:
-            return {"total_billed": 0, "total_settled": 0, "total_arrears": 0, "efficiency_pct": 100, "status": "healthy", "status_display": "Sehat"}
+            return {"total_billed": 0, "total_settled": 0, "total_arrears": 0, "efficiency_pct": 0, "status": "unavailable", "status_display": "Data Tidak Tersedia"}
 
     def _get_overdue_payments_count(self, reference_date=None):
         """
@@ -1190,7 +1201,7 @@ class Project(TenantScopedModel):
         try:
             from apps.payments.models import Payment
             from django.utils import timezone
-            today = reference_date or timezone.now().date()
+            today = reference_date or timezone.localdate()
             return Payment.objects.filter(unit__project=self).filter(
                 models.Q(status="menunggak") | models.Q(status="menunggu", due_date__lt=today)
             ).count()
@@ -1761,7 +1772,7 @@ class Project(TenantScopedModel):
         try:
             from apps.payments.models import Payment
             from django.utils import timezone
-            today    = timezone.now().date()
+            today    = timezone.localdate()
             payments = list(Payment.objects.filter(unit__project=self).select_related("unit", "unit__buyer"))
             if not payments:
                 return {"has_data": False, "total_billed": 0, "total_lunas": 0, "total_menunggak": 0, "total_upcoming": 0, "efficiency_pct": 100, "status": "healthy", "status_display": "Sehat", "overdue_items": [], "upcoming_items": []}
@@ -1774,4 +1785,4 @@ class Project(TenantScopedModel):
             upcoming_items = sorted([{"id": str(p.id), "unit_number": p.unit.unit_number, "buyer_name": p.unit.buyer.full_name if p.unit.buyer else "—", "payment_type": p.payment_type, "amount": int(p.amount), "due_date": p.due_date.isoformat(), "days_until": (p.due_date - today).days} for p in payments if p.status in ("akan_datang", "menunggu") and p.due_date >= today and (p.due_date - today).days <= 30], key=lambda x: x["days_until"])
             return {"has_data": True, "total_billed": int(total_billed), "total_lunas": int(total_lunas), "total_menunggak": int(total_menunggak), "total_upcoming": int(total_upcoming), "efficiency_pct": efficiency, "status": "healthy" if efficiency >= 90 else "attention" if efficiency >= 70 else "critical", "status_display": "Sehat" if efficiency >= 90 else "Perlu Perhatian" if efficiency >= 70 else "Kritis", "overdue_items": overdue_items, "upcoming_items": upcoming_items}
         except Exception:
-            return {"has_data": False, "total_billed": 0, "total_lunas": 0, "total_menunggak": 0, "total_upcoming": 0, "efficiency_pct": 100, "status": "healthy", "status_display": "Sehat", "overdue_items": [], "upcoming_items": []}
+            return {"has_data": False, "total_billed": 0, "total_lunas": 0, "total_menunggak": 0, "total_upcoming": 0, "efficiency_pct": 0, "status": "unavailable", "status_display": "Data Tidak Tersedia", "overdue_items": [], "upcoming_items": []}

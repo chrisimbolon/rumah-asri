@@ -302,13 +302,19 @@ class Booking(models.Model):
         booking. A signal only, computed fresh on every access —
         deliberately NOT wired into the Decision Engine yet (that's a
         heavier system, out of scope for this sprint).
+
+        Sprint 25 bugfix: was using timezone.now().date(), which
+        returns the UTC calendar date — silently wrong for several
+        hours around local midnight in Asia/Jakarta (UTC+7). Now uses
+        timezone.localdate(). Same bug also found and fixed in
+        Payment.is_overdue this sprint.
         """
         if self.status != self.BookingStatus.ACTIVE:
             return False
         if self.kpr_status in (self.KPRStatus.DISETUJUI, self.KPRStatus.AKAD):
             return False
         from django.utils import timezone
-        days_since_booking = (timezone.now().date() - self.booking_date).days
+        days_since_booking = (timezone.localdate() - self.booking_date).days
         return days_since_booking >= self.STALL_THRESHOLD_DAYS
 
     @classmethod
