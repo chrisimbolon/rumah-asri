@@ -9,7 +9,7 @@
 
 import { Project, projectsApi } from "@/lib/api/projects";
 import {
-  BookingPayload, CreateUnitPayload,
+  Booking, BookingPayload, CreateUnitPayload,
   UNIT_TYPE_OPTIONS, Unit, unitsApi,
 } from "@/lib/api/units";
 import { rupiah, warnaProgres } from "@/lib/mock-data";
@@ -33,6 +33,23 @@ const NEXT_STATUS: Partial<Record<Unit["status"], { next: Unit["status"]; label:
   proses:  { next: "terjual",      label: "Tandai Terjual" },
   terjual: { next: "serah_terima", label: "Serah Terima" },
 };
+
+// ── Sprint 23: booking expiry countdown ────────────────────────
+// Only meaningful for a still-ACTIVE booking with a real deadline —
+// a converted/cancelled/expired booking has nothing left to count
+// down. Color escalates as the deadline gets close, matching the
+// same "quiet until it matters" spirit as the risk-score pulses.
+function bookingCountdown(booking: Booking): { label: string; color: string } | null {
+  if (booking.status !== "active" || !booking.expires_at) return null;
+
+  const msLeft   = new Date(booking.expires_at).getTime() - Date.now();
+  const daysLeft = Math.ceil(msLeft / 86_400_000);
+
+  if (daysLeft <= 0) return { label: "⚠️ Kedaluwarsa",        color: "var(--color-danger)"  };
+  if (daysLeft <= 1) return { label: "⚠️ Kedaluwarsa besok",  color: "var(--color-danger)"  };
+  if (daysLeft <= 3) return { label: `⏳ ${daysLeft} hari lagi`, color: "var(--color-warning)" };
+  return                    { label: `⏳ ${daysLeft} hari lagi`, color: "var(--color-ink-3)"   };
+}
 
 // ── Status badge ──────────────────────────────────────────────
 function StatusBadge({ status, display }: { status: Unit["status"]; display: string }) {
@@ -229,6 +246,7 @@ function BookingModal({
     buyer_id:       buyers[0]?.id ?? "",
     booking_fee:    0,
     booking_date:   new Date().toISOString().split("T")[0],
+    expiry_days:    7,
     payment_method: "",
     bank:           "",
     notes:          "",
@@ -357,6 +375,26 @@ function BookingModal({
                     value={form.payment_method ?? ""}
                     onChange={(e) => setForm({ ...form, payment_method: e.target.value })}
                     style={inputStyle} />
+                </div>
+              </div>
+
+              {/* Sprint 23: deposit window — how many days before this
+                  booking auto-expires if never converted to a real
+                  sale. Defaults to 7, matching Booking.DEFAULT_EXPIRY_DAYS
+                  server-side, but adjustable per-booking here. */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 5 }}>
+                  Jendela Deposit (hari)
+                </label>
+                <input type="number" min={1} placeholder="7"
+                  value={form.expiry_days ?? 7}
+                  onChange={(e) => setForm({ ...form, expiry_days: Number(e.target.value) })}
+                  style={inputStyle} />
+                <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 4 }}>
+                  Booking otomatis kedaluwarsa pada{" "}
+                  {new Date(Date.now() + (form.expiry_days ?? 7) * 86_400_000)
+                    .toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}
+                  {" "}jika belum dikonversi
                 </div>
               </div>
 
@@ -652,6 +690,11 @@ export default function UnitsPage() {
                       {u.booking && (
                         <div style={{ fontSize: 10, color: "var(--color-warning)", marginTop: 3, fontWeight: 600 }}>
                           📄 {u.booking.spr_number}
+                        </div>
+                      )}
+                      {u.booking && bookingCountdown(u.booking) && (
+                        <div style={{ fontSize: 10, fontWeight: 700, marginTop: 2, color: bookingCountdown(u.booking)!.color }}>
+                          {bookingCountdown(u.booking)!.label}
                         </div>
                       )}
                     </div>
