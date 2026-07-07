@@ -420,44 +420,18 @@ export default function UnitsPage() {
     Promise.all([
       unitsApi.list(),
       projectsApi.list(),
-      // Fetch buyers for booking modal
-      import("@/lib/api").then(({ default: api }) =>
-        api.get("/api/auth/me/").then(() =>
-          api.get("/api/units/").then(() => [] as typeof buyers)
-        ).catch(() => [] as typeof buyers)
-      ),
     ])
       .then(([u, p]) => { setUnits(u); setProjects(p); })
       .catch(() => setError("Gagal memuat data unit"))
       .finally(() => setLoading(false));
-
-    // Fetch buyers separately
-    import("@/lib/api").then(({ default: api }) => {
-      api.get("/api/auth/register/").catch(() => {});
-    });
-
-    // Simple buyer fetch via shell — use existing endpoint
-    fetch("/api/units/")
-      .then(() => {})
-      .catch(() => {});
-  }, []);
-
-  // Fetch buyers from registration data (simplified)
-  useEffect(() => {
-    import("@/lib/api").then(({ default: api }) => {
-      // We'll use a simple approach — fetch from a buyers endpoint
-      // For now use the existing buyer portal users
-      api.get("/api/buyer/me/")
-        .then(() => {})
-        .catch(() => {});
-    });
   }, []);
 
   const loadBuyers = async () => {
     try {
       const { default: api } = await import("@/lib/api");
-      // Use Django admin or a dedicated endpoint
-      // For Sprint 6 we'll get buyers from unit assignments
+      // Derive buyers from existing unit assignments first, then
+      // supplement with the full org buyer list if that endpoint is
+      // available (it is — apps/organizations/views.py:BuyerListView).
       const buyerSet = new Map<string, { id: string; full_name: string; email: string }>();
       units.forEach((u) => {
         if (u.buyer && u.buyer_name && u.buyer_email) {
@@ -468,7 +442,6 @@ export default function UnitsPage() {
           });
         }
       });
-      // Also try to get all buyers from a dedicated endpoint
       try {
         const { data } = await api.get("/api/organizations/buyers/");
         if (data?.results) {
@@ -477,7 +450,7 @@ export default function UnitsPage() {
           });
         }
       } catch {
-        // endpoint may not exist yet — use unit-based buyers
+        // endpoint may not exist yet — unit-derived buyers still work
       }
       setBuyers(Array.from(buyerSet.values()));
     } catch {
