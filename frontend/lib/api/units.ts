@@ -12,9 +12,14 @@ export interface Booking {
   spr_number:     string;
   booking_fee:    number;
   booking_date:   string;
+  expires_at:     string | null;
+  // Optional: the raw response from POST /book/ doesn't include this
+  // (always false right after creation anyway) — only the full
+  // BookingSerializer used elsewhere (e.g. GET /units/<id>/) does.
+  is_expired?:    boolean;
   payment_method: string;
   bank:           string;
-  status:         "active" | "cancelled" | "converted";
+  status:         "active" | "cancelled" | "converted" | "expired";
   status_display: string;
   notes:          string;
   buyer:          string;
@@ -64,6 +69,9 @@ export interface BookingPayload {
   buyer_id:       string;
   booking_fee:    number;
   booking_date?:  string;
+  // Sprint 23: how many days until this booking auto-expires if never
+  // converted — defaults to 7 server-side if omitted entirely.
+  expiry_days?:   number;
   payment_method?: string;
   bank?:          string;
   notes?:         string;
