@@ -764,11 +764,9 @@ export default function UnitsPage() {
                         Batalkan
                       </button>
                     )}
-                    {/* Sprint 22: the piece that was completely missing —
-                        dipesan→proses, proses→terjual, terjual→serah_terima
-                        all had zero UI before this. Only the ONE legal
-                        next step is ever offered, mirroring the backend
-                        guard exactly. */}
+                    {/* Sprint 22: the piece that was completely missing — dipesan→proses, proses→terjual, 
+                    terjual→serah_terima all had zero UI before this.Only the ONE legal
+                        next step is ever offered, mirroring the backend guard exactly. */}
                     {NEXT_STATUS[u.status] && (
                       <button
                         className="btn-accent btn-sm"
