@@ -30,6 +30,19 @@ class Unit(TenantScopedModel):
         SOLD        = "terjual",      "Terjual"
         HANDOVER    = "serah_terima", "Serah Terima"
 
+    # Sprint 22: legal forward/backward transitions. Single source of
+    # truth — used by the serializer's validate() so both manual PUT
+    # edits and any future booking-flow action (convert, handover) all
+    # go through the same guard, same as the ProjectRequirementStatus
+    # pattern this whole platform already trusts.
+    VALID_TRANSITIONS = {
+        Status.AVAILABLE:   {Status.BOOKED},
+        Status.BOOKED:      {Status.AVAILABLE, Status.IN_PROGRESS},   # cancel or convert-to-sale
+        Status.IN_PROGRESS: {Status.SOLD},
+        Status.SOLD:        {Status.HANDOVER},
+        Status.HANDOVER:    set(),   # terminal — nothing comes after handover
+    }
+
     project = models.ForeignKey(
         Project, on_delete=models.CASCADE,
         related_name="units", verbose_name="Proyek",
@@ -70,6 +83,25 @@ class Unit(TenantScopedModel):
 
     def _resolve_organization(self):
         return self.project.organization
+
+    def can_transition_to(self, new_status):
+        """
+        Sprint 22: is moving from the CURRENT status to new_status
+        legal? Same-status "changes" (no-op edits) are always allowed.
+        Returns (bool, reason_string) — mirrors the exact shape of
+        ProjectRequirementStatus.can_complete() elsewhere in this
+        codebase, so error handling stays consistent everywhere.
+        """
+        if new_status == self.status:
+            return True, ""
+        allowed = self.VALID_TRANSITIONS.get(self.status, set())
+        if new_status not in allowed:
+            return False, (
+                f"Tidak dapat mengubah status dari "
+                f"'{self.get_status_display()}' langsung ke "
+                f"'{dict(self.Status.choices).get(new_status, new_status)}'."
+            )
+        return True, ""
 
 
 # =============================================================================
@@ -194,3 +226,43 @@ class Booking(models.Model):
             created_at__year=year,
         ).count() + 1
         return f"SPR-{initials}-{year}-{count:03d}"
+
+
+# =============================================================================
+# UnitPriceHistory — Sprint 22: append-only log of price changes
+# =============================================================================
+
+class UnitPriceHistory(models.Model):
+    """
+    Sprint 22: written automatically whenever Unit.price changes via
+    the update endpoint (see UnitCreateSerializer.update()) — never
+    created or edited directly by hand. Append-only, ordered newest
+    first, same "before/after snapshot" spirit as RequirementAudit.
+    """
+    id         = models.UUIDField(
+        primary_key=True,
+        default=__import__("uuid").uuid4,
+        editable=False,
+    )
+    unit       = models.ForeignKey(
+        Unit, on_delete=models.CASCADE,
+        related_name="price_history",
+        verbose_name="Unit",
+    )
+    old_price  = models.BigIntegerField(verbose_name="Harga Lama (IDR)")
+    new_price  = models.BigIntegerField(verbose_name="Harga Baru (IDR)")
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="unit_price_changes",
+        verbose_name="Diubah Oleh",
+    )
+    changed_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name        = "Riwayat Harga Unit"
+        verbose_name_plural = "Riwayat Harga Unit"
+        ordering            = ["-changed_at"]
+
+    def __str__(self):
+        return f"{self.unit.unit_number}: {self.old_price} → {self.new_price}"

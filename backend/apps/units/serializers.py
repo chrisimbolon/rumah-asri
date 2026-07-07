@@ -8,7 +8,7 @@ from datetime import date
 
 from rest_framework import serializers
 
-from .models import Booking, Unit
+from .models import Booking, Unit, UnitPriceHistory
 
 
 class BookingSerializer(serializers.ModelSerializer):
@@ -29,12 +29,22 @@ class BookingSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "spr_number", "created_at"]
 
 
+class UnitPriceHistorySerializer(serializers.ModelSerializer):
+    changed_by_name = serializers.CharField(source="changed_by.full_name", read_only=True)
+
+    class Meta:
+        model  = UnitPriceHistory
+        fields = ["id", "old_price", "new_price", "changed_by_name", "changed_at"]
+        read_only_fields = fields
+
+
 class UnitSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     project_name   = serializers.CharField(source="project.name",       read_only=True)
     buyer_name     = serializers.CharField(source="buyer.full_name",    read_only=True)
     buyer_email    = serializers.CharField(source="buyer.email",        read_only=True)
     booking        = BookingSerializer(read_only=True)
+    price_history  = UnitPriceHistorySerializer(many=True, read_only=True)
 
     class Meta:
         model  = Unit
@@ -46,7 +56,7 @@ class UnitSerializer(serializers.ModelSerializer):
             "payment_method", "bank",
             "project", "project_name",
             "buyer", "buyer_name", "buyer_email",
-            "booking",
+            "booking", "price_history",
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
@@ -75,6 +85,35 @@ class UnitCreateSerializer(serializers.ModelSerializer):
                 "Anda tidak memiliki akses ke proyek ini."
             )
         return project
+
+    def validate(self, attrs):
+        # Sprint 22: status transition guard. Only applies on UPDATE
+        # (self.instance exists) — a fresh Unit being created has no
+        # "current" status to violate, it just starts wherever the
+        # model default says (tersedia).
+        if self.instance is not None and "status" in attrs:
+            new_status = attrs["status"]
+            if new_status != self.instance.status:
+                can_transition, reason = self.instance.can_transition_to(new_status)
+                if not can_transition:
+                    raise serializers.ValidationError({"status": reason})
+        return attrs
+
+    def update(self, instance, validated_data):
+        # Sprint 22: log every real price change, append-only, before
+        # the actual field update happens — mirrors the same "capture
+        # before, then apply" order used throughout the intelligence
+        # layer (readiness_before/after, etc).
+        new_price = validated_data.get("price")
+        if new_price is not None and new_price != instance.price:
+            request = self.context.get("request")
+            UnitPriceHistory.objects.create(
+                unit=instance,
+                old_price=instance.price,
+                new_price=new_price,
+                changed_by=getattr(request, "user", None),
+            )
+        return super().update(instance, validated_data)
 
 
 class BookingCreateSerializer(serializers.Serializer):
