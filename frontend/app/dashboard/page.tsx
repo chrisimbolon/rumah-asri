@@ -41,8 +41,7 @@ import {
   STAGE_META,
   TREND_META,
 } from "@/lib/api/projects";
-// Sprint 19: extracted so the standalone Tasks & Actions page can
-// reuse these without duplicating logic — same pattern as above.
+// Sprint 19: extracted so the standalone Tasks & Actions page can reuse these without duplicating logic — same pattern as above.
 import {
   NextActionsPanel,
 } from "@/components/dashboard/TaskPanels";
