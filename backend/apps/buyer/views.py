@@ -82,7 +82,15 @@ class BuyerMeView(APIView):
                 "id":       str(unit.project.id),
                 "name":     unit.project.name,
                 "location": unit.project.location,
-                "status":   unit.project.status,
+                # Sprint 27 fix: Project.status was removed back in
+                # apps/projects/migrations/0004_remove_project_status_...
+                # — this line was dead code that crashed BuyerMeView on
+                # every real call. stage_display matches what
+                # ProjectSerializer already exposes elsewhere in the
+                # codebase (e.g. "Konstruksi" instead of the raw
+                # "konstruksi" enum value) — more buyer-readable than
+                # the raw `stage` value would be.
+                "status":   unit.project.stage_display,
             },
         })
 
