@@ -20,8 +20,7 @@
 //      week-over-week deltas).
 //    - Removed: mock "Log Aktivitas" section (LOG from mock-data) — Event Stream now covers this with real data; 
 //      having both a real live feed AND a fake static one would be confusing.
-//    - AI Assistant panel from the roadmap mockup: intentionally
-//      skipped (Sprint 15 is still shelved).
+//    - AI Assistant panel from the roadmap mockup: intentionally skipped (Sprint 15 is still shelved).
 // =============================================================================
 
 import {
