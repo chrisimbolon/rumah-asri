@@ -37,8 +37,8 @@ const NEXT_STATUS: Partial<Record<Unit["status"], { next: Unit["status"]; label:
 
 // ── Sprint 23: booking expiry countdown ────────────────────────
 // Only meaningful for a still-ACTIVE booking with a real deadline —
-// a converted/cancelled/expired booking has nothing left to count
-// down. Color escalates as the deadline gets close, matching the
+// a converted/cancelled/expired booking has nothing left to count down. 
+// Color escalates as the deadline gets close, matching the
 // same "quiet until it matters" spirit as the risk-score pulses.
 function bookingCountdown(booking: Booking): { label: string; color: string } | null {
   if (booking.status !== "active" || !booking.expires_at) return null;
