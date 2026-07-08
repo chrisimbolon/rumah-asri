@@ -5,7 +5,7 @@
 /**
  * Sprint 6: Tambah Unit modal + Booking modal added.
  * Unit status now includes "dipesan" (booked/pre-sales).
- * Sprint 23 is implemented here
+ * Sprint 23 and Sprint 24 are implemented here
  */
 
 import { Project, projectsApi } from "@/lib/api/projects";
