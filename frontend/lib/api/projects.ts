@@ -479,12 +479,16 @@ export interface RecentActivityItem {
 
 // Sprint 18: Portfolio Intelligence Hub ────────────────────────
 export interface PortfolioMetrics {
-  total_projects:    number;
-  avg_readiness:     number;   // 0-100
-  critical_count:    number;   // projects with blockers
-  high_risk_count:   number;
-  delayed_count:     number;
-  revenue_protected: number;   // Rupiah integer
+  total_projects:     number;
+  avg_readiness:      number;   // 0-100
+  critical_count:     number;   // projects with blockers
+  high_risk_count:    number;
+  delayed_count:      number;
+  revenue_protected:  number;   // Rupiah integer, all-time collected (status="lunas")
+  // Sprint 26: genuinely new fields, already live on PortfolioIntelligenceView —
+  // this type was just never updated to declare them.
+  revenue_this_month: number;   // Rupiah integer, current calendar month (timezone.localtime())
+  ar_outstanding:     number;   // Rupiah integer, sum of Payment.amount where is_overdue
 }
 
 export interface PortfolioWeekDelta {
