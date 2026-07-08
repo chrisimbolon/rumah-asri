@@ -56,7 +56,7 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-// ── Matcher — which routes this proxy applies to ──────────────
+// ── Matcher — which routes this proxy applies to 
 export const config = {
   matcher: [
     "/dashboard/:path*",
