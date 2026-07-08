@@ -1461,7 +1461,9 @@ class PortfolioIntelligenceView(TenantScopedAPIView):
           "critical_count":    1,
           "high_risk_count":   0,
           "delayed_count":     2,
-          "revenue_protected": 46000000000
+          "revenue_protected": 46000000000,
+          "revenue_this_month": 7200000,
+          "ar_outstanding":    2000000
         },
         "week_delta": {
           "avg_readiness":   4.0,   (positive = improved)
@@ -1489,7 +1491,16 @@ class PortfolioIntelligenceView(TenantScopedAPIView):
       Honest, never hallucinated. Run `snapshot_portfolio_daily` to populate.
     - top_at_risk: worst 3 projects by readiness with blockers/risk.
     - Tenant isolation via get_queryset() (Project.objects.for_user).
-    - revenue_protected = sum(target_budget) for non-completed active projects.
+    - Sprint 26: revenue_protected = sum(Payment.amount) where
+      status="lunas", portfolio-wide, all-time — real collected money,
+      not planned budget (that was the old, misleading definition).
+      revenue_this_month = same, filtered to paid_at in the current
+      calendar month (via timezone.localtime(), not a naive UTC
+      comparison — same bug class hardened in Sprint 25).
+      ar_outstanding = sum(Payment.amount) where Payment.is_overdue,
+      portfolio-wide — reuses the exact same property that already
+      drives the per-project collection_efficiency figure, so the two
+      numbers can never quietly disagree.
     """
     model = Project
 
@@ -1510,6 +1521,7 @@ class PortfolioIntelligenceView(TenantScopedAPIView):
                     "total_projects": 0, "avg_readiness": 0,
                     "critical_count": 0, "high_risk_count": 0,
                     "delayed_count": 0, "revenue_protected": 0,
+                    "revenue_this_month": 0, "ar_outstanding": 0,
                 },
                 "week_delta":  None,
                 "top_at_risk": [],
@@ -1528,19 +1540,46 @@ class PortfolioIntelligenceView(TenantScopedAPIView):
             and p.end_date < today
             and p.stage not in self.ACTIVE_STAGES
         )
+        # Sprint 26: revenue_protected now means what it says — real
+        # money actually collected (status="lunas"), portfolio-wide,
+        # all-time. Previously this summed target_budget (planned
+        # construction budget), which had zero connection to whether
+        # a single Rupiah had ever been collected — same class of
+        # honesty problem as the old collection_efficiency bug, just
+        # under a more convincing label. revenue_this_month and
+        # ar_outstanding are genuinely new; ar_outstanding reuses
+        # Payment.is_overdue (hardened Sprint 25) so this portfolio
+        # figure can never quietly disagree with the per-project
+        # collection_efficiency number the same way total_arrears
+        # used to before that fix.
+        from apps.payments.models import Payment
+        from django.utils import timezone
+
+        portfolio_payments = list(
+            Payment.objects.filter(unit__project__in=projects).select_related("unit")
+        )
         revenue_protected = int(sum(
-            float(p.target_budget)
-            for p in projects
-            if p.target_budget and p.stage not in self.ACTIVE_STAGES
+            p.amount for p in portfolio_payments if p.status == "lunas"
+        ))
+        revenue_this_month = int(sum(
+            p.amount for p in portfolio_payments
+            if p.status == "lunas" and p.paid_at
+            and timezone.localtime(p.paid_at).year == today.year
+            and timezone.localtime(p.paid_at).month == today.month
+        ))
+        ar_outstanding = int(sum(
+            p.amount for p in portfolio_payments if p.is_overdue
         ))
 
         current = {
-            "total_projects":    total,
-            "avg_readiness":     avg_readiness,
-            "critical_count":    critical_count,
-            "high_risk_count":   high_risk_count,
-            "delayed_count":     delayed_count,
-            "revenue_protected": revenue_protected,
+            "total_projects":     total,
+            "avg_readiness":      avg_readiness,
+            "critical_count":     critical_count,
+            "high_risk_count":    high_risk_count,
+            "delayed_count":      delayed_count,
+            "revenue_protected":  revenue_protected,
+            "revenue_this_month": revenue_this_month,
+            "ar_outstanding":     ar_outstanding,
         }
 
         # ── Week delta from PortfolioSnapshot ─────────────────────

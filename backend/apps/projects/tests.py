@@ -1173,6 +1173,25 @@ class PortfolioIntelligenceTests(APITestCase):
             organization=self.org_b, user=self.dev_b, role="owner", is_active=True,
         )
 
+        # Sprint 26: revenue_protected now sums real collected Payment
+        # amounts instead of budget figures — needs at least one real
+        # "lunas" payment so the correctness test has real money to
+        # check against, not just target_budget totals.
+        from apps.units.models import Unit
+        from apps.payments.models import Payment
+        self.unit_a1 = Unit.objects.create(
+            project=self.project_a1, unit_number="A-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+        # Deliberately no paid_at here — Payment.save()'s Sprint 25
+        # auto-sync sets it, proving the two sprints' fixes compose
+        # correctly together.
+        Payment.objects.create(
+            unit=self.unit_a1, payment_type="Cicilan 1",
+            due_date=date(2026, 1, 1), amount=500_000_000,
+            status=Payment.Status.PAID,
+        )
+
     def _login_as(self, user):
         self.client.force_authenticate(user=user)
 
@@ -1210,9 +1229,13 @@ class PortfolioIntelligenceTests(APITestCase):
         self.assertEqual(current["total_projects"], 2)
         # delayed_count: only project_a1 has end_date in the past
         self.assertGreaterEqual(current["delayed_count"], 1)
-        # revenue_protected: both projects are in CONSTRUCTION (active)
-        # = 16B + 20B = 36B (or close to it depending on Rupiah conversion)
-        self.assertGreater(current["revenue_protected"], 0)
+        # Sprint 26: exact real value now — the one lunas payment from
+        # setUp(), not the old (never-real) budget-sum figure
+        self.assertEqual(current["revenue_protected"], 500_000_000)
+        # Paid today via Payment.save()'s auto-sync — counts as this month
+        self.assertEqual(current["revenue_this_month"], 500_000_000)
+        # No overdue payments in this fixture
+        self.assertEqual(current["ar_outstanding"], 0)
         # avg_readiness should be a valid percentage
         self.assertGreaterEqual(current["avg_readiness"], 0)
         self.assertLessEqual(current["avg_readiness"], 100)
@@ -1222,6 +1245,63 @@ class PortfolioIntelligenceTests(APITestCase):
         self.assertFalse(resp.data["has_history"])
         # week_delta: null until snapshot history exists
         self.assertIsNone(resp.data["week_delta"])
+
+    # ── Sprint 26: revenue_this_month / ar_outstanding ─────────
+
+    def test_revenue_this_month_excludes_prior_month_payment(self):
+        """
+        A lunas payment from a prior month must count toward
+        revenue_protected (all-time) but NOT revenue_this_month.
+        """
+        from apps.units.models import Unit
+        from apps.payments.models import Payment
+        from django.utils import timezone
+
+        unit = Unit.objects.create(
+            project=self.project_a2, unit_number="B-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=300_000_000,
+        )
+        old_payment = Payment.objects.create(
+            unit=unit, payment_type="Cicilan Lama",
+            due_date=date(2025, 1, 1), amount=300_000_000,
+            status=Payment.Status.PAID,
+        )
+        old_payment.paid_at = timezone.now().replace(year=timezone.now().year - 1)
+        old_payment.save(update_fields=["paid_at"])
+
+        self._login_as(self.dev_a)
+        resp = self.client.get("/api/projects/portfolio-intelligence/")
+        current = resp.data["current"]
+        # setUp()'s payment (500M, this month) + this one (300M, all-time)
+        self.assertEqual(current["revenue_protected"], 800_000_000)
+        # Only setUp()'s payment counts toward this month
+        self.assertEqual(current["revenue_this_month"], 500_000_000)
+
+    def test_ar_outstanding_sums_real_overdue_payments(self):
+        """ar_outstanding reuses Payment.is_overdue directly — must
+        sum only genuinely overdue amounts, portfolio-wide."""
+        from apps.units.models import Unit
+        from apps.payments.models import Payment
+        from datetime import timedelta
+
+        unit = Unit.objects.create(
+            project=self.project_a1, unit_number="A-02", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=200_000_000,
+        )
+        Payment.objects.create(
+            unit=unit, payment_type="Cicilan Terlambat",
+            due_date=date.today() - timedelta(days=10),
+            amount=200_000_000, status=Payment.Status.PENDING,
+        )
+        Payment.objects.create(
+            unit=unit, payment_type="Cicilan Akan Datang",
+            due_date=date.today() + timedelta(days=10),
+            amount=150_000_000, status=Payment.Status.UPCOMING,
+        )
+
+        self._login_as(self.dev_a)
+        resp = self.client.get("/api/projects/portfolio-intelligence/")
+        self.assertEqual(resp.data["current"]["ar_outstanding"], 200_000_000)
 
     # ── Management command ────────────────────────────────────
 
@@ -1248,7 +1328,9 @@ class PortfolioIntelligenceTests(APITestCase):
         ).first()
         self.assertIsNotNone(snap, "PortfolioSnapshot should exist after running command")
         self.assertEqual(snap.total_projects, 2)
-        self.assertGreater(snap.revenue_protected, 0)
+        # Sprint 26: exact real value now that the command computes
+        # from real Payment data too, not just the live view
+        self.assertEqual(snap.revenue_protected, 500_000_000)
         # avg_readiness should be between 0 and 100
         self.assertGreaterEqual(snap.avg_readiness, 0)
         self.assertLessEqual(snap.avg_readiness, 100)

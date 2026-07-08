@@ -8,6 +8,17 @@
 #
 # Creates/updates one PortfolioSnapshot per active organization per day.
 # Uses update_or_create — safe to run multiple times on same day.
+#
+# Sprint 26: revenue_protected fixed to match PortfolioIntelligenceView's
+# new definition — real collected money (Payment.amount where
+# status="lunas"), not target_budget. Found only because we went
+# looking for other copies of the same bug after fixing the live view;
+# this command runs nightly via cron and was silently writing fake
+# budget figures into snapshot history. Without this fix, week_delta
+# would eventually compare real money (today, from the fixed view)
+# against fake budget money (last week's snapshot, from this
+# unfixed command) — a meaningless comparison the moment real
+# payments start flowing in.
 # =============================================================================
 from datetime import date
 
@@ -26,6 +37,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         from apps.projects.models import PortfolioSnapshot, Project
+        from apps.payments.models import Payment
 
         today    = date.today()
         orgs     = Organization.objects.filter(is_active=True)
@@ -49,11 +61,13 @@ class Command(BaseCommand):
                 if p.end_date and p.end_date < today
                 and p.stage not in ("selesai", "serah_terima")
             )
+            # Sprint 26: real collected money, portfolio-wide, all-time —
+            # matches PortfolioIntelligenceView's revenue_protected exactly,
+            # so live numbers and snapshot history never quietly disagree.
             revenue_protected = int(sum(
-                float(p.target_budget)
-                for p in projects
-                if p.target_budget
-                and p.stage not in ("selesai", "serah_terima")
+                p.amount for p in Payment.objects.filter(
+                    unit__project__in=projects, status="lunas"
+                )
             ))
 
             PortfolioSnapshot.objects.update_or_create(
