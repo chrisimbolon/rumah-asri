@@ -1,7 +1,6 @@
 /**
  * DevelopIndo — Next.js 16 Proxy (Route Protection)
  * Renamed from middleware.ts → proxy.ts in Next.js 16
- *
  * Protected routes:
  *   /dashboard/super-admin  → requires super_admin role
  *   /dashboard/*            → requires login (any role)
