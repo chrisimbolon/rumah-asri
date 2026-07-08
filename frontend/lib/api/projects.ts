@@ -111,7 +111,7 @@ export interface ReadinessBreakdownItem {
   id:                    string;
   name:                  string;
   category:              string;
-  weight:                number;   // raw weight value
+  weight:                number;  
   weight_pct:            number;   // % of total weight (e.g. 40)
   status:                ReqStatus;
   is_completed:          boolean;
