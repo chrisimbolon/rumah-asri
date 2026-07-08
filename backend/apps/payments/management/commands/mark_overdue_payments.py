@@ -24,7 +24,7 @@ Meant to run daily via cron, same pattern as expire_bookings:
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from apps.payments.models import Payment
+from apps.payments.models import FinancialAudit, Payment
 
 
 class Command(BaseCommand):
@@ -44,8 +44,30 @@ class Command(BaseCommand):
 
         count = 0
         for payment in overdue_qs:
+            ar_before = payment.unit.ar_outstanding
+
             payment.status = Payment.Status.OVERDUE
             payment.save(update_fields=["status", "updated_at"])
+
+            # Sprint 27: changed_by deliberately omitted (defaults to
+            # None) — this is a system sweep, not a human decision.
+            # Pretending a user "approved" this would be dishonest.
+            # AR itself doesn't move here (status="menunggak" still
+            # isn't "lunas"), but logging ar_before == ar_after is more
+            # honest than leaving both fields null and implying we
+            # didn't check.
+            FinancialAudit.log(
+                organization = payment.organization,
+                action       = FinancialAudit.Action.PAYMENT_MARKED_OVERDUE,
+                payment      = payment,
+                unit         = payment.unit,
+                old_value    = Payment.Status.PENDING,
+                new_value    = Payment.Status.OVERDUE,
+                notes        = f"Jatuh tempo {payment.due_date}, disapu otomatis",
+                ar_before    = ar_before,
+                ar_after     = payment.unit.ar_outstanding,
+            )
+
             self.stdout.write(
                 f"  ✓ Unit {payment.unit.unit_number} — {payment.payment_type} "
                 f"kini menunggak (jatuh tempo {payment.due_date})"

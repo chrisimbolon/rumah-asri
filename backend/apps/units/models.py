@@ -103,6 +103,24 @@ class Unit(TenantScopedModel):
             )
         return True, ""
 
+    @property
+    def ar_outstanding(self):
+        """
+        Sprint 27: this unit's own outstanding balance — price minus
+        everything actually paid (status="lunas"). Reused by
+        FinancialAudit's ar_before/ar_after so a "before" and "after"
+        snapshot can never quietly disagree with however
+        collection_efficiency defines the same idea elsewhere. Local
+        import of Payment to avoid a circular import between the
+        units and payments apps — same pattern PortfolioIntelligenceView
+        already uses for its own local Payment import.
+        """
+        from apps.payments.models import Payment
+        paid = sum(
+            p.amount for p in self.payments.filter(status=Payment.Status.PAID)
+        )
+        return self.price - paid
+
 
 # =============================================================================
 # Booking — records the pre-sales transaction

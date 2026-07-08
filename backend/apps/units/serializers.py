@@ -8,6 +8,8 @@ from datetime import date
 
 from rest_framework import serializers
 
+from apps.payments.models import FinancialAudit
+
 from .models import Booking, Unit, UnitPriceHistory
 
 
@@ -105,18 +107,39 @@ class UnitCreateSerializer(serializers.ModelSerializer):
         return attrs
 
     def update(self, instance, validated_data):
+        request     = self.context.get("request")
+        changed_by  = getattr(request, "user", None)
+
         # Sprint 22: log every real price change, append-only, before
         # the actual field update happens — mirrors the same "capture
         # before, then apply" order used throughout the intelligence
         # layer (readiness_before/after, etc).
         new_price = validated_data.get("price")
         if new_price is not None and new_price != instance.price:
-            request = self.context.get("request")
+            old_price = instance.price
             UnitPriceHistory.objects.create(
                 unit=instance,
-                old_price=instance.price,
+                old_price=old_price,
                 new_price=new_price,
-                changed_by=getattr(request, "user", None),
+                changed_by=changed_by,
+            )
+            # Sprint 27: AR moves 1-for-1 with price, since ar_outstanding
+            # = price - paid. Computed directly rather than via
+            # instance.ar_outstanding, since instance.price hasn't been
+            # updated by super().update() yet at this point.
+            from apps.payments.models import Payment
+            paid = sum(
+                p.amount for p in instance.payments.filter(status=Payment.Status.PAID)
+            )
+            FinancialAudit.log(
+                organization = instance.organization,
+                action       = FinancialAudit.Action.PRICE_CHANGED,
+                changed_by   = changed_by,
+                unit         = instance,
+                old_value    = f"Rp {old_price:,}",
+                new_value    = f"Rp {new_price:,}",
+                ar_before    = old_price - paid,
+                ar_after     = new_price - paid,
             )
 
         # Sprint 23: when a booked unit advances to "proses" (in
@@ -134,6 +157,23 @@ class UnitCreateSerializer(serializers.ModelSerializer):
         ):
             instance.booking.status = Booking.BookingStatus.CONVERTED
             instance.booking.save(update_fields=["status", "updated_at"])
+
+            # Sprint 27: the sale-closing moment. AR itself doesn't move
+            # from this status sync alone (that's payment_recorded's
+            # job) — logged as unit.ar_outstanding on both sides since
+            # instance.price is still the pre-update value here, same
+            # as the price-change block above.
+            FinancialAudit.log(
+                organization = instance.organization,
+                action       = FinancialAudit.Action.BOOKING_CONVERTED,
+                changed_by   = changed_by,
+                booking      = instance.booking,
+                unit         = instance,
+                old_value    = Booking.BookingStatus.ACTIVE,
+                new_value    = Booking.BookingStatus.CONVERTED,
+                ar_before    = instance.ar_outstanding,
+                ar_after     = instance.ar_outstanding,
+            )
 
         return super().update(instance, validated_data)
 

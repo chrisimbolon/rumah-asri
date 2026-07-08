@@ -14,6 +14,7 @@ cron, same pattern as snapshot_portfolio_daily / snapshot_risk_daily:
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from apps.payments.models import FinancialAudit
 from apps.units.models import Booking, Unit
 
 
@@ -32,6 +33,7 @@ class Command(BaseCommand):
         count = 0
         for booking in expired_qs:
             unit = booking.unit
+            ar_before = unit.ar_outstanding
 
             booking.status = Booking.BookingStatus.EXPIRED
             booking.save(update_fields=["status", "updated_at"])
@@ -39,6 +41,23 @@ class Command(BaseCommand):
             unit.status = Unit.Status.AVAILABLE
             unit.buyer  = None
             unit.save(update_fields=["status", "buyer", "updated_at"])
+
+            # Sprint 27: system-triggered, changed_by=None. AR doesn't
+            # move here — an expired booking never had a Payment row
+            # to begin with (only booking_fee, tracked on Booking
+            # itself, not Payment) — so ar_before == ar_after is
+            # correct, not a placeholder.
+            FinancialAudit.log(
+                organization = booking.organization,
+                action       = FinancialAudit.Action.BOOKING_EXPIRED,
+                booking      = booking,
+                unit         = unit,
+                old_value    = Booking.BookingStatus.ACTIVE,
+                new_value    = Booking.BookingStatus.EXPIRED,
+                notes        = f"SPR {booking.spr_number} — kedaluwarsa otomatis",
+                ar_before    = ar_before,
+                ar_after     = unit.ar_outstanding,
+            )
 
             self.stdout.write(
                 f"  ✓ {booking.spr_number} kedaluwarsa — "

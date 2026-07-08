@@ -4,7 +4,10 @@
 """
 DevelopIndo — Payments Model
 """
-from django.db import models
+import uuid
+
+from django.conf import settings
+from django.db import models, transaction
 
 from apps.core.models import TenantScopedModel
 from apps.units.models import Unit
@@ -94,4 +97,129 @@ class Payment(TenantScopedModel):
             kwargs["update_fields"] = list(update_fields) + ["paid_at"]
 
         super().save(*args, **kwargs)
+
+
+# =============================================================================
+# FinancialAudit — Sprint 27: the audit trail for every real-money action
+# introduced in Sprints 22-26. Mirrors RequirementAudit's shape (flat
+# before/after fields, nullable changed_by, silent-fail .log() classmethod)
+# rather than a generic JSON snapshot — same discipline the rest of this
+# codebase already trusts.
+# =============================================================================
+
+class FinancialAudit(models.Model):
+    class Action(models.TextChoices):
+        PAYMENT_RECORDED       = "payment_recorded",       "Pembayaran Dicatat"
+        PAYMENT_STATUS_CHANGED = "payment_status_changed", "Status Pembayaran Diubah"
+        PAYMENT_MARKED_OVERDUE = "payment_marked_overdue", "Pembayaran Ditandai Menunggak"
+        BOOKING_CREATED        = "booking_created",         "Booking Dibuat"
+        BOOKING_CANCELLED      = "booking_cancelled",       "Booking Dibatalkan"
+        BOOKING_EXPIRED        = "booking_expired",         "Booking Kedaluwarsa"
+        BOOKING_CONVERTED      = "booking_converted",       "Booking Dikonversi ke Penjualan"
+        PRICE_CHANGED          = "price_changed",           "Harga Unit Diubah"
+        KPR_ADVANCED           = "kpr_advanced",             "Status KPR Dilanjutkan"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Sprint 27 divergence from RequirementAudit: that model scopes tenant
+    # isolation transitively (via requirement_status -> project). This model
+    # can't do that safely — it references THREE different object types
+    # (payment/booking/unit) depending on action_type, only one populated
+    # per row. A direct FK is what makes the tenant-isolation regression
+    # sweep simple to test and bulletproof, not an approximation of it.
+    organization = models.ForeignKey(
+        "organizations.Organization", on_delete=models.CASCADE,
+        related_name="financial_audit_logs", verbose_name="Organisasi",
+    )
+
+    action = models.CharField(max_length=30, choices=Action.choices, db_index=True)
+
+    # Only the relevant one populated per row, same nullable-FK spirit
+    # UnitPriceHistory.changed_by already uses.
+    payment = models.ForeignKey(
+        Payment, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="audit_logs",
+    )
+    booking = models.ForeignKey(
+        "units.Booking", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="audit_logs",
+    )
+    unit = models.ForeignKey(
+        "units.Unit", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="financial_audit_logs",
+    )
+
+    old_value = models.CharField(max_length=50, blank=True)
+    new_value = models.CharField(max_length=50, blank=True)
+    notes     = models.TextField(blank=True)
+
+    # Nullable exactly like RequirementAudit.changed_by and
+    # UnitPriceHistory.changed_by — None means system-triggered
+    # (mark_overdue_payments / expire_bookings). That distinction matters:
+    # pretending a human "approved" a cron sweep would be dishonest, not
+    # just a null-handling detail.
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="financial_audit_logs",
+    )
+    changed_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    # Sprint 27: per-unit AR before/after, not the portfolio-wide number —
+    # "this action moved THIS deal's AR from X to Y" is the meaningful
+    # audit line, not the entire portfolio ticking on every payment.
+    # Nullable: not every action type moves AR (e.g. a cancelled booking).
+    ar_before = models.BigIntegerField(null=True, blank=True)
+    ar_after  = models.BigIntegerField(null=True, blank=True)
+
+    class Meta:
+        verbose_name        = "Audit Keuangan"
+        verbose_name_plural  = "Audit Keuangan"
+        ordering             = ["-changed_at"]
+
+    def __str__(self):
+        return f"[{self.get_action_display()}] {self.old_value} → {self.new_value}"
+
+    @classmethod
+    def log(
+        cls,
+        organization,
+        action,
+        changed_by = None,
+        payment    = None,
+        booking    = None,
+        unit       = None,
+        old_value  = "",
+        new_value  = "",
+        notes      = "",
+        ar_before  = None,
+        ar_after   = None,
+    ):
+        # Mirrors RequirementAudit.log()'s silent-fail try/except — an
+        # audit-log write failing must never take down the real
+        # payment/booking action that triggered it. The inner
+        # transaction.atomic() is essential, not decorative: on
+        # PostgreSQL, a failed query poisons the ENTIRE surrounding
+        # transaction until something rolls back, regardless of whether
+        # Python catches the exception. Without this savepoint, a
+        # broken .log() call would silently break every subsequent
+        # query in the same request/transaction — including the real
+        # action this call is supposed to protect. Caught by a real
+        # test failure, not a hypothetical.
+        try:
+            with transaction.atomic():
+                cls.objects.create(
+                    organization = organization,
+                    action       = action,
+                    changed_by   = changed_by,
+                    payment      = payment,
+                    booking      = booking,
+                    unit         = unit,
+                    old_value    = old_value or "",
+                    new_value    = new_value or "",
+                    notes        = notes or "",
+                    ar_before    = ar_before,
+                    ar_after     = ar_after,
+                )
+        except Exception:
+            pass
 

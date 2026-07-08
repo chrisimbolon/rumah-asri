@@ -19,6 +19,7 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from apps.core.views import TenantScopedAPIView
+from apps.payments.models import FinancialAudit
 
 from .models import Booking, Unit
 from .serializers import (
@@ -176,6 +177,21 @@ class UnitBookingView(TenantScopedAPIView):
         unit.buyer  = buyer
         unit.save(update_fields=["status", "buyer", "updated_at"])
 
+        # Sprint 27: ar_before == ar_after here on purpose — no Payment
+        # row exists yet at the moment a booking is created, only a
+        # booking_fee on the Booking itself. Booking a unit doesn't move
+        # AR; recording an actual Payment does. Not a bug, just honest.
+        FinancialAudit.log(
+            organization = org,
+            action       = FinancialAudit.Action.BOOKING_CREATED,
+            changed_by   = request.user,
+            booking      = booking,
+            unit         = unit,
+            new_value    = f"SPR {spr_number}, fee Rp {booking.booking_fee:,}",
+            ar_before    = unit.ar_outstanding,
+            ar_after     = unit.ar_outstanding,
+        )
+
         return Response({
             "success": True,
             "message": (
@@ -245,6 +261,22 @@ class BookingCancelView(TenantScopedAPIView):
         unit.buyer  = None
         unit.save(update_fields=["status", "buyer", "updated_at"])
 
+        # Sprint 27: same as booking_created — no Payment row was ever
+        # tied to a cancelled ACTIVE booking (only booking_fee, which
+        # doesn't touch Payment/AR), so ar_before == ar_after is correct.
+        FinancialAudit.log(
+            organization = booking.organization,
+            action       = FinancialAudit.Action.BOOKING_CANCELLED,
+            changed_by   = request.user,
+            booking      = booking,
+            unit         = unit,
+            old_value    = Booking.BookingStatus.ACTIVE,
+            new_value    = Booking.BookingStatus.CANCELLED,
+            notes        = booking.cancel_reason,
+            ar_before    = unit.ar_outstanding,
+            ar_after     = unit.ar_outstanding,
+        )
+
         return Response({
             "success": True,
             "message": f"Booking {booking.spr_number} berhasil dibatalkan. Unit {unit.unit_number} kembali tersedia.",
@@ -279,8 +311,25 @@ class BookingKPRUpdateView(TenantScopedAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        old_kpr_status = booking.kpr_status
         booking.kpr_status = serializer.validated_data["kpr_status"]
         booking.save(update_fields=["kpr_status", "updated_at"])
+
+        # Sprint 27: KPR progress doesn't move AR by itself — approving
+        # financing isn't the same event as money landing (that's
+        # payment_recorded's job). ar_before == ar_after is correct here.
+        unit = booking.unit
+        FinancialAudit.log(
+            organization = booking.organization,
+            action       = FinancialAudit.Action.KPR_ADVANCED,
+            changed_by   = request.user,
+            booking      = booking,
+            unit         = unit,
+            old_value    = old_kpr_status,
+            new_value    = booking.kpr_status,
+            ar_before    = unit.ar_outstanding,
+            ar_after     = unit.ar_outstanding,
+        )
 
         return Response({
             "success": True,

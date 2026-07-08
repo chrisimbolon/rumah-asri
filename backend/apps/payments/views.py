@@ -15,7 +15,7 @@ from rest_framework.response import Response
 
 from apps.core.views import TenantScopedAPIView
 
-from .models import Payment
+from .models import FinancialAudit, Payment
 from .serializers import PaymentCreateSerializer, PaymentSerializer
 
 
@@ -45,6 +45,29 @@ class PaymentListView(TenantScopedAPIView):
         serializer = PaymentCreateSerializer(data=request.data, context={"request": request})
         if serializer.is_valid():
             payment = serializer.save()
+
+            # Sprint 27: ar_before computed mathematically rather than by
+            # re-querying the unit pre-save (I haven't verified this
+            # serializer's internal field names, so avoiding an assumption
+            # there). ar_outstanding = price - sum(paid payments); this
+            # payment either landed as PAID (reduced AR by its amount) or
+            # didn't (no AR impact yet) — either way the "before" state is
+            # exactly derivable from the "after" state plus this one fact.
+            ar_after  = payment.unit.ar_outstanding
+            ar_before = ar_after + payment.amount if payment.status == Payment.Status.PAID else ar_after
+
+            FinancialAudit.log(
+                organization = payment.organization,
+                action       = FinancialAudit.Action.PAYMENT_RECORDED,
+                changed_by   = request.user,
+                payment      = payment,
+                unit         = payment.unit,
+                new_value    = f"Rp {payment.amount:,} ({payment.get_status_display()})",
+                notes        = f"{payment.payment_type} — jatuh tempo {payment.due_date}",
+                ar_before    = ar_before,
+                ar_after     = ar_after,
+            )
+
             return Response({
                 "success": True,
                 "message": "Pembayaran berhasil ditambahkan",
@@ -62,11 +85,32 @@ class PaymentDetailView(TenantScopedAPIView):
 
     def put(self, request, pk):
         payment = self.get_object(pk)
+        old_status = payment.status
+        ar_before  = payment.unit.ar_outstanding
+
         serializer = PaymentCreateSerializer(
             payment, data=request.data, partial=True, context={"request": request},
         )
         if serializer.is_valid():
             serializer.save()
+
+            # Sprint 27: only log when the status actually moved — a PUT
+            # that edits notes/bank/etc without touching status isn't a
+            # financial state change, same "only log real transitions"
+            # discipline RequirementAudit already follows.
+            if payment.status != old_status:
+                FinancialAudit.log(
+                    organization = payment.organization,
+                    action       = FinancialAudit.Action.PAYMENT_STATUS_CHANGED,
+                    changed_by   = request.user,
+                    payment      = payment,
+                    unit         = payment.unit,
+                    old_value    = old_status,
+                    new_value    = payment.status,
+                    ar_before    = ar_before,
+                    ar_after     = payment.unit.ar_outstanding,
+                )
+
             return Response({
                 "success": True,
                 "message": "Pembayaran berhasil diperbarui",
