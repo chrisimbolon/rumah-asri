@@ -668,6 +668,23 @@ function PortfolioIntelligenceHub() {
       color:   "var(--color-accent)",
       icon:    "💰",
     },
+    // Sprint 26 close-out: these two were already live on the backend
+    // (PortfolioIntelligenceView) — genuinely new numbers, just never
+    // given a home on the Command Center until now.
+    {
+      label:   "Pendapatan Bulan Ini",
+      value:   formatRupiah(current.revenue_this_month),
+      delta:   null,
+      color:   "var(--color-success)",
+      icon:    "📅",
+    },
+    {
+      label:   "AR Outstanding",
+      value:   formatRupiah(current.ar_outstanding),
+      delta:   null,
+      color:   current.ar_outstanding > 0 ? "var(--color-danger)" : "var(--color-success)",
+      icon:    "⚠️",
+    },
   ];
 
   return (
@@ -689,10 +706,13 @@ function PortfolioIntelligenceHub() {
         </div>
       </div>
 
-      {/* 6 Bloomberg metrics */}
+      {/* Bloomberg metrics — 8 tiles now (Sprint 26 close-out added
+          Pendapatan Bulan Ini + AR Outstanding). 4-per-row keeps each
+          tile readable instead of squeezing 8 into one row. Row 1:
+          operational health. Row 2: the financial cluster. */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: "repeat(6, 1fr)",
+        gridTemplateColumns: "repeat(4, 1fr)",
         gap: 8,
         marginBottom: top_at_risk.length > 0 ? 16 : 0,
       }}>
