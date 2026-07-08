@@ -377,8 +377,7 @@ function PortfolioTable({ rows, projects }: { rows: PortfolioRow[]; projects: Pr
 
 // ── Sprint 17: Dashboard Cross-Project Event Stream ───────────
 // Sprint 19: moved here from app/dashboard/projects/page.tsx — the
-// roadmap explicitly wants Event Stream as the FIRST thing on the
-// Command Center, not buried on the projects list page.
+// roadmap explicitly wants Event Stream as the FIRST thing on the Command Center, not buried on the projects list page.
 function DashboardEventStream() {
   const [events,      setEvents]      = useState<RecentActivityItem[]>([]);
   const [loading,     setLoading]     = useState(true);
