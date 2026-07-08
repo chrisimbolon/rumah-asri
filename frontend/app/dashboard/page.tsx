@@ -10,8 +10,7 @@
 //  Sprint 19: Command Center redesign.
 //    - Event Stream + Portfolio Intelligence Hub MOVED here from
 //      app/dashboard/projects/page.tsx (unchanged, just relocated —
-//      the roadmap wants these on the main dashboard, not the
-//      projects list page).
+//      the roadmap wants these on the main dashboard, not the projects list page).
 //    - Added: Dependency Graph / Decision Engine / Risk Forecast for
 //      the single highest-priority project (top_at_risk[0] from
 //      Portfolio Intelligence) — per-project only versions exist,
