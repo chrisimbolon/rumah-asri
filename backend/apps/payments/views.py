@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from apps.core.views import TenantScopedAPIView
 
 from .models import FinancialAudit, Payment
-from .serializers import PaymentCreateSerializer, PaymentSerializer
+from .serializers import FinancialAuditSerializer, PaymentCreateSerializer, PaymentSerializer
 
 
 class PaymentListView(TenantScopedAPIView):
@@ -117,3 +117,41 @@ class PaymentDetailView(TenantScopedAPIView):
                 "payment": PaymentSerializer(payment).data,
             })
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# =============================================================================
+# Sprint 27: read-only audit log view.
+# =============================================================================
+
+class FinancialAuditListView(TenantScopedAPIView):
+    """
+    GET /api/payments/audit/
+    Read-only. FinancialAudit rows are never created directly through
+    this API — only ever via FinancialAudit.log() from the real actions
+    that trigger them (payment/booking views, the two cron commands).
+    Tenant-scoped the same way every other list view here is —
+    self.get_queryset() already filters to the requesting user's
+    organization via TenantScopedAPIView, same super_admin bypass
+    included.
+    """
+    model = FinancialAudit
+
+    def get(self, request):
+        entries = self.get_queryset().select_related(
+            "changed_by", "unit", "payment", "booking",
+        )
+
+        action_filter = request.query_params.get("action")
+        if action_filter:
+            entries = entries.filter(action=action_filter)
+
+        unit_id = request.query_params.get("unit")
+        if unit_id:
+            entries = entries.filter(unit__id=unit_id)
+
+        serializer = FinancialAuditSerializer(entries, many=True)
+        return Response({
+            "success": True,
+            "count":   entries.count(),
+            "results": serializer.data,
+        })

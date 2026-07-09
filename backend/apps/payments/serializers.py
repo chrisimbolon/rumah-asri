@@ -4,7 +4,7 @@ DevelopIndo — Payments Serializers
 
 from rest_framework import serializers
 
-from .models import Payment
+from .models import FinancialAudit, Payment
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -38,3 +38,32 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
         if unit.organization_id not in org_ids:
             raise serializers.ValidationError("Anda tidak memiliki akses ke unit ini.")
         return unit
+
+
+# =============================================================================
+# Sprint 27: FinancialAudit read serializer.
+# =============================================================================
+
+class FinancialAuditSerializer(serializers.ModelSerializer):
+    action_display  = serializers.CharField(source="get_action_display", read_only=True)
+    changed_by_name  = serializers.SerializerMethodField()
+    unit_number      = serializers.CharField(source="unit.unit_number",       read_only=True, default=None)
+    payment_type     = serializers.CharField(source="payment.payment_type",   read_only=True, default=None)
+    booking_spr      = serializers.CharField(source="booking.spr_number",     read_only=True, default=None)
+
+    class Meta:
+        model  = FinancialAudit
+        fields = [
+            "id", "action", "action_display",
+            "old_value", "new_value", "notes",
+            "ar_before", "ar_after",
+            "changed_by_name", "changed_at",
+            "unit_number", "payment_type", "booking_spr",
+        ]
+        read_only_fields = fields
+
+    def get_changed_by_name(self, obj):
+        # None means system-triggered (mark_overdue_payments /
+        # expire_bookings) — say so plainly rather than showing a
+        # blank field, which would read as a bug, not a fact.
+        return obj.changed_by.full_name if obj.changed_by else "Sistem (Otomatis)"

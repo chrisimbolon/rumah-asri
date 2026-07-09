@@ -9,7 +9,7 @@ import uuid
 from django.conf import settings
 from django.db import models, transaction
 
-from apps.core.models import TenantScopedModel
+from apps.core.models import TenantScopedManager, TenantScopedModel
 from apps.units.models import Unit
 
 
@@ -170,6 +170,18 @@ class FinancialAudit(models.Model):
     # Nullable: not every action type moves AR (e.g. a cancelled booking).
     ar_before = models.BigIntegerField(null=True, blank=True)
     ar_after  = models.BigIntegerField(null=True, blank=True)
+
+    # Sprint 27: FinancialAudit deliberately does NOT inherit
+    # TenantScopedModel (see the organization field's docstring above —
+    # it needs a required FK, not TenantScopedModel's nullable one).
+    # But TenantScopedAPIView.get_queryset() calls
+    # self.model.objects.for_user(user), which only exists via
+    # TenantScopedManager. Swapping in the manager directly (without
+    # the abstract base class) gives the audit log view the same
+    # battle-tested tenant-scoping logic — including the super_admin
+    # bypass — without inheriting the nullable-organization behavior
+    # this model was specifically designed to avoid.
+    objects = TenantScopedManager()
 
     class Meta:
         verbose_name        = "Audit Keuangan"
