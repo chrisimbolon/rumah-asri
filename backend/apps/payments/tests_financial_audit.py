@@ -7,9 +7,7 @@
 # actual content of either, and editing files blind risks silently
 # clobbering existing coverage. Django's test runner picks this up
 # automatically (default discovery pattern is "test*.py", which this
-# filename matches) — no wiring needed, just drop it in
-# apps/payments/tests_financial_audit.py and run as normal.
-#
+# filename matches) 
 # NOTE — verified against the real apps/core/models.py,
 # apps/organizations/models.py, and apps/authentication/models.py:
 #   - TenantScopedModel.organization is a real FK field (not a computed
