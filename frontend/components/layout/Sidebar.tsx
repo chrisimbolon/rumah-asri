@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import {
   BarChart2, Bell, Building2, Calendar, ChevronLeft,
   CreditCard, FileText, FolderOpen, Home, LayoutDashboard,
-  LogOut, Settings, Shield, Target, TrendingUp, UserCheck, Users,
+  ListChecks, LogOut, Settings, Shield, Target, TrendingUp, UserCheck, Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -62,6 +62,12 @@ const NAV_DEVELOPER = [
     items: [
       { href: "/dashboard/payments", icon: CreditCard, label: "Pelacak Pembayaran" },
       { href: "/dashboard/reports",  icon: FileText,   label: "Laporan" },
+      // Sprint 27: FinancialAudit's own read endpoint gets its home
+      // here, matching the model's verbose_name ("Audit Keuangan") —
+      // same section as Pelacak Pembayaran/Laporan since it's reading
+      // the same underlying financial reality, just as a trail rather
+      // than a live tracker.
+      { href: "/dashboard/audit",    icon: ListChecks, label: "Audit Keuangan" },
     ],
   },
   {
