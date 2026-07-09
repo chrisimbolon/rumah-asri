@@ -72,3 +72,38 @@ export const paymentsApi = {
     return data.payment;
   },
 };
+
+// =============================================================================
+// Sprint 27: FinancialAudit — read-only, GET /api/payments/audit/
+// =============================================================================
+
+export interface FinancialAuditEntry {
+  id:              string;
+  action:          string;
+  action_display:  string;
+  old_value:       string;
+  new_value:       string;
+  notes:           string;
+  ar_before:       number | null;
+  ar_after:        number | null;
+  changed_by_name: string;   // "Sistem (Otomatis)" for cron-triggered rows
+  changed_at:      string;
+  unit_number:     string | null;
+  payment_type:    string | null;
+  booking_spr:     string | null;
+}
+
+export interface FinancialAuditListResponse {
+  success: boolean;
+  count:   number;
+  results: FinancialAuditEntry[];
+}
+
+export const financialAuditApi = {
+  async list(params?: { action?: string; unit?: string }): Promise<FinancialAuditEntry[]> {
+    const { data } = await api.get<FinancialAuditListResponse>("/api/payments/audit/", {
+      params,
+    });
+    return data.results;
+  },
+};
