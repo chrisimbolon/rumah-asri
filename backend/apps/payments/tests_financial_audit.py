@@ -29,7 +29,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.organizations.models import OrganizationMembership, Organization
 from apps.payments.models import FinancialAudit, Payment
-from apps.payments.views import PaymentDetailView, PaymentListView
+from apps.payments.views import FinancialAuditListView, PaymentDetailView, PaymentListView
 from apps.projects.models import Project
 from apps.units.models import Booking, Unit
 from apps.units.views import BookingCancelView, BookingKPRUpdateView, UnitBookingView
@@ -344,3 +344,96 @@ class FinancialAuditTenantIsolationTests(FinancialAuditTestBase):
 
         self.assertEqual(FinancialAudit.objects.filter(organization=self.org).count(), 1)
         self.assertEqual(FinancialAudit.objects.filter(organization=self.other_org).count(), 0)
+
+
+class FinancialAuditListViewTests(FinancialAuditTestBase):
+    """
+    Sprint 27: GET /api/payments/audit/ — the read endpoint itself.
+    Everything above tests FinancialAudit as data; this is the first
+    test that actually exercises FinancialAuditListView end-to-end,
+    including the TenantScopedManager swap that endpoint depends on
+    (FinancialAudit doesn't inherit TenantScopedModel, so .for_user()
+    only exists because of that explicit `objects = TenantScopedManager()`
+    added alongside this view — worth proving it actually works, not
+    just that it doesn't crash on import).
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.other_developer = User.objects.create_user(
+            email="citra@kompetitor.id", password="testpass123",
+            full_name="Citra Developer", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            user=self.other_developer, organization=self.other_org, is_active=True,
+        )
+        self.other_project = Project.objects.create(
+            name="Griya Kompetitor", location="Palembang", organization=self.other_org,
+        )
+        self.other_unit = Unit.objects.create(
+            project=self.other_project, unit_number="B-01", unit_type="45/90",
+            land_area=90, building_area=45, price=700_000_000,
+        )
+
+        # One entry per org, plus one SYSTEM-triggered entry for org A —
+        # covers isolation AND the changed_by_name "Sistem (Otomatis)"
+        # fallback in the same setup.
+        FinancialAudit.log(
+            organization=self.org, action=FinancialAudit.Action.PRICE_CHANGED,
+            changed_by=self.developer, unit=self.unit,
+            old_value="Rp 500.000.000", new_value="Rp 520.000.000",
+        )
+        FinancialAudit.log(
+            organization=self.org, action=FinancialAudit.Action.BOOKING_EXPIRED,
+            changed_by=None, unit=self.unit,
+        )
+        FinancialAudit.log(
+            organization=self.other_org, action=FinancialAudit.Action.PRICE_CHANGED,
+            changed_by=self.other_developer, unit=self.other_unit,
+        )
+
+    def _get_audit_list(self, user, query_string=""):
+        request = self.factory.get(f"/api/payments/audit/{query_string}")
+        force_authenticate(request, user=user)
+        return FinancialAuditListView.as_view()(request)
+
+    def test_org_a_sees_only_org_a_entries(self):
+        resp = self._get_audit_list(self.developer)
+        self.assertEqual(resp.data["count"], 2)
+        unit_numbers = {r["unit_number"] for r in resp.data["results"]}
+        self.assertEqual(unit_numbers, {self.unit.unit_number})
+        self.assertNotIn(self.other_unit.unit_number, unit_numbers)
+
+    def test_org_b_never_sees_org_a_entries(self):
+        resp = self._get_audit_list(self.other_developer)
+        self.assertEqual(resp.data["count"], 1)
+        self.assertEqual(resp.data["results"][0]["unit_number"], self.other_unit.unit_number)
+
+    def test_super_admin_sees_entries_across_all_orgs(self):
+        """TenantScopedManager's super_admin bypass, proven for
+        FinancialAudit specifically — not just assumed to work because
+        it works for Unit/Payment/Booking elsewhere."""
+        admin = User.objects.create_user(
+            email="admin@developindo.id", password="testpass123",
+            full_name="Platform Admin", role="super_admin",
+        )
+        resp = self._get_audit_list(admin)
+        self.assertEqual(resp.data["count"], 3)
+
+    def test_system_triggered_entry_shows_sistem_otomatis(self):
+        resp = self._get_audit_list(self.developer)
+        actions = {r["action"]: r["changed_by_name"] for r in resp.data["results"]}
+        self.assertEqual(actions[FinancialAudit.Action.BOOKING_EXPIRED], "Sistem (Otomatis)")
+        self.assertEqual(actions[FinancialAudit.Action.PRICE_CHANGED], self.developer.full_name)
+
+    def test_action_filter_narrows_results(self):
+        resp = self._get_audit_list(self.developer, "?action=price_changed")
+        self.assertEqual(resp.data["count"], 1)
+        self.assertEqual(resp.data["results"][0]["action"], FinancialAudit.Action.PRICE_CHANGED)
+
+    def test_unit_filter_never_leaks_other_org_unit(self):
+        """Even if org A guessed org B's unit UUID and passed it as a
+        filter, TenantScopedManager's org scoping applies BEFORE the
+        unit filter — so this must return zero rows, not org B's data."""
+        resp = self._get_audit_list(self.developer, f"?unit={self.other_unit.id}")
+        self.assertEqual(resp.data["count"], 0)
