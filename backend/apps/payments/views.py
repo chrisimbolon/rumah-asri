@@ -96,7 +96,6 @@ class PaymentDetailView(TenantScopedAPIView):
 
             # Sprint 27: only log when the status actually moved — a PUTthat edits notes/bank/etc without touching status isn't a
             # financial state change, same "only log real transitions"
-            # 
             # discipline RequirementAudit already follows.
             if payment.status != old_status:
                 FinancialAudit.log(
