@@ -29,6 +29,9 @@ from .views import (
     RequirementCommentView,
     RequirementEvidenceVerifyView,
     RequirementEvidenceView,
+    SitePlanMarkerDetailView,
+    SitePlanMarkerListView,
+    SitePlanView,
 )
 
 urlpatterns = [
@@ -145,4 +148,17 @@ urlpatterns = [
     path("<uuid:pk>/members/",
          ProjectOrgMembersView.as_view(),
          name="project-members"),
+
+    # ── Sprint 27-follow-up: Site Plan ────────────────────────
+    path("<uuid:pk>/site-plan/",
+         SitePlanView.as_view(),
+         name="project-site-plan"),
+
+    path("<uuid:pk>/site-plan/markers/",
+         SitePlanMarkerListView.as_view(),
+         name="project-site-plan-markers"),
+
+    path("<uuid:pk>/site-plan/markers/<uuid:marker_id>/",
+         SitePlanMarkerDetailView.as_view(),
+         name="project-site-plan-marker-detail"),
 ]

@@ -1786,3 +1786,104 @@ class Project(TenantScopedModel):
             return {"has_data": True, "total_billed": int(total_billed), "total_lunas": int(total_lunas), "total_menunggak": int(total_menunggak), "total_upcoming": int(total_upcoming), "efficiency_pct": efficiency, "status": "healthy" if efficiency >= 90 else "attention" if efficiency >= 70 else "critical", "status_display": "Sehat" if efficiency >= 90 else "Perlu Perhatian" if efficiency >= 70 else "Kritis", "overdue_items": overdue_items, "upcoming_items": upcoming_items}
         except Exception:
             return {"has_data": False, "total_billed": 0, "total_lunas": 0, "total_menunggak": 0, "total_upcoming": 0, "efficiency_pct": 0, "status": "unavailable", "status_display": "Data Tidak Tersedia", "overdue_items": [], "upcoming_items": []}
+
+# =============================================================================
+# SitePlan / SitePlanUnitMarker — real interactive site plan.
+# Replaces the dead Project.site_plan_url field (existed since Sprint 1,
+# confirmed never rendered or populated anywhere in the frontend during
+# a real audit before writing a single line here). site_plan_url is left
+# in place, untouched — deprecating/removing it is a separate decision,
+# not bundled into this migration.
+# =============================================================================
+
+class SitePlan(models.Model):
+    """
+    The actual uploaded site plan image + its coordinate reference frame.
+    ForeignKey to Project, not OneToOne — a project may legitimately need
+    more than one plan over time (a redesigned layout, a separate diagram
+    per floor for an apartment project). `is_active` marks which one is
+    currently "the real one"; old plans stay queryable, not silently lost.
+    """
+    id      = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(
+        Project, on_delete=models.CASCADE, related_name="site_plans",
+    )
+    label     = models.CharField(max_length=100, default="Site Plan Utama")
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    # ImageField, not FileField — deliberate deviation from the
+    # RequirementEvidence convention (FileField everywhere else in this
+    # codebase). This needs guaranteed real image dimensions at upload
+    # time (image_width/image_height below) to define the coordinate
+    # space every marker's polygon is recorded against — a generic
+    # FileField can't provide that. Pillow already confirmed present
+    # in requirements/base.txt.
+    image        = models.ImageField(upload_to="site_plans/%Y/%m/")
+    image_width  = models.PositiveIntegerField()
+    image_height = models.PositiveIntegerField()
+
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="uploaded_site_plans",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name        = "Site Plan"
+        verbose_name_plural  = "Site Plan"
+        ordering             = ["-uploaded_at"]
+
+    def __str__(self):
+        return f"{self.label} — {self.project.name}"
+
+    # No direct `organization` field, unlike FinancialAudit — here
+    # there's exactly one unambiguous path to it (project.organization),
+    # not multiple possible FK types to reconcile, so transitive
+    # scoping is the honest, simple choice here, not a shortcut.
+    @property
+    def organization(self):
+        return self.project.organization
+
+
+class SitePlanUnitMarker(models.Model):
+    """
+    One polygon per Unit, positioned on its project's active site plan.
+    Polygon, not a rectangle — real site plan blocks are visibly angled/
+    trapezoid (confirmed directly from the actual screenshot this was
+    designed against), so a rectangle-only model would render visibly
+    wrong on a meaningful fraction of real developments.
+    """
+    id        = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    site_plan = models.ForeignKey(SitePlan, on_delete=models.CASCADE, related_name="markers")
+
+    # OneToOne: one shape per unit. A unit occupying a genuinely
+    # irregular multi-piece plot is a real edge case some developments
+    # might eventually hit — deliberately not solved now; this can
+    # loosen to a plain ForeignKey later via a trivial migration if it
+    # ever actually comes up. Cheap to widen later, unlike SitePlan's
+    # Project cardinality, which is why THAT one got the wider type
+    # up front and this one didn't.
+    unit = models.OneToOneField(
+        "units.Unit", on_delete=models.CASCADE, related_name="map_marker",
+    )
+
+    # [[x, y], [x, y], ...] in SitePlan.image_width/image_height's pixel
+    # reference frame. Color is NEVER stored here — always computed
+    # live from Unit.map_status, same "never store what you can
+    # honestly compute" discipline ar_outstanding already follows.
+    points = models.JSONField(verbose_name="Titik Koordinat Poligon")
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="created_site_plan_markers",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name        = "Marker Unit Site Plan"
+        verbose_name_plural  = "Marker Unit Site Plan"
+
+    def __str__(self):
+        return f"{self.unit.unit_number} @ {self.site_plan.project.name}"

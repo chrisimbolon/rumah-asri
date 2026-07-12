@@ -7,7 +7,7 @@ from datetime import date
 
 from rest_framework import serializers
 
-from .models import Project, ProjectRequirementStatus, RequirementComment, RequirementEvidence, StageRequirement
+from .models import Project, ProjectRequirementStatus, RequirementComment, RequirementEvidence, SitePlan, SitePlanUnitMarker, StageRequirement
 
 class RequirementCommentSerializer(serializers.ModelSerializer):
     author_name  = serializers.SerializerMethodField()
@@ -264,3 +264,63 @@ class ProjectAdvanceSerializer(serializers.Serializer):
                 "Konfirmasi diperlukan untuk melanjutkan tahap proyek."
             )
         return value
+
+
+# =============================================================================
+# Sprint 27-follow-up: Site Plan serializers.
+# =============================================================================
+
+class SitePlanUnitMarkerSerializer(serializers.ModelSerializer):
+    """Read serializer. Color is deliberately NOT computed as a hex
+    value here — map_status returns a fixed vocabulary string, and the
+    frontend owns the actual color mapping, same separation of
+    concerns as every other status field in this codebase."""
+    unit_number = serializers.CharField(source="unit.unit_number", read_only=True)
+    map_status  = serializers.CharField(source="unit.map_status",  read_only=True)
+    unit_id     = serializers.UUIDField(source="unit.id",          read_only=True)
+
+    class Meta:
+        model  = SitePlanUnitMarker
+        fields = ["id", "unit_id", "unit_number", "map_status", "points", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+    def validate_points(self, value):
+        if not isinstance(value, list) or len(value) < 3:
+            raise serializers.ValidationError(
+                "Poligon membutuhkan minimal 3 titik koordinat."
+            )
+        for point in value:
+            if not (isinstance(point, list) and len(point) == 2):
+                raise serializers.ValidationError(
+                    "Setiap titik harus berupa [x, y]."
+                )
+        return value
+
+
+class SitePlanSerializer(serializers.ModelSerializer):
+    image_url  = serializers.SerializerMethodField()
+    markers    = SitePlanUnitMarkerSerializer(many=True, read_only=True)
+    unit_count = serializers.SerializerMethodField()
+    mapped_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = SitePlan
+        fields = [
+            "id", "label", "is_active",
+            "image_url", "image_width", "image_height",
+            "markers", "unit_count", "mapped_count",
+            "uploaded_at",
+        ]
+        read_only_fields = fields
+
+    def get_image_url(self, obj):
+        request = self.context.get("request")
+        if obj.image and request:
+            return request.build_absolute_uri(obj.image.url)
+        return obj.image.url if obj.image else ""
+
+    def get_unit_count(self, obj):
+        return obj.project.units.count()
+
+    def get_mapped_count(self, obj):
+        return obj.markers.count()

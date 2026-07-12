@@ -16,6 +16,8 @@ from .models import (
     RequirementAudit,
     RequirementComment,
     RequirementEvidence,
+    SitePlan,
+    SitePlanUnitMarker,
     StageRequirement,
 )
 from .serializers import (
@@ -25,6 +27,8 @@ from .serializers import (
     ProjectUpdateSerializer,
     RequirementCommentSerializer,
     RequirementEvidenceSerializer,
+    SitePlanSerializer,
+    SitePlanUnitMarkerSerializer,
 )
 
 
@@ -1628,4 +1632,189 @@ class PortfolioIntelligenceView(TenantScopedAPIView):
             "week_delta":  week_delta,
             "top_at_risk": top_at_risk,
             "has_history": has_history,
+        })
+
+# =============================================================================
+# Sprint 27-follow-up: Site Plan views.
+# =============================================================================
+
+class SitePlanView(TenantScopedAPIView):
+    """
+    GET  /api/projects/<pk>/site-plan/   — current active plan + markers
+    POST /api/projects/<pk>/site-plan/   — upload a new plan image
+
+    Uploading a new plan does NOT delete the old one — it's kept,
+    just marked is_active=False, so historical plans stay queryable
+    rather than silently lost (see SitePlan.is_active's docstring).
+    """
+    model = Project
+
+    def get(self, request, pk):
+        project   = self.get_object(pk)
+        site_plan = project.site_plans.filter(is_active=True).first()
+        if not site_plan:
+            return Response({
+                "success": True, "site_plan": None,
+                "message": "Belum ada site plan untuk proyek ini.",
+            })
+        return Response({
+            "success": True,
+            "site_plan": SitePlanSerializer(site_plan, context={"request": request}).data,
+        })
+
+    def post(self, request, pk):
+        if request.user.role not in ("developer", "super_admin"):
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        project       = self.get_object(pk)
+        uploaded_file = request.FILES.get("image")
+        label         = request.data.get("label", "Site Plan Utama").strip()
+
+        if not uploaded_file:
+            return Response(
+                {"success": False, "message": "Upload gambar site plan diperlukan"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Deactivate any current plan(s) — kept, not deleted.
+        project.site_plans.filter(is_active=True).update(is_active=False)
+
+        # Read real pixel dimensions BEFORE save via Pillow directly —
+        # the uploaded file is a raw in-memory stream at this point,
+        # it has no .width/.height of its own until wrapped by a saved
+        # ImageField. seek(0) afterward is required: PIL consumes the
+        # stream reading it, and Django needs to read it again from
+        # the start to actually persist the file.
+        from PIL import Image
+        try:
+            pil_image = Image.open(uploaded_file)
+            width, height = pil_image.size
+            uploaded_file.seek(0)
+        except Exception:
+            return Response(
+                {"success": False, "message": "File yang diunggah bukan gambar yang valid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        site_plan = SitePlan.objects.create(
+            project=project, label=label or "Site Plan Utama",
+            is_active=True, image=uploaded_file, uploaded_by=request.user,
+            image_width=width, image_height=height,
+        )
+
+        return Response({
+            "success": True,
+            "message": "Site plan berhasil diunggah",
+            "site_plan": SitePlanSerializer(site_plan, context={"request": request}).data,
+        }, status=status.HTTP_201_CREATED)
+
+
+class SitePlanMarkerListView(TenantScopedAPIView):
+    """
+    GET  /api/projects/<pk>/site-plan/markers/   — all markers on the active plan
+    POST /api/projects/<pk>/site-plan/markers/   — add a marker for one unit
+    """
+    model = Project
+
+    def _get_active_site_plan(self, project):
+        return project.site_plans.filter(is_active=True).first()
+
+    def get(self, request, pk):
+        project   = self.get_object(pk)
+        site_plan = self._get_active_site_plan(project)
+        if not site_plan:
+            return Response(
+                {"success": False, "message": "Belum ada site plan untuk proyek ini."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        markers = site_plan.markers.select_related("unit").all()
+        return Response({
+            "success": True,
+            "count":   markers.count(),
+            "results": SitePlanUnitMarkerSerializer(markers, many=True).data,
+        })
+
+    def post(self, request, pk):
+        if request.user.role not in ("developer", "super_admin"):
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        project   = self.get_object(pk)
+        site_plan = self._get_active_site_plan(project)
+        if not site_plan:
+            return Response(
+                {"success": False, "message": "Upload site plan terlebih dahulu sebelum menambahkan marker."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        unit_id = request.data.get("unit_id")
+        points  = request.data.get("points")
+
+        try:
+            unit = project.units.get(id=unit_id)
+        except Exception:
+            return Response(
+                {"success": False, "message": "Unit tidak ditemukan pada proyek ini."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if SitePlanUnitMarker.objects.filter(unit=unit).exists():
+            return Response(
+                {"success": False, "message": f"Unit {unit.unit_number} sudah dipetakan. Hapus marker lama terlebih dahulu untuk menggambar ulang."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = SitePlanUnitMarkerSerializer(data={"points": points})
+        if not serializer.is_valid():
+            return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        marker = SitePlanUnitMarker.objects.create(
+            site_plan=site_plan, unit=unit,
+            points=serializer.validated_data["points"],
+            created_by=request.user,
+        )
+        return Response({
+            "success": True,
+            "message": f"Unit {unit.unit_number} berhasil dipetakan",
+            "marker":  SitePlanUnitMarkerSerializer(marker).data,
+        }, status=status.HTTP_201_CREATED)
+
+
+class SitePlanMarkerDetailView(TenantScopedAPIView):
+    """
+    DELETE /api/projects/<pk>/site-plan/markers/<marker_id>/
+
+    No PUT/edit — matches the deliberate v1 UX decision: a wrong
+    shape gets deleted and redrawn from scratch rather than dragged
+    into place, since this is a rare, one-time-per-unit setup action,
+    not a frequent editing workflow.
+    """
+    model = Project
+
+    def delete(self, request, pk, marker_id):
+        if request.user.role not in ("developer", "super_admin"):
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        project = self.get_object(pk)
+        try:
+            marker = SitePlanUnitMarker.objects.get(id=marker_id, site_plan__project=project)
+        except SitePlanUnitMarker.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Marker tidak ditemukan"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        unit_number = marker.unit.unit_number
+        marker.delete()
+        return Response({
+            "success": True,
+            "message": f"Marker untuk unit {unit_number} berhasil dihapus",
         })

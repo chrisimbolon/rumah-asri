@@ -121,6 +121,44 @@ class Unit(TenantScopedModel):
         )
         return self.price - paid
 
+    @property
+    def map_status(self):
+        """
+        Site plan color state — a small, fixed vocabulary, not a raw
+        hex color. Color choices stay a frontend/design decision;
+        this just answers "what's actually true about this unit,"
+        the same separation of concerns RequirementEvidence's status
+        strings already follow. Priority order is deliberate: an
+        overdue payment overrides "cicilan_berjalan" even though both
+        could technically be true at once — a stalling deal is a
+        sharper, more urgent signal than "still paying normally,"
+        and the board should surface the urgent one first.
+
+        Returns one of:
+          "tersedia"          — not booked at all
+          "menunggak"         — has at least one overdue payment
+          "lunas"             — fully paid (ar_outstanding == 0)
+          "booking_baru"      — booked, no installments paid yet
+          "cicilan_berjalan"  — partway through paying
+        """
+        from apps.payments.models import Payment
+
+        if self.status == self.Status.AVAILABLE:
+            return "tersedia"
+
+        has_overdue = self.payments.filter(status=Payment.Status.OVERDUE).exists() or any(
+            p.is_overdue for p in self.payments.filter(status=Payment.Status.PENDING)
+        )
+        if has_overdue:
+            return "menunggak"
+
+        outstanding = self.ar_outstanding
+        if outstanding <= 0:
+            return "lunas"
+        if outstanding >= self.price:
+            return "booking_baru"
+        return "cicilan_berjalan"
+
 
 # =============================================================================
 # Booking — records the pre-sales transaction
