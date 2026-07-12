@@ -1014,3 +1014,76 @@ export const commentApi = {
     return data.comment;
   },
 };
+
+// =============================================================================
+// Sprint 27-follow-up: Site Plan — real interactive site plan, replacing
+// the dead site_plan_url field (existed but was never rendered anywhere,
+// confirmed by direct audit before this feature was built).
+// =============================================================================
+
+export type MapStatus = "tersedia" | "booking_baru" | "cicilan_berjalan" | "lunas" | "menunggak";
+
+export interface SitePlanUnitMarker {
+  id:          string;
+  unit_id:     string;
+  unit_number: string;
+  map_status:  MapStatus;
+  points:      [number, number][];
+  created_at:  string;
+}
+
+export interface SitePlan {
+  id:            string;
+  label:         string;
+  is_active:     boolean;
+  image_url:     string;
+  image_width:   number;
+  image_height:  number;
+  markers:       SitePlanUnitMarker[];
+  unit_count:    number;
+  mapped_count:  number;
+  uploaded_at:   string;
+}
+
+export const sitePlanApi = {
+  async get(projectId: string): Promise<SitePlan | null> {
+    const { data } = await api.get(`/api/projects/${projectId}/site-plan/`);
+    return data.site_plan;
+  },
+
+  async upload(
+    projectId: string,
+    payload: { image: File; label?: string }
+  ): Promise<SitePlan> {
+    const formData = new FormData();
+    formData.append("image", payload.image);
+    if (payload.label) formData.append("label", payload.label);
+
+    const { data } = await api.post(
+      `/api/projects/${projectId}/site-plan/`,
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return data.site_plan;
+  },
+
+  async listMarkers(projectId: string): Promise<SitePlanUnitMarker[]> {
+    const { data } = await api.get(`/api/projects/${projectId}/site-plan/markers/`);
+    return data.results;
+  },
+
+  async createMarker(
+    projectId: string,
+    payload: { unit_id: string; points: [number, number][] }
+  ): Promise<SitePlanUnitMarker> {
+    const { data } = await api.post(
+      `/api/projects/${projectId}/site-plan/markers/`,
+      payload
+    );
+    return data.marker;
+  },
+
+  async deleteMarker(projectId: string, markerId: string): Promise<void> {
+    await api.delete(`/api/projects/${projectId}/site-plan/markers/${markerId}/`);
+  },
+};
