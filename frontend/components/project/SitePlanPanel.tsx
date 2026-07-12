@@ -18,7 +18,6 @@
 // this is a rare, one-time-per-unit admin setup task, not a polished
 // end-user feature. No drag-to-edit — a wrong shape gets deleted and
 // redrawn from scratch.
-//  SITE MAP IS A HARD PART -REVEIW THIS BEHAVIOR MANY TIMES
 // =============================================================================
 
 import { useAuth } from "@/context/AuthContext";
@@ -29,7 +28,9 @@ import {
   Loader2,
   MapPinned,
   RotateCcw,
-  Upload
+  Trash2,
+  Upload,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -39,7 +40,12 @@ const MAP_STATUS_META: Record<
   { fill: string; stroke: string; label: string }
 > = {
   tersedia:          { fill: "var(--color-paper-2)",       stroke: "rgba(14,13,11,0.25)",  label: "Tersedia" },
-  booking_baru:      { fill: "var(--color-gold-light)",    stroke: "var(--color-gold)",    label: "Booking Baru" },
+  // Fix: was var(--color-gold-light) (#F5EDD9), nearly identical in
+  // hue/luminosity to tersedia's paper-2 (#EDEAE3) — indistinguishable
+  // at 60% opacity in a real screenshot. Confirmed by comparing the
+  // actual hex values in globals.css, not guessed. warning-light is a
+  // genuine pale yellow (#FEF3C7), clearly distinct from beige.
+  booking_baru:      { fill: "var(--color-warning-light)", stroke: "var(--color-warning)", label: "Booking Baru" },
   cicilan_berjalan:  { fill: "var(--color-accent-light)",  stroke: "var(--color-accent)",  label: "Cicilan Berjalan" },
   lunas:             { fill: "var(--color-success-light)", stroke: "var(--color-success)", label: "Lunas" },
   menunggak:         { fill: "var(--color-danger-light)",  stroke: "var(--color-danger)",  label: "Menunggak" },
