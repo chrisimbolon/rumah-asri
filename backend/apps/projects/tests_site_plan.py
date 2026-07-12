@@ -82,10 +82,10 @@ class UnitMapStatusTests(SitePlanTestBase):
     def test_tersedia_when_not_booked(self):
         self.assertEqual(self.unit.map_status, "tersedia")
 
-    def test_booking_baru_when_booked_no_payments(self):
+    def test_belum_ada_pembayaran_when_booked_no_payments(self):
         self.unit.status = Unit.Status.BOOKED
         self.unit.save(update_fields=["status"])
-        self.assertEqual(self.unit.map_status, "booking_baru")
+        self.assertEqual(self.unit.map_status, "belum_ada_pembayaran")
 
     def test_cicilan_berjalan_when_partially_paid(self):
         self.unit.status = Unit.Status.BOOKED
@@ -161,7 +161,7 @@ class UnitMapStatusTests(SitePlanTestBase):
             due_date=date.today() - timedelta(days=5),
             amount=50_000_000, status=Payment.Status.UPCOMING,
         )
-        self.assertEqual(self.unit.map_status, "booking_baru")
+        self.assertEqual(self.unit.map_status, "belum_ada_pembayaran")
 
 
 class SitePlanModelTests(SitePlanTestBase):

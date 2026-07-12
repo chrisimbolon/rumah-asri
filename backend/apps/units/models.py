@@ -138,7 +138,20 @@ class Unit(TenantScopedModel):
           "tersedia"          — not booked at all
           "menunggak"         — has at least one overdue payment
           "lunas"             — fully paid (ar_outstanding == 0)
-          "booking_baru"      — booked, no installments paid yet
+          "belum_ada_pembayaran" — no payment recorded yet, regardless of
+                                    whether the underlying Unit.status is
+                                    "dipesan" or "terjual". Deliberately
+                                    status-neutral: this state can't tell
+                                    the difference between "genuinely just
+                                    booked" and "marked sold but nobody
+                                    entered the payment records yet" — those
+                                    are different real situations, and a
+                                    label implying "just booked" would be
+                                    actively misleading on an already-sold
+                                    unit with a data-entry gap. Renamed
+                                    from "booking_baru" after exactly this
+                                    confusion surfaced on a real Terjual
+                                    unit during testing.
           "cicilan_berjalan"  — partway through paying
         """
         from apps.payments.models import Payment
@@ -156,7 +169,7 @@ class Unit(TenantScopedModel):
         if outstanding <= 0:
             return "lunas"
         if outstanding >= self.price:
-            return "booking_baru"
+            return "belum_ada_pembayaran"
         return "cicilan_berjalan"
 
 
