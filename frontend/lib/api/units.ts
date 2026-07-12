@@ -120,8 +120,8 @@ export const unitsApi = {
   },
 
   // Sprint 24: deliberately trimmed — a plain status update, no
-  // transition guard client-side either (matches the backend, which
-  // allows a KPR status to revert for reapplication).
+  // transition guard client-side either (matches the backend, which allows a KPR status to revert for reapplication).
+  
   async updateKPRStatus(
     bookingId: string,
     kprStatus: Booking["kpr_status"]
