@@ -535,8 +535,8 @@ export interface CalendarEvent {
 // Sprint 20: shape returned by the three requirement-changing
 // endpoints (status update, evidence upload, evidence verify) — the
 // "feedback loop" data. readiness/risk before/after/delta and
-// stage_can_advance existed since the Sprint 16 bug hunt; newly_unlocked
-// and the dynamic message are new in Sprint 20.
+// stage_can_advance existed since the Sprint 16 bug hunt; newly_unlocked and the dynamic message are new in Sprint 20.
+
 export interface RequirementImpact {
   readiness_before:  number;
   readiness_after:   number;
