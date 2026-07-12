@@ -47,6 +47,7 @@ import {
   DependencyGraphPanel,
   RiskForecastPanel,
 } from "@/components/project/IntelligencePanels";
+import SitePlanPanel from "@/components/project/SitePlanPanel";
 import {
   AlertTriangle,
   ArrowRight,
@@ -2649,6 +2650,9 @@ export default function ProjectDetailPage() {
         <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-ink)", marginBottom: 20 }}>Alur Tahap Proyek</div>
         <StagePipeline stage={project.stage} />
       </div>
+
+      {/* Sprint 27-follow-up: Site Plan */}
+      <SitePlanPanel projectId={project.id} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
 
