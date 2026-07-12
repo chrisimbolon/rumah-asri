@@ -14,7 +14,6 @@ export interface Booking {
   booking_date:   string;
   expires_at:     string | null;
   // Optional: the raw response from POST /book/ doesn't include this (always false right after creation anyway) 
-  // 
   // — only the full BookingSerializer used elsewhere (e.g. GET /units/<id>/) does.
   is_expired?:    boolean;
   // Sprint 24: same reasoning applies here too.
