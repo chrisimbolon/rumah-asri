@@ -186,7 +186,7 @@ export interface RiskTrendPoint {
   level: string;   // "low" | "medium" | "high"
 }
 
-// ── IntelligenceSummary — UNCHANGED ──────────────────────────
+// ── IntelligenceSummary — UNCHANGED 
 
 export interface IntelligenceSummary {
   readiness_score:    number;
