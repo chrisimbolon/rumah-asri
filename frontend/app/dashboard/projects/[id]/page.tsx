@@ -8,6 +8,7 @@
 //  Spint 10 :Live Intelligence Dashboard - IS implemented here
 //  Sprint 14 : Risk Forecast (14-day projection) - IS implemented here
 //  Sprint 17 : Live Event Stream + Readiness Momentum - IS implemented here
+//  Site map implementation need to be reviewed
 // ============================================================
 
 import {
