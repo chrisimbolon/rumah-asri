@@ -6,6 +6,7 @@
 // Sprint 14: Risk Forecast 
 //  Sprint 17 : Live Event Stream + Readiness Momentum - IS implemented here
 //  Sprint 26 :IS implemented here
+//  Site map functionality need to be reviewed
 // ==========================================================================
 import api from "@/lib/api";
 
