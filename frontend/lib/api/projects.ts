@@ -29,7 +29,7 @@ export type ReqStatus =
   | "not_applicable";
 
 export type AlertLevel           = "critical" | "warning" | "info";
-export type EvidenceVerifStatus  = "pending" | "approved" | "rejected";  // Sprint 2
+export type EvidenceVerifStatus  = "pending" | "approved" | "rejected"; 
 
 // ── Sprint 1 types — UNCHANGED ────────────────────────────────
 
