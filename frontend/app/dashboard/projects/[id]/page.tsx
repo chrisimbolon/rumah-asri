@@ -175,8 +175,8 @@ function ReadinessGauge({ score }: { score: number }) {
 // component can have `intel === null` during early renders, and
 // hooks can't safely sit before that null-check. Mounting this only
 // once real data exists (same pattern ReadinessGauge already uses)
-// sidesteps the problem entirely, and avoids a fake "count up from
-// zero" animation firing on first page load.
+// sidesteps the problem entirely, and avoids a fake "count up from zero" animation firing on first page load.
+
 function RiskScoreBadge({ score }: { score: number }) {
   const displayScore = useCountUp(score, 1200);
   const prevScoreRef = useRef(score);
