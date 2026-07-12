@@ -18,6 +18,7 @@
 // this is a rare, one-time-per-unit admin setup task, not a polished
 // end-user feature. No drag-to-edit — a wrong shape gets deleted and
 // redrawn from scratch.
+//  SITE MAP IS A HARD PART -REVEIW THIS BEHAVIOR MANY TIMES
 // =============================================================================
 
 import { useAuth } from "@/context/AuthContext";
@@ -28,9 +29,7 @@ import {
   Loader2,
   MapPinned,
   RotateCcw,
-  Trash2,
-  Upload,
-  X,
+  Upload
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
