@@ -9,7 +9,7 @@
 //
 // Color is NEVER hardcoded per-marker or fetched as a hex value from
 // the backend — map_status is a fixed vocabulary string
-// ("tersedia" | "booking_baru" | "cicilan_berjalan" | "lunas" |
+// ("tersedia" | "belum_ada_pembayaran" | "cicilan_berjalan" | "lunas" |
 // "menunggak"), and the color mapping lives entirely here, in the
 // frontend. Same separation of concerns as every other status field
 // in this codebase.
@@ -28,9 +28,7 @@ import {
   Loader2,
   MapPinned,
   RotateCcw,
-  Trash2,
-  Upload,
-  X,
+  Upload
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -45,7 +43,11 @@ const MAP_STATUS_META: Record<
   // at 60% opacity in a real screenshot. Confirmed by comparing the
   // actual hex values in globals.css, not guessed. warning-light is a
   // genuine pale yellow (#FEF3C7), clearly distinct from beige.
-  booking_baru:      { fill: "var(--color-warning-light)", stroke: "var(--color-warning)", label: "Booking Baru" },
+  // Renamed from booking_baru — status-neutral on purpose, since this
+  // state can't distinguish "genuinely just booked" from "marked sold
+  // but no payment ever recorded" (real confusion caught on a real
+  // Terjual unit during testing — see Unit.map_status's docstring).
+  belum_ada_pembayaran: { fill: "var(--color-warning-light)", stroke: "var(--color-warning)", label: "Belum Ada Pembayaran" },
   cicilan_berjalan:  { fill: "var(--color-accent-light)",  stroke: "var(--color-accent)",  label: "Cicilan Berjalan" },
   lunas:             { fill: "var(--color-success-light)", stroke: "var(--color-success)", label: "Lunas" },
   menunggak:         { fill: "var(--color-danger-light)",  stroke: "var(--color-danger)",  label: "Menunggak" },
