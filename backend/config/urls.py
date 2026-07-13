@@ -29,6 +29,7 @@ urlpatterns = [
     path("api/construction/",  include("apps.construction.urls")),
     path("api/payments/",      include("apps.payments.urls")),
     path("api/documents/",     include("apps.documents.urls")),
+    path("api/prospects/",     include("apps.crm.urls")),
 
     # ── Buyer portal ──────────────────────────────────────────
     path("api/buyer/",         include("apps.buyer.urls")),
