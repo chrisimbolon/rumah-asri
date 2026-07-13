@@ -186,6 +186,13 @@ class BookingCreateSerializer(serializers.Serializer):
     buyer_id       = serializers.UUIDField(
         help_text="UUID of the buyer (CustomUser with role=buyer)"
     )
+    # Sprint 2 (CRM Foundation): optional, defaults to None. Every
+    # existing caller — every current test, every current frontend
+    # call — omits this entirely and behaves exactly as before.
+    prospect_id    = serializers.UUIDField(
+        required=False, allow_null=True, default=None,
+        help_text="UUID of the Prospect being converted (optional)"
+    )
     booking_fee    = serializers.IntegerField(
         min_value=1,
         help_text="Booking fee amount in IDR"
@@ -220,6 +227,23 @@ class BookingCreateSerializer(serializers.Serializer):
                 "Pembeli tidak ditemukan atau bukan akun buyer."
             )
         return buyer
+
+    def validate_prospect_id(self, value):
+        """
+        Sprint 2 (CRM Foundation): existence check only — same
+        division of responsibility as validate_buyer_id. Tenant
+        isolation (prospect must belong to the same org as the unit
+        being booked) can't be checked here since this serializer
+        gets no request context; that check lives in
+        UnitBookingView.post(), which already has `org` in scope.
+        """
+        if value is None:
+            return None
+        from apps.crm.models import Prospect
+        try:
+            return Prospect.objects.get(id=value)
+        except Prospect.DoesNotExist:
+            raise serializers.ValidationError("Prospect tidak ditemukan.")
 
 
 class BookingCancelSerializer(serializers.Serializer):
