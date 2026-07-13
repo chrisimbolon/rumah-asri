@@ -6,7 +6,6 @@
 // Sprint 14: Risk Forecast 
 //  Sprint 17 : Live Event Stream + Readiness Momentum - IS implemented here
 //  Sprint 26 :IS implemented here
-//  Site map functionality need to be reviewed
 // ==========================================================================
 import api from "@/lib/api";
 
@@ -29,7 +28,7 @@ export type ReqStatus =
   | "not_applicable";
 
 export type AlertLevel           = "critical" | "warning" | "info";
-export type EvidenceVerifStatus  = "pending" | "approved" | "rejected"; 
+export type EvidenceVerifStatus  = "pending" | "approved" | "rejected";  // Sprint 2
 
 // ── Sprint 1 types — UNCHANGED ────────────────────────────────
 
@@ -186,7 +185,7 @@ export interface RiskTrendPoint {
   level: string;   // "low" | "medium" | "high"
 }
 
-// ── IntelligenceSummary — UNCHANGED 
+// ── IntelligenceSummary — UNCHANGED ──────────────────────────
 
 export interface IntelligenceSummary {
   readiness_score:    number;
@@ -535,8 +534,8 @@ export interface CalendarEvent {
 // Sprint 20: shape returned by the three requirement-changing
 // endpoints (status update, evidence upload, evidence verify) — the
 // "feedback loop" data. readiness/risk before/after/delta and
-// stage_can_advance existed since the Sprint 16 bug hunt; newly_unlocked and the dynamic message are new in Sprint 20.
-
+// stage_can_advance existed since the Sprint 16 bug hunt; newly_unlocked
+// and the dynamic message are new in Sprint 20.
 export interface RequirementImpact {
   readiness_before:  number;
   readiness_after:   number;
@@ -1022,7 +1021,7 @@ export const commentApi = {
 // confirmed by direct audit before this feature was built).
 // =============================================================================
 
-export type MapStatus = "tersedia" | "booking_baru" | "cicilan_berjalan" | "lunas" | "menunggak";
+export type MapStatus = "tersedia" | "belum_ada_pembayaran" | "cicilan_berjalan" | "lunas" | "menunggak";
 
 export interface SitePlanUnitMarker {
   id:          string;
