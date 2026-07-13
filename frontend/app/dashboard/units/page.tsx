@@ -501,7 +501,7 @@ export default function UnitsPage() {
           });
         }
       } catch {
-        // endpoint may not exist yet — unit-derived buyers still work
+        // endpoint may not exist yet — unit-derived buyers still work - coming soon
       }
       setBuyers(Array.from(buyerSet.values()));
     } catch {
