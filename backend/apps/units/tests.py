@@ -6,6 +6,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.authentication.models import CustomUser
+from apps.crm.models import Prospect
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.projects.models import Project
 
@@ -774,3 +775,98 @@ class BookingTenantIsolationTests(APITestCase):
             {"kpr_status": "diajukan"}, format="json",
         )
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+
+class BookingProspectConversionTests(APITestCase):
+    """
+    Sprint 2 (CRM Foundation): proves the prospect_id wiring added to
+    BookingCreateSerializer / UnitBookingView.post(). Four things,
+    matching the CRM roadmap's own list — end-to-end conversion, cross-
+    org rejection, an invalid id, and — the one that matters most —
+    that the pre-existing booking flow is byte-for-byte unchanged when
+    prospect_id is simply omitted, exactly as every caller before this
+    sprint always did.
+    """
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Asri Sentosa Prospect Conversion")
+        self.dev = CustomUser.objects.create_user(
+            email="dev.prospectconv@test.id", password="pass12345!",
+            full_name="Dev Prospect Conversion", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.dev, role="owner", is_active=True,
+        )
+        self.buyer = CustomUser.objects.create_user(
+            email="buyer.prospectconv@test.id", password="pass12345!",
+            full_name="Buyer Prospect Conversion", role="buyer",
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster Prospect Conversion", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.unit = Unit.objects.create(
+            project=self.project, unit_number="A-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+        self.prospect = Prospect.objects.create(
+            organization=self.org, name="Andi Calon Pembeli", phone="081234567890",
+        )
+
+    def _login_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def _book_unit(self, **extra):
+        payload = {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000, **extra}
+        self._login_as(self.dev)
+        return self.client.post(f"/api/units/{self.unit.id}/book/", payload, format="json")
+
+    def test_booking_with_prospect_id_marks_prospect_converted(self):
+        resp = self._book_unit(prospect_id=str(self.prospect.id))
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+        self.prospect.refresh_from_db()
+        self.assertEqual(self.prospect.status, Prospect.Status.KONVERSI)
+        booking = Booking.objects.get(unit=self.unit)
+        self.assertEqual(self.prospect.converted_booking_id, booking.id)
+
+    def test_existing_booking_flow_unchanged_without_prospect_id(self):
+        """
+        The regression test that matters most: every caller before
+        this sprint never sent prospect_id at all. Booking must
+        succeed exactly as before, and the untouched prospect must
+        stay exactly as it started.
+        """
+        resp = self._book_unit()
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+        self.unit.refresh_from_db()
+        self.assertEqual(self.unit.status, Unit.Status.BOOKED)
+        self.assertEqual(self.unit.buyer_id, self.buyer.id)
+
+        self.prospect.refresh_from_db()
+        self.assertEqual(self.prospect.status, Prospect.Status.BARU)
+        self.assertIsNone(self.prospect.converted_booking)
+
+    def test_cross_org_prospect_id_rejected_with_zero_side_effects(self):
+        other_org = Organization.objects.create(name="Org Lain Prospect Conversion")
+        foreign_prospect = Prospect.objects.create(
+            organization=other_org, name="Prospect Org Lain", phone="081299998888",
+        )
+
+        resp = self._book_unit(prospect_id=str(foreign_prospect.id))
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Zero side effects — no Booking created, unit still available,
+        # the foreign prospect completely untouched.
+        self.assertFalse(Booking.objects.filter(unit=self.unit).exists())
+        self.unit.refresh_from_db()
+        self.assertEqual(self.unit.status, Unit.Status.AVAILABLE)
+        foreign_prospect.refresh_from_db()
+        self.assertEqual(foreign_prospect.status, Prospect.Status.BARU)
+
+    def test_invalid_prospect_id_returns_400(self):
+        resp = self._book_unit(prospect_id="00000000-0000-0000-0000-000000000000")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(Booking.objects.filter(unit=self.unit).exists())
