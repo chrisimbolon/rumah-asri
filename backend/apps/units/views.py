@@ -19,6 +19,7 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from apps.core.views import TenantScopedAPIView
+from apps.crm.models import Prospect
 from apps.payments.models import FinancialAudit
 
 from .models import Booking, Unit
@@ -148,6 +149,18 @@ class UnitBookingView(TenantScopedAPIView):
         # Get organization from unit
         org = unit.organization
 
+        # Sprint 2 (CRM Foundation): optional prospect conversion.
+        # Validated here, before any Booking/Unit mutation happens, so
+        # a cross-org prospect_id fails cleanly with zero side effects
+        # — same "validate everything before touching state" order the
+        # rest of this view already follows.
+        prospect = data["prospect_id"]
+        if prospect is not None and prospect.organization_id != org.id:
+            return Response({
+                "success": False,
+                "message": "Prospect tidak ditemukan di organisasi ini.",
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Generate SPR number
         spr_number = Booking.generate_spr_number(org)
 
@@ -176,6 +189,14 @@ class UnitBookingView(TenantScopedAPIView):
         unit.status = Unit.Status.BOOKED
         unit.buyer  = buyer
         unit.save(update_fields=["status", "buyer", "updated_at"])
+
+        # Sprint 2 (CRM Foundation): mark the prospect converted. Pure
+        # addition — the booking flow above this point is byte-for-byte
+        # unchanged when prospect_id is omitted (the default case).
+        if prospect is not None:
+            prospect.status = Prospect.Status.KONVERSI
+            prospect.converted_booking = booking
+            prospect.save(update_fields=["status", "converted_booking", "updated_at"])
 
         # Sprint 27: ar_before == ar_after here on purpose — no Payment
         # row exists yet at the moment a booking is created, only a
