@@ -1,3 +1,4 @@
+# === backend/apps/crm/admin.py ===
 from django.contrib import admin
 
 from .models import Prospect
