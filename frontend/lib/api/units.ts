@@ -78,6 +78,12 @@ export interface BookingPayload {
   payment_method?: string;
   bank?:          string;
   notes?:         string;
+  // Sprint 3 (CRM Foundation): optional. When a booking is created
+  // from the Prospect conversion hand-off, this rides along so the
+  // backend (Sprint 2's wiring in UnitBookingView.post()) marks the
+  // source prospect "konversi". Omitted entirely for every ordinary
+  // booking, exactly as before this sprint.
+  prospect_id?:   string;
 }
 
 export const UNIT_TYPE_OPTIONS = [
