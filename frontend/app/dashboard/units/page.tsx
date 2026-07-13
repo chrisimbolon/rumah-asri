@@ -17,9 +17,10 @@ import { rupiah, warnaProgres } from "@/lib/mock-data";
 import {
   CheckCircle2,
   FileText, Home, Loader2, Plus,
-  Search, TrendingUp, Users, X
+  Search, TrendingUp, UserCheck, Users, X
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
 // ── Sprint 22: legal forward transitions, mirroring Unit.VALID_TRANSITIONS
 // on the backend exactly. "tersedia→dipesan" and "dipesan→tersedia" are
@@ -247,13 +248,21 @@ function AddUnitModal({
 function BookingModal({
   unit,
   buyers,
+  prospectId,
+  prospectName,
   onClose,
   onBooked,
 }: {
-  unit:     Unit;
-  buyers:   { id: string; full_name: string; email: string }[];
-  onClose:  () => void;
-  onBooked: (u: Unit) => void;
+  unit:         Unit;
+  buyers:       { id: string; full_name: string; email: string }[];
+  // Sprint 3 (CRM Foundation): when set, this booking is converting a
+  // real Prospect — prospectId rides into the payload so the backend
+  // marks the lead "konversi"; prospectName is display-only, purely
+  // to make the modal honest about what it's doing.
+  prospectId?:  string;
+  prospectName?: string;
+  onClose:      () => void;
+  onBooked:     (u: Unit) => void;
 }) {
   const [form, setForm] = useState<BookingPayload>({
     buyer_id:       buyers[0]?.id ?? "",
@@ -263,6 +272,7 @@ function BookingModal({
     payment_method: "",
     bank:           "",
     notes:          "",
+    prospect_id:    prospectId,
   });
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState<string | null>(null);
@@ -329,6 +339,16 @@ function BookingModal({
               {error && (
                 <div style={{ marginBottom: 16, padding: "10px 14px", backgroundColor: "var(--color-danger-light)", borderRadius: 6, fontSize: 12, color: "var(--color-danger)" }}>
                   {error}
+                </div>
+              )}
+
+              {/* Sprint 3 (CRM Foundation): honest about what's happening
+                  when this booking originated from a Prospect conversion —
+                  no silent behavior, the user sees exactly what's linked. */}
+              {prospectId && (
+                <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", backgroundColor: "var(--color-success-light)", borderRadius: 6, fontSize: 12, color: "var(--color-success)" }}>
+                  <UserCheck size={14} style={{ flexShrink: 0 }} />
+                  Mengonversi prospect: <strong>{prospectName ?? "—"}</strong>
                 </div>
               )}
 
@@ -452,7 +472,10 @@ const STATUS_TABS = [
 ];
 
 // ── Main page ─────────────────────────────────────────────────
-export default function UnitsPage() {
+function UnitsPageContent() {
+  const router       = useRouter();
+  const searchParams = useSearchParams();
+
   const [units,      setUnits]      = useState<Unit[]>([]);
   const [projects,   setProjects]   = useState<Project[]>([]);
   const [buyers,     setBuyers]     = useState<{ id: string; full_name: string; email: string }[]>([]);
@@ -466,6 +489,33 @@ export default function UnitsPage() {
   // Sprint 22: tracks which specific row is mid-transition, so only
   // that row's button shows a spinner — not the whole table.
   const [advancingId, setAdvancingId] = useState<string | null>(null);
+
+  // Sprint 3 (CRM Foundation): the Prospect list page hands off here
+  // via ?prospect=<id>&prospect_name=<name>&project=<id>. Read once
+  // on mount — not re-read on every render, since the query string
+  // stays in the URL until the user explicitly leaves conversion mode
+  // (see clearConversion below), and re-parsing it on every render
+  // would fight that.
+  const [convertingProspect, setConvertingProspect] = useState<{ id: string; name: string } | null>(null);
+
+  useEffect(() => {
+    const prospectId   = searchParams.get("prospect");
+    const prospectName = searchParams.get("prospect_name");
+    const projectId    = searchParams.get("project");
+    if (prospectId) {
+      setConvertingProspect({ id: prospectId, name: prospectName ?? "—" });
+      setActiveTab("tersedia");
+    }
+    if (projectId) {
+      setProjectFilter(projectId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const clearConversion = () => {
+    setConvertingProspect(null);
+    router.replace("/dashboard/units");
+  };
 
   useEffect(() => {
     Promise.all([
@@ -521,6 +571,10 @@ export default function UnitsPage() {
   const handleUnitBooked = (updatedUnit: Unit) => {
     setUnits((prev) => prev.map((u) => u.id === updatedUnit.id ? updatedUnit : u));
     setBookingUnit(null);
+    // Sprint 3 (CRM Foundation): the conversion is done — leave
+    // conversion mode so the banner and pre-filter don't linger after
+    // their job is finished.
+    if (convertingProspect) clearConversion();
   };
 
   // Sprint 22: advance a unit to the ONE legal next status. The button
@@ -582,6 +636,8 @@ export default function UnitsPage() {
         <BookingModal
           unit={bookingUnit}
           buyers={buyers}
+          prospectId={convertingProspect?.id}
+          prospectName={convertingProspect?.name}
           onClose={() => setBookingUnit(null)}
           onBooked={handleUnitBooked}
         />
@@ -601,6 +657,24 @@ export default function UnitsPage() {
           <Plus size={15} /> Tambah Unit
         </button>
       </div>
+
+      {/* ── Sprint 3 (CRM Foundation): conversion-mode banner ── */}
+      {convertingProspect && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", backgroundColor: "var(--color-success-light)", border: "1px solid rgba(21,128,61,0.15)", borderRadius: 6, marginBottom: 20 }}>
+          <UserCheck size={16} style={{ color: "var(--color-success)", flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-success)" }}>
+              Mengonversi prospect: {convertingProspect.name}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--color-success)", opacity: 0.8, marginTop: 2 }}>
+              Pilih unit tersedia di bawah, lalu klik &quot;Booking&quot; untuk melanjutkan.
+            </div>
+          </div>
+          <button className="btn-ghost btn-sm" style={{ flexShrink: 0 }} onClick={clearConversion}>
+            Batal
+          </button>
+        </div>
+      )}
 
       {/* ── Summary strip ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 20 }}>
@@ -810,5 +884,24 @@ export default function UnitsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Sprint 3 (CRM Foundation): Suspense wrapper ─────────────────
+// Required by Next.js App Router — useSearchParams() inside
+// UnitsPageContent must sit under a Suspense boundary, or the
+// production build fails. This is the only reason this page now has
+// two components instead of one; UnitsPageContent still owns 100% of
+// the real UI and logic.
+export default function UnitsPage() {
+  return (
+    <Suspense fallback={
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 300, gap: 10, color: "var(--color-ink-3)" }}>
+        <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} />
+        <span style={{ fontSize: 13 }}>Memuat unit…</span>
+      </div>
+    }>
+      <UnitsPageContent />
+    </Suspense>
   );
 }
