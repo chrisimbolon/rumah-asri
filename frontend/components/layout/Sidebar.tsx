@@ -18,7 +18,8 @@ import { cn } from "@/lib/utils";
 import {
   BarChart2, Bell, Building2, Calendar, ChevronLeft,
   CreditCard, FileText, FolderOpen, Home, LayoutDashboard,
-  ListChecks, LogOut, Settings, Shield, Target, TrendingUp, UserCheck, Users,
+  ListChecks, LogOut, Settings, Shield, Target, TrendingUp,
+  UserCheck, UserPlus, Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -52,9 +53,13 @@ const NAV_DEVELOPER = [
   {
     group: "Penjualan",
     items: [
-      { href: "/dashboard/sales",   icon: BarChart2, label: "Dasbor Penjualan" },
-      { href: "/dashboard/agents",  icon: UserCheck, label: "Agen" },
-      { href: "/dashboard/buyers",  icon: Users,     label: "Data Pembeli" },
+      // CRM Foundation Sprint 3: leads come before sales — a
+      // prospect exists before there's anything to track in
+      // Dasbor Penjualan at all.
+      { href: "/dashboard/prospects", icon: UserPlus,  label: "Prospect" },
+      { href: "/dashboard/sales",     icon: BarChart2, label: "Dasbor Penjualan" },
+      { href: "/dashboard/agents",    icon: UserCheck, label: "Agen" },
+      { href: "/dashboard/buyers",    icon: Users,     label: "Data Pembeli" },
     ],
   },
   {
