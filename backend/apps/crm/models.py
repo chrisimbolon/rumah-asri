@@ -107,3 +107,55 @@ class Prospect(TenantScopedModel):
         if self.interested_project_id:
             return self.interested_project.organization
         return None
+
+
+class Activity(TenantScopedModel):
+    """
+    CRM Foundation Phase B, Sprint 4: follow-up history. The most-cited
+    real gap from the Sansan/Joe/Suryanto review — "every call, every
+    WhatsApp, every meeting, every note needs history."
+
+    Deliberately scoped to `Prospect` only, not a generic activity log
+    across every model in the platform — a generic timeline is a much
+    bigger, different feature, and nothing in the feedback asked for
+    one. This is Prospect follow-up history, named as such.
+    """
+
+    class ActivityType(models.TextChoices):
+        CALL      = "call",      "Telepon"
+        WHATSAPP  = "whatsapp",  "WhatsApp"
+        MEETING   = "meeting",   "Pertemuan"
+        NOTE      = "note",      "Catatan"
+
+    prospect = models.ForeignKey(
+        Prospect, on_delete=models.CASCADE,
+        related_name="activities",
+        verbose_name="Prospect",
+    )
+    activity_type = models.CharField(
+        max_length=20, choices=ActivityType.choices,
+        verbose_name="Jenis Aktivitas",
+    )
+    notes = models.TextField(blank=True, verbose_name="Catatan")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="crm_activities",
+        verbose_name="Dicatat Oleh",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Activity"
+        verbose_name_plural  = "Activities"
+        ordering             = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.get_activity_type_display()} — {self.prospect.name}"
+
+    def _resolve_organization(self):
+        """Same pattern as Prospect._resolve_organization() — derive
+        from the parent relation. Unlike Prospect, `prospect` here is
+        required (never null), so this always resolves; no explicit-set
+        fallback needed the way Prospect's own resolution does."""
+        return self.prospect.organization
