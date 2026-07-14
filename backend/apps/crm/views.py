@@ -17,8 +17,8 @@ from rest_framework.response import Response
 
 from apps.core.views import TenantScopedAPIView
 
-from .models import Activity, Prospect
-from .serializers import ActivitySerializer, ProspectCreateSerializer, ProspectSerializer
+from .models import Activity, Prospect, SiteVisit
+from .serializers import ActivitySerializer, ProspectCreateSerializer, ProspectSerializer, SiteVisitSerializer
 
 
 class ProspectListView(TenantScopedAPIView):
@@ -144,6 +144,96 @@ class ActivityListView(TenantScopedAPIView):
                 "message":  "Aktivitas berhasil dicatat",
                 "activity": ActivitySerializer(activity).data,
             }, status=status.HTTP_201_CREATED)
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class SiteVisitListView(TenantScopedAPIView):
+    """
+    GET  /api/prospects/<prospect_id>/site-visits/
+    POST /api/prospects/<prospect_id>/site-visits/
+
+    Sprint 6 (CRM Foundation Phase B). Same nested-under-Prospect
+    tenant-scoping pattern ActivityListView (Sprint 4) already
+    established — access is fully gated by resolving the parent
+    Prospect first via self.get_object(), no separate tenant check
+    needed on SiteVisit itself.
+    """
+    model = Prospect
+
+    def get(self, request, prospect_id):
+        prospect = self.get_object(prospect_id)
+        visits = prospect.site_visits.all()
+        serializer = SiteVisitSerializer(visits, many=True)
+        return Response({
+            "success": True,
+            "count":   visits.count(),
+            "results": serializer.data,
+        })
+
+    def post(self, request, prospect_id):
+        if request.user.role not in ("developer", "agent", "super_admin"):
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        prospect = self.get_object(prospect_id)
+        serializer = SiteVisitSerializer(data=request.data, context={"request": request})
+        if serializer.is_valid():
+            visit = serializer.save(
+                prospect=prospect,
+                organization=prospect.organization,
+                created_by=request.user,
+            )
+            return Response({
+                "success":     True,
+                "message":     "Kunjungan berhasil dijadwalkan",
+                "site_visit":  SiteVisitSerializer(visit).data,
+            }, status=status.HTTP_201_CREATED)
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class SiteVisitDetailView(TenantScopedAPIView):
+    """
+    PUT /api/prospects/<prospect_id>/site-visits/<visit_id>/
+
+    Sprint 6: status updates (completed/no_show/cancelled) and
+    reschedules. Scoped through Prospect first (tenant check), then
+    the specific SiteVisit is looked up filtered by that exact
+    prospect — a visit_id belonging to a DIFFERENT prospect in the
+    SAME org still 404s here, not just cross-org ones.
+    """
+    model = Prospect
+
+    def put(self, request, prospect_id, visit_id):
+        if request.user.role not in ("developer", "agent", "super_admin"):
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        prospect = self.get_object(prospect_id)
+        try:
+            visit = prospect.site_visits.get(id=visit_id)
+        except SiteVisit.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Kunjungan tidak ditemukan."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        serializer = SiteVisitSerializer(
+            visit, data=request.data, partial=True, context={"request": request},
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "success":    True,
+                "message":    "Kunjungan berhasil diperbarui",
+                "site_visit": SiteVisitSerializer(visit).data,
+            })
         return Response(
             {"success": False, "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
