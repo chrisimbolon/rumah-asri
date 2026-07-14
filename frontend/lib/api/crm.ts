@@ -79,3 +79,50 @@ export const prospectsApi = {
     return data.prospect;
   },
 };
+
+// =============================================================================
+// Sprint 4 (CRM Foundation Phase B): Activity Timeline
+// =============================================================================
+
+export interface Activity {
+  id:                     string;
+  activity_type:          "call" | "whatsapp" | "meeting" | "note";
+  activity_type_display:  string;
+  notes:                  string;
+  created_by:             string | null;
+  created_by_name:        string | null;
+  created_at:             string;
+}
+
+export interface ActivityListResponse {
+  success: boolean;
+  count:   number;
+  results: Activity[];
+}
+
+export interface ActivityDetailResponse {
+  success:  boolean;
+  activity: Activity;
+}
+
+export interface CreateActivityPayload {
+  activity_type: Activity["activity_type"];
+  notes?:        string;
+}
+
+export const activitiesApi = {
+  async list(prospectId: string): Promise<Activity[]> {
+    const { data } = await api.get<ActivityListResponse>(
+      `/api/prospects/${prospectId}/activities/`
+    );
+    return data.results;
+  },
+
+  async create(prospectId: string, payload: CreateActivityPayload): Promise<Activity> {
+    const { data } = await api.post<ActivityDetailResponse>(
+      `/api/prospects/${prospectId}/activities/`,
+      payload
+    );
+    return data.activity;
+  },
+};
