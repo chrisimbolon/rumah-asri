@@ -27,10 +27,13 @@
 
 import {
   Activity, CreateActivityPayload, CreateProspectPayload,
-  Prospect, activitiesApi, prospectsApi,
+  CreateSiteVisitPayload, Prospect, SiteVisit,
+  activitiesApi, prospectsApi, siteVisitsApi,
 } from "@/lib/api/crm";
 import { Project, projectsApi } from "@/lib/api/projects";
 import {
+  Building2,
+  CalendarPlus,
   CheckCircle2,
   Clock,
   Loader2,
@@ -459,6 +462,201 @@ function ActivityModal({
   );
 }
 
+// ── Site Visit status → badge color ─────────────────────────────
+const VISIT_STATUS_META: Record<SiteVisit["status"], { color: string; bg: string }> = {
+  scheduled: { color: "var(--color-info)",    bg: "var(--color-info-light)"    },
+  completed: { color: "var(--color-success)", bg: "var(--color-success-light)" },
+  no_show:   { color: "var(--color-warning)", bg: "var(--color-warning-light)" },
+  cancelled: { color: "var(--color-ink-3)",   bg: "var(--color-paper-2)"       },
+};
+
+// ── Site Visit Modal ───────────────────────────────────────────
+// Sprint 6 (CRM Foundation Phase B). Same "modal, not a full detail
+// page" call as ActivityModal (Sprint 4) — a dedicated Prospect
+// detail route still isn't justified by this sprint alone.
+//
+// Deliberately no Unit picker in this form: SiteVisit.unit is
+// nullable on the backend (a visit can happen before a buyer settles
+// on one specific unit), and wiring a real unit-select here would
+// need fetching + filtering units by the prospect's interested
+// project — real scope beyond what this sprint's "schedule form,
+// list of upcoming visits" asked for. Can be added later without
+// touching anything else, same as assigned_to was left out of the
+// Add Prospect form in Sprint 2.5 for an equivalent reason.
+function SiteVisitModal({
+  prospect,
+  onClose,
+}: {
+  prospect: Prospect;
+  onClose:  () => void;
+}) {
+  const [visits,  setVisits]  = useState<SiteVisit[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
+
+  const defaultDateTime = new Date(Date.now() + 24 * 60 * 60 * 1000)
+    .toISOString().slice(0, 16);
+  const [scheduledAt, setScheduledAt] = useState(defaultDateTime);
+  const [notes,       setNotes]       = useState("");
+  const [saving,      setSaving]      = useState(false);
+  const [updatingId,  setUpdatingId]  = useState<string | null>(null);
+
+  useEffect(() => {
+    siteVisitsApi.list(prospect.id)
+      .then(setVisits)
+      .catch(() => setError("Gagal memuat jadwal kunjungan"))
+      .finally(() => setLoading(false));
+  }, [prospect.id]);
+
+  const handleSchedule = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const payload: CreateSiteVisitPayload = {
+        scheduled_at: new Date(scheduledAt).toISOString(),
+        notes,
+      };
+      const created = await siteVisitsApi.create(prospect.id, payload);
+      setVisits((prev) => [...prev, created].sort(
+        (a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+      ));
+      setNotes("");
+    } catch {
+      setError("Gagal menjadwalkan kunjungan");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUpdateStatus = async (visit: SiteVisit, newStatus: SiteVisit["status"]) => {
+    setUpdatingId(visit.id);
+    try {
+      const updated = await siteVisitsApi.update(prospect.id, visit.id, { status: newStatus });
+      setVisits((prev) => prev.map((v) => v.id === updated.id ? updated : v));
+    } catch {
+      setError("Gagal memperbarui status kunjungan");
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, backgroundColor: "rgba(14,13,11,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ backgroundColor: "white", borderRadius: 12, width: "100%", maxWidth: 480, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(14,13,11,0.15)", overflow: "hidden" }}>
+
+        <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid rgba(14,13,11,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <CalendarPlus size={15} style={{ color: "var(--color-accent)" }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--color-accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Kunjungan Lokasi</span>
+            </div>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: "var(--color-ink)", margin: 0 }}>{prospect.name}</h2>
+          </div>
+          <button onClick={onClose} style={{ padding: 6, borderRadius: 6, border: "none", backgroundColor: "transparent", cursor: "pointer", color: "var(--color-ink-3)" }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* ── Schedule form ── */}
+        <div style={{ padding: "16px 24px", borderBottom: "1px solid rgba(14,13,11,0.06)", flexShrink: 0 }}>
+          {error && (
+            <div style={{ marginBottom: 10, padding: "8px 12px", backgroundColor: "var(--color-danger-light)", borderRadius: 6, fontSize: 12, color: "var(--color-danger)" }}>
+              {error}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <input
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={(e) => setScheduledAt(e.target.value)}
+              style={{ flex: 1, padding: "8px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 12, outline: "none" }}
+            />
+            <button
+              onClick={handleSchedule}
+              disabled={saving || !scheduledAt}
+              className="btn-accent btn-sm"
+              style={{ display: "flex", alignItems: "center", gap: 4, opacity: (!scheduledAt || saving) ? 0.5 : 1, flexShrink: 0 }}
+            >
+              {saving ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <CalendarPlus size={13} />}
+              Jadwalkan
+            </button>
+          </div>
+          <input
+            type="text"
+            placeholder="Catatan (opsional) — mis. minat unit tipe 45..."
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            style={{ width: "100%", padding: "8px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 12, outline: "none", boxSizing: "border-box" }}
+          />
+        </div>
+
+        {/* ── Visit list ── */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px" }}>
+          {loading ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 30, gap: 8, color: "var(--color-ink-3)" }}>
+              <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+              <span style={{ fontSize: 12 }}>Memuat jadwal…</span>
+            </div>
+          ) : visits.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 30, color: "var(--color-ink-3)", fontSize: 12 }}>
+              Belum ada kunjungan dijadwalkan untuk prospect ini.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {visits.map((v) => {
+                const meta = VISIT_STATUS_META[v.status];
+                return (
+                  <div key={v.id} style={{ padding: "10px 12px", borderRadius: 8, backgroundColor: "var(--color-paper-2)" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: v.notes ? 6 : 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <Building2 size={13} style={{ color: "var(--color-ink-3)" }} />
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-ink)" }}>
+                          {new Date(v.scheduled_at).toLocaleString("id-ID", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 999, color: meta.color, backgroundColor: meta.bg }}>
+                        {v.status_display}
+                      </span>
+                    </div>
+                    {v.notes && (
+                      <div style={{ fontSize: 12, color: "var(--color-ink)", marginBottom: 6 }}>{v.notes}</div>
+                    )}
+                    {v.status === "scheduled" && (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          disabled={updatingId === v.id}
+                          onClick={() => handleUpdateStatus(v, "completed")}
+                          style={{ fontSize: 10, padding: "3px 8px", borderRadius: 4, border: "1px solid var(--color-success)", color: "var(--color-success)", backgroundColor: "transparent", cursor: "pointer" }}
+                        >
+                          Selesai
+                        </button>
+                        <button
+                          disabled={updatingId === v.id}
+                          onClick={() => handleUpdateStatus(v, "no_show")}
+                          style={{ fontSize: 10, padding: "3px 8px", borderRadius: 4, border: "1px solid var(--color-warning)", color: "var(--color-warning)", backgroundColor: "transparent", cursor: "pointer" }}
+                        >
+                          Tidak Hadir
+                        </button>
+                        <button
+                          disabled={updatingId === v.id}
+                          onClick={() => handleUpdateStatus(v, "cancelled")}
+                          style={{ fontSize: 10, padding: "3px 8px", borderRadius: 4, border: "1px solid var(--color-ink-3)", color: "var(--color-ink-3)", backgroundColor: "transparent", cursor: "pointer" }}
+                        >
+                          Batal
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Status tabs ───────────────────────────────────────────────
 // Sprint 5 (CRM Foundation Phase B): expanded from 4 to 7, in
 // pipeline order — Lead through Won, with Lost last since it's an
@@ -487,6 +685,7 @@ export default function ProspectsPage() {
   const [showAdd,   setShowAdd]   = useState(false);
   const [followUpProspect, setFollowUpProspect] = useState<Prospect | null>(null);
   const [activityProspect, setActivityProspect] = useState<Prospect | null>(null);
+  const [visitProspect, setVisitProspect] = useState<Prospect | null>(null);
   const [losingId, setLosingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -580,6 +779,12 @@ export default function ProspectsPage() {
         <ActivityModal
           prospect={activityProspect}
           onClose={() => setActivityProspect(null)}
+        />
+      )}
+      {visitProspect && (
+        <SiteVisitModal
+          prospect={visitProspect}
+          onClose={() => setVisitProspect(null)}
         />
       )}
 
@@ -684,6 +889,16 @@ export default function ProspectsPage() {
                     {/* Sprint 5 (CRM Foundation Phase B): KONVERSI/HILANG renamed WON/LOST. */}
                     {p.status !== "won" && p.status !== "lost" && (
                       <>
+                        {/* Sprint 6: gated same as Follow-up/Konversi/Hilang
+                            below — scheduling a new visit for a won or
+                            lost lead doesn't make sense the same way. */}
+                        <button
+                          className="btn-ghost btn-sm"
+                          onClick={() => setVisitProspect(p)}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}
+                        >
+                          <CalendarPlus size={11} /> Kunjungan
+                        </button>
                         <button
                           className="btn-ghost btn-sm"
                           onClick={() => setFollowUpProspect(p)}
