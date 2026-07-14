@@ -257,8 +257,9 @@ function BookingModal({
   buyers:       { id: string; full_name: string; email: string }[];
   // Sprint 3 (CRM Foundation): when set, this booking is converting a
   // real Prospect — prospectId rides into the payload so the backend
-  // marks the lead "konversi"; prospectName is display-only, purely
-  // to make the modal honest about what it's doing.
+  // marks the lead as won (Sprint 5: WON, formerly "konversi");
+  // prospectName is display-only, purely to make the modal honest
+  // about what it's doing.
   prospectId?:  string;
   prospectName?: string;
   onClose:      () => void;
