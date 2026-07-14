@@ -10,7 +10,7 @@ from django.db.models import Q
 
 from apps.core.models import TenantScopedModel
 from apps.projects.models import Project
-from apps.units.models import Booking
+from apps.units.models import Booking, Unit
 
 
 class Prospect(TenantScopedModel):
@@ -175,3 +175,90 @@ class Activity(TenantScopedModel):
         required (never null), so this always resolves; no explicit-set
         fallback needed the way Prospect's own resolution does."""
         return self.prospect.organization
+
+
+class SiteVisit(TenantScopedModel):
+    """
+    CRM Foundation Phase B, Sprint 6: site visit scheduling.
+
+    Calendar-integration check (done before writing this model, not
+    assumed): apps.projects.ProjectCalendarView is NOT a generic
+    schedulable-event system — it's a single hardcoded query over
+    ProjectRequirementStatus rows with a due_date, field names baked
+    to that one purpose. Nothing to hang this off of, so SiteVisit is
+    its own standalone model. A future sprint could extend the
+    Calendar page to also surface these, but that's optional, later,
+    and not assumed here.
+
+    Relationship to Prospect.Status.SITE_VISIT (Sprint 5): the status
+    is the pipeline *stage*, this row is the specific *appointment* —
+    same relationship Booking already has to Unit.status. A prospect
+    can be in the SITE_VISIT stage with zero, one, or several
+    SiteVisit rows (reschedules happen).
+    """
+
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", "Dijadwalkan"
+        COMPLETED = "completed", "Selesai"
+        NO_SHOW   = "no_show",   "Tidak Hadir"
+        CANCELLED = "cancelled", "Dibatalkan"
+
+    prospect = models.ForeignKey(
+        Prospect, on_delete=models.CASCADE,
+        related_name="site_visits",
+        verbose_name="Prospect",
+    )
+    # Nullable on purpose — a visit might be to a project generally,
+    # before a buyer has settled on one specific unit yet. Same
+    # reasoning Prospect.interested_project already uses.
+    unit = models.ForeignKey(
+        Unit, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="site_visits",
+        verbose_name="Unit",
+    )
+    scheduled_at = models.DateTimeField(verbose_name="Waktu Kunjungan")
+    status = models.CharField(
+        max_length=20, choices=Status.choices,
+        default=Status.SCHEDULED, verbose_name="Status",
+    )
+    notes = models.TextField(blank=True, verbose_name="Catatan")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="crm_site_visits",
+        verbose_name="Dijadwalkan Oleh",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Site Visit"
+        verbose_name_plural  = "Site Visits"
+        ordering             = ["scheduled_at"]
+
+    def __str__(self):
+        return f"{self.prospect.name} — {self.scheduled_at:%d %b %Y %H:%M}"
+
+    def _resolve_organization(self):
+        return self.prospect.organization
+
+    def save(self, *args, **kwargs):
+        """
+        Sprint 6 convenience, same shape as UnitCreateSerializer's
+        Booking-status sync (Sprint 22): scheduling a real visit is a
+        real domain event, so it advances the prospect's pipeline
+        stage automatically — but only forward, never backward. A
+        prospect already in NEGOTIATION or further shouldn't regress
+        to SITE_VISIT just because a second visit got booked.
+        """
+        is_new = self._state.adding
+        super().save(*args, **kwargs)
+        if is_new:
+            EARLY_STAGES = {
+                Prospect.Status.LEAD,
+                Prospect.Status.QUALIFIED,
+                Prospect.Status.FOLLOW_UP,
+            }
+            if self.prospect.status in EARLY_STAGES:
+                self.prospect.status = Prospect.Status.SITE_VISIT
+                self.prospect.save(update_fields=["status", "updated_at"])
