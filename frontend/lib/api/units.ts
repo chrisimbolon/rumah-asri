@@ -81,8 +81,9 @@ export interface BookingPayload {
   // Sprint 3 (CRM Foundation): optional. When a booking is created
   // from the Prospect conversion hand-off, this rides along so the
   // backend (Sprint 2's wiring in UnitBookingView.post()) marks the
-  // source prospect "konversi". Omitted entirely for every ordinary
-  // booking, exactly as before this sprint.
+  // source prospect as won (Sprint 5: WON, formerly "konversi").
+  // Omitted entirely for every ordinary booking, exactly as before
+  // this sprint.
   prospect_id?:   string;
 }
 
