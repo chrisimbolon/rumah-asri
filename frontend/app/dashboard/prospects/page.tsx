@@ -25,12 +25,17 @@
  * that data source exists.
  */
 
+import {
+  Activity, CreateActivityPayload, CreateProspectPayload,
+  Prospect, activitiesApi, prospectsApi,
+} from "@/lib/api/crm";
 import { Project, projectsApi } from "@/lib/api/projects";
-import { CreateProspectPayload, Prospect, prospectsApi } from "@/lib/api/crm";
 import {
   CheckCircle2,
   Clock,
   Loader2,
+  MessageSquareText,
+  Phone,
   Plus,
   Search,
   UserCheck,
@@ -290,6 +295,161 @@ function FollowUpModal({
   );
 }
 
+// ── Activity type → icon/label, shared between the modal's history
+//    list and its own quick-add form ──────────────────────────────
+const ACTIVITY_TYPE_META: Record<Activity["activity_type"], { icon: typeof Phone; label: string }> = {
+  call:      { icon: Phone,             label: "Telepon"   },
+  whatsapp:  { icon: MessageSquareText, label: "WhatsApp"  },
+  meeting:   { icon: Users,             label: "Pertemuan" },
+  note:      { icon: MessageSquareText, label: "Catatan"   },
+};
+
+// ── Activity Timeline Modal ───────────────────────────────────────
+// Sprint 4 (CRM Foundation Phase B): follow-up history. Deliberately a
+// modal rather than a full detail page — a dedicated Prospect detail
+// route isn't justified until Sprint 6 (Site Visit) needs one anyway,
+// per the roadmap's own note on this sprint.
+function ActivityModal({
+  prospect,
+  onClose,
+}: {
+  prospect: Prospect;
+  onClose:  () => void;
+}) {
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState<string | null>(null);
+
+  const [newType,  setNewType]  = useState<Activity["activity_type"]>("call");
+  const [newNotes, setNewNotes] = useState("");
+  const [saving,   setSaving]   = useState(false);
+
+  useEffect(() => {
+    activitiesApi.list(prospect.id)
+      .then(setActivities)
+      .catch(() => setError("Gagal memuat riwayat aktivitas"))
+      .finally(() => setLoading(false));
+  }, [prospect.id]);
+
+  const handleAdd = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const payload: CreateActivityPayload = { activity_type: newType, notes: newNotes };
+      const created = await activitiesApi.create(prospect.id, payload);
+      setActivities((prev) => [created, ...prev]);
+      setNewNotes("");
+    } catch {
+      setError("Gagal mencatat aktivitas");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, backgroundColor: "rgba(14,13,11,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ backgroundColor: "white", borderRadius: 12, width: "100%", maxWidth: 480, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(14,13,11,0.15)", overflow: "hidden" }}>
+
+        <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid rgba(14,13,11,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <MessageSquareText size={15} style={{ color: "var(--color-accent)" }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--color-accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Riwayat Aktivitas</span>
+            </div>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: "var(--color-ink)", margin: 0 }}>{prospect.name}</h2>
+          </div>
+          <button onClick={onClose} style={{ padding: 6, borderRadius: 6, border: "none", backgroundColor: "transparent", cursor: "pointer", color: "var(--color-ink-3)" }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* ── Quick-add form ── */}
+        <div style={{ padding: "16px 24px", borderBottom: "1px solid rgba(14,13,11,0.06)", flexShrink: 0 }}>
+          {error && (
+            <div style={{ marginBottom: 10, padding: "8px 12px", backgroundColor: "var(--color-danger-light)", borderRadius: 6, fontSize: 12, color: "var(--color-danger)" }}>
+              {error}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            {(Object.keys(ACTIVITY_TYPE_META) as Activity["activity_type"][]).map((type) => {
+              const meta = ACTIVITY_TYPE_META[type];
+              const active = newType === type;
+              return (
+                <button key={type} onClick={() => setNewType(type)}
+                  style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "8px 4px", borderRadius: 6, border: active ? "1px solid var(--color-accent)" : "1px solid rgba(14,13,11,0.1)", backgroundColor: active ? "var(--color-accent-light)" : "transparent", cursor: "pointer" }}
+                >
+                  <meta.icon size={14} style={{ color: active ? "var(--color-accent)" : "var(--color-ink-3)" }} />
+                  <span style={{ fontSize: 10, color: active ? "var(--color-accent)" : "var(--color-ink-3)", fontWeight: active ? 600 : 400 }}>{meta.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="text"
+              placeholder="Catatan singkat tentang aktivitas ini..."
+              value={newNotes}
+              onChange={(e) => setNewNotes(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && newNotes.trim() && !saving) handleAdd(); }}
+              style={{ flex: 1, padding: "8px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 12, outline: "none" }}
+            />
+            <button
+              onClick={handleAdd}
+              disabled={saving || !newNotes.trim()}
+              className="btn-accent btn-sm"
+              style={{ display: "flex", alignItems: "center", gap: 4, opacity: (!newNotes.trim() || saving) ? 0.5 : 1 }}
+            >
+              {saving ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Plus size={13} />}
+              Catat
+            </button>
+          </div>
+        </div>
+
+        {/* ── Timeline ── */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px" }}>
+          {loading ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 30, gap: 8, color: "var(--color-ink-3)" }}>
+              <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+              <span style={{ fontSize: 12 }}>Memuat riwayat…</span>
+            </div>
+          ) : activities.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 30, color: "var(--color-ink-3)", fontSize: 12 }}>
+              Belum ada aktivitas tercatat untuk prospect ini.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {activities.map((a) => {
+                const meta = ACTIVITY_TYPE_META[a.activity_type];
+                return (
+                  <div key={a.id} style={{ display: "flex", gap: 10 }}>
+                    <div style={{ width: 26, height: 26, borderRadius: "50%", backgroundColor: "var(--color-accent-light)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <meta.icon size={12} style={{ color: "var(--color-accent)" }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-ink)" }}>{meta.label}</span>
+                        <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>
+                          {new Date(a.created_at).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                        {a.created_by_name && (
+                          <span style={{ fontSize: 11, color: "var(--color-ink-3)" }}>· {a.created_by_name}</span>
+                        )}
+                      </div>
+                      {a.notes && (
+                        <div style={{ fontSize: 12, color: "var(--color-ink)", marginTop: 2 }}>{a.notes}</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Status tabs ───────────────────────────────────────────────
 const STATUS_TABS = [
   { key: "semua",     label: "Semua"     },
@@ -311,6 +471,7 @@ export default function ProspectsPage() {
   const [search,    setSearch]    = useState("");
   const [showAdd,   setShowAdd]   = useState(false);
   const [followUpProspect, setFollowUpProspect] = useState<Prospect | null>(null);
+  const [activityProspect, setActivityProspect] = useState<Prospect | null>(null);
   const [losingId, setLosingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -397,6 +558,12 @@ export default function ProspectsPage() {
           prospect={followUpProspect}
           onClose={() => setFollowUpProspect(null)}
           onUpdated={handleFollowUpUpdated}
+        />
+      )}
+      {activityProspect && (
+        <ActivityModal
+          prospect={activityProspect}
+          onClose={() => setActivityProspect(null)}
         />
       )}
 
@@ -487,6 +654,17 @@ export default function ProspectsPage() {
                 </td>
                 <td>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {/* Sprint 4: history matters regardless of pipeline
+                        status — a won or lost lead's activity trail is
+                        still worth reading, so this button isn't gated
+                        by status like the three below it. */}
+                    <button
+                      className="btn-ghost btn-sm"
+                      onClick={() => setActivityProspect(p)}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}
+                    >
+                      <MessageSquareText size={11} /> Riwayat
+                    </button>
                     {p.status !== "konversi" && p.status !== "hilang" && (
                       <>
                         <button
