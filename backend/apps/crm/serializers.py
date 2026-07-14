@@ -4,7 +4,7 @@
 # =============================================================================
 from rest_framework import serializers
 
-from .models import Prospect
+from .models import Activity, Prospect
 
 
 class ProspectSerializer(serializers.ModelSerializer):
@@ -107,3 +107,22 @@ class ProspectCreateSerializer(serializers.ModelSerializer):
             organization = membership.organization
 
         return Prospect.objects.create(organization=organization, **validated_data)
+
+
+class ActivitySerializer(serializers.ModelSerializer):
+    """
+    Sprint 4 (CRM Foundation Phase B). `prospect`, `organization`, and
+    `created_by` are all set server-side in ActivityListView.post() —
+    never client-writable — same discipline ProspectCreateSerializer
+    already applies to `converted_booking`.
+    """
+    activity_type_display = serializers.CharField(source="get_activity_type_display", read_only=True)
+    created_by_name        = serializers.CharField(source="created_by.full_name", read_only=True, default=None)
+
+    class Meta:
+        model  = Activity
+        fields = [
+            "id", "activity_type", "activity_type_display",
+            "notes", "created_by", "created_by_name", "created_at",
+        ]
+        read_only_fields = ["id", "created_by", "created_by_name", "created_at"]
