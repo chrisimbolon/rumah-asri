@@ -17,8 +17,8 @@ from rest_framework.response import Response
 
 from apps.core.views import TenantScopedAPIView
 
-from .models import Prospect
-from .serializers import ProspectCreateSerializer, ProspectSerializer
+from .models import Activity, Prospect
+from .serializers import ActivitySerializer, ProspectCreateSerializer, ProspectSerializer
 
 
 class ProspectListView(TenantScopedAPIView):
@@ -93,6 +93,57 @@ class ProspectDetailView(TenantScopedAPIView):
                 "message":  f"Prospect {prospect.name} berhasil diperbarui",
                 "prospect": ProspectSerializer(prospect).data,
             })
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class ActivityListView(TenantScopedAPIView):
+    """
+    GET  /api/prospects/<prospect_id>/activities/
+    POST /api/prospects/<prospect_id>/activities/
+
+    Sprint 4 (CRM Foundation Phase B): follow-up history for a single
+    Prospect. Deliberately scoped through `Prospect`'s own tenant check
+    rather than giving `Activity` a separate detail endpoint — the URL
+    always names a prospect_id, and self.get_object() (inherited from
+    TenantScopedAPIView, model=Prospect) 404s on a cross-org prospect
+    before a single Activity row is ever queried. No separate tenant
+    check needed on Activity itself; access is fully gated by its
+    parent.
+    """
+    model = Prospect
+
+    def get(self, request, prospect_id):
+        prospect = self.get_object(prospect_id)
+        activities = prospect.activities.all()
+        serializer = ActivitySerializer(activities, many=True)
+        return Response({
+            "success": True,
+            "count":   activities.count(),
+            "results": serializer.data,
+        })
+
+    def post(self, request, prospect_id):
+        if request.user.role not in ("developer", "agent", "super_admin"):
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        prospect = self.get_object(prospect_id)
+        serializer = ActivitySerializer(data=request.data)
+        if serializer.is_valid():
+            activity = serializer.save(
+                prospect=prospect,
+                organization=prospect.organization,
+                created_by=request.user,
+            )
+            return Response({
+                "success":  True,
+                "message":  "Aktivitas berhasil dicatat",
+                "activity": ActivitySerializer(activity).data,
+            }, status=status.HTTP_201_CREATED)
         return Response(
             {"success": False, "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
