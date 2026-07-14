@@ -17,7 +17,10 @@ export interface Prospect {
   project_name:         string | null;
   assigned_to:          string | null;
   assigned_to_name:     string | null;
-  status:               "baru" | "follow_up" | "hilang" | "konversi";
+  // Sprint 5 (CRM Foundation Phase B): expanded from the original
+  // 4 values. BOOKING deliberately excluded — see Decision 1 in the
+  // Phase B roadmap; "Won" already implies a real Booking exists.
+  status:               "lead" | "qualified" | "follow_up" | "site_visit" | "negotiation" | "won" | "lost";
   status_display:       string;
   next_followup_date:   string | null;
   notes:                string;
