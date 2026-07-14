@@ -30,10 +30,26 @@ class Prospect(TenantScopedModel):
     """
 
     class Status(models.TextChoices):
-        BARU      = "baru",      "Baru"
-        FOLLOW_UP = "follow_up", "Follow Up"
-        HILANG    = "hilang",    "Hilang"
-        KONVERSI  = "konversi",  "Konversi"
+        """
+        Sprint 5 (CRM Foundation Phase B): expanded from the original
+        4 values. `BOOKING` deliberately does NOT exist as a separate
+        status — Decision 1 resolved that "Booking" and "Won" are the
+        same real event (`converted_booking IS NOT NULL`), so having
+        both would let a card sit in "Booking" with no real Booking
+        row behind it, the exact fiction Decision 1 exists to prevent.
+
+        FOLLOW_UP's stored value is unchanged from the original 4-value
+        enum on purpose — every existing `follow_up` row needs zero
+        remapping in the Sprint 5 data migration, only baru/konversi/
+        hilang do.
+        """
+        LEAD         = "lead",         "Lead"
+        QUALIFIED    = "qualified",    "Qualified"
+        FOLLOW_UP    = "follow_up",    "Follow Up"
+        SITE_VISIT   = "site_visit",   "Site Visit"
+        NEGOTIATION  = "negotiation",  "Negotiation"
+        WON          = "won",          "Won"
+        LOST         = "lost",         "Lost"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -65,7 +81,7 @@ class Prospect(TenantScopedModel):
 
     status = models.CharField(
         max_length=20, choices=Status.choices,
-        default=Status.BARU, verbose_name="Status",
+        default=Status.LEAD, verbose_name="Status",
     )
     next_followup_date = models.DateField(
         null=True, blank=True, verbose_name="Tanggal Follow-up Berikutnya",
