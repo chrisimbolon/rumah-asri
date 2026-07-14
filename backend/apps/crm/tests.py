@@ -18,7 +18,7 @@ from apps.authentication.models import CustomUser
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.projects.models import Project
 
-from .models import Prospect
+from .models import Activity, Prospect
 
 
 
@@ -434,3 +434,142 @@ class ProspectAPITenantIsolationTests(ProspectAPITestBase):
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
         self.prospect.refresh_from_db()
         self.assertEqual(self.prospect.status, Prospect.Status.BARU)
+
+
+# =============================================================================
+# Sprint 4 (CRM Foundation Phase B): Activity Timeline tests.
+# =============================================================================
+
+class ActivityModelTests(ProspectTestBase):
+
+    def setUp(self):
+        super().setUp()
+        self.prospect = Prospect.objects.create(
+            organization=self.org, name="Andi Aktivitas", phone="081200005555",
+        )
+
+    def test_create_activity(self):
+        activity = Activity.objects.create(
+            prospect=self.prospect, activity_type=Activity.ActivityType.CALL,
+            notes="Diskusi budget dan skema pembayaran.", created_by=self.dev,
+        )
+        self.assertEqual(activity.organization_id, self.org.id)
+        self.assertIn("Telepon", str(activity))
+
+    def test_activities_ordered_newest_first(self):
+        first  = Activity.objects.create(prospect=self.prospect, activity_type="note", notes="Pertama")
+        second = Activity.objects.create(prospect=self.prospect, activity_type="note", notes="Kedua")
+        ordered = list(self.prospect.activities.all())
+        self.assertEqual(ordered[0].id, second.id)
+        self.assertEqual(ordered[1].id, first.id)
+
+    def test_organization_always_resolves_from_prospect(self):
+        """Unlike Prospect itself, Activity.prospect is required, so
+        this should never be null — no explicit-set fallback needed."""
+        activity = Activity.objects.create(
+            prospect=self.prospect, activity_type=Activity.ActivityType.WHATSAPP,
+        )
+        self.assertEqual(activity.organization_id, self.prospect.organization_id)
+
+
+class ActivityAPITests(ProspectAPITestBase):
+
+    def setUp(self):
+        super().setUp()
+        self.prospect = Prospect.objects.create(
+            organization=self.org, name="Budi Aktivitas API", phone="081200006666",
+        )
+
+    def test_developer_can_log_activity(self):
+        self._login_as(self.dev)
+        resp = self.client.post(
+            f"/api/prospects/{self.prospect.id}/activities/",
+            {"activity_type": "call", "notes": "Tanya unit type 2 lantai"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Activity.objects.filter(prospect=self.prospect).count(), 1)
+        created = Activity.objects.get(prospect=self.prospect)
+        self.assertEqual(created.created_by_id, self.dev.id)
+
+    def test_agent_can_log_activity(self):
+        self._login_as(self.agent)
+        resp = self.client.post(
+            f"/api/prospects/{self.prospect.id}/activities/",
+            {"activity_type": "whatsapp", "notes": "Kirim brosur"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_buyer_cannot_log_activity(self):
+        self._login_as(self.buyer)
+        resp = self.client.post(
+            f"/api/prospects/{self.prospect.id}/activities/",
+            {"activity_type": "note", "notes": "..."},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_list_returns_activities_newest_first(self):
+        Activity.objects.create(prospect=self.prospect, activity_type="call", notes="A")
+        Activity.objects.create(prospect=self.prospect, activity_type="meeting", notes="B")
+        self._login_as(self.dev)
+        resp = self.client.get(f"/api/prospects/{self.prospect.id}/activities/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["count"], 2)
+        self.assertEqual(resp.data["results"][0]["notes"], "B")
+
+    def test_cannot_write_prospect_or_organization_through_payload(self):
+        """prospect/organization/created_by must come from the URL and
+        request.user only — never from client-supplied fields, even if
+        someone tries to sneak them into the POST body."""
+        other_prospect = Prospect.objects.create(
+            organization=self.org, name="Other Prospect", phone="081200007777",
+        )
+        self._login_as(self.dev)
+        resp = self.client.post(
+            f"/api/prospects/{self.prospect.id}/activities/",
+            {"activity_type": "note", "notes": "x", "prospect": str(other_prospect.id)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        created = Activity.objects.get(notes="x")
+        # Regardless of what was in the payload, it's attached to the
+        # URL's prospect, not whatever the client tried to pass.
+        self.assertEqual(created.prospect_id, self.prospect.id)
+
+
+class ActivityTenantIsolationTests(ProspectAPITestBase):
+    """The case that matters most: an activity list/create for a
+    prospect in another org must 404 before any Activity row is
+    touched — proving access is fully gated by Prospect's own
+    tenant-scoped lookup, with zero separate logic needed on Activity."""
+
+    def setUp(self):
+        super().setUp()
+        self.other_org = Organization.objects.create(name="Org Lain Activity Isolation")
+        self.other_dev = CustomUser.objects.create_user(
+            email="dev.activityisolation.other@test.id", password="pass12345!",
+            full_name="Dev Org Lain", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.other_org, user=self.other_dev, role="owner", is_active=True,
+        )
+        self.prospect = Prospect.objects.create(
+            organization=self.org, name="Prospect Org A", phone="081200008888",
+        )
+
+    def test_org_b_cannot_list_org_a_prospect_activities(self):
+        self._login_as(self.other_dev)
+        resp = self.client.get(f"/api/prospects/{self.prospect.id}/activities/")
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_org_b_cannot_log_activity_on_org_a_prospect(self):
+        self._login_as(self.other_dev)
+        resp = self.client.post(
+            f"/api/prospects/{self.prospect.id}/activities/",
+            {"activity_type": "call", "notes": "should never be created"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(Activity.objects.filter(prospect=self.prospect).count(), 0)
