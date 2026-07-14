@@ -17,7 +17,7 @@ import { organizationsApi } from "@/lib/api/organizations";
 import { cn } from "@/lib/utils";
 import {
   BarChart2, Bell, Building2, Calendar, ChevronLeft,
-  CreditCard, FileText, FolderOpen, Home, LayoutDashboard,
+  Columns3, CreditCard, FileText, FolderOpen, Home, LayoutDashboard,
   ListChecks, LogOut, Settings, Shield, Target, TrendingUp,
   UserCheck, UserPlus, Users,
 } from "lucide-react";
@@ -57,6 +57,9 @@ const NAV_DEVELOPER = [
       // prospect exists before there's anything to track in
       // Dasbor Penjualan at all.
       { href: "/dashboard/prospects", icon: UserPlus,  label: "Prospect" },
+      // Sprint 7 (CRM Foundation Phase B): same data as Prospect,
+      // Kanban view instead of table — sits right next to it.
+      { href: "/dashboard/pipeline",  icon: Columns3,  label: "Pipeline" },
       { href: "/dashboard/sales",     icon: BarChart2, label: "Dasbor Penjualan" },
       { href: "/dashboard/agents",    icon: UserCheck, label: "Agen" },
       { href: "/dashboard/buyers",    icon: Users,     label: "Data Pembeli" },
