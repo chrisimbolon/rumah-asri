@@ -61,13 +61,22 @@ function formatDate(iso: string | null): string {
 
 // ── Status badge ──────────────────────────────────────────────
 function StatusBadge({ status, display }: { status: Prospect["status"]; display: string }) {
+  // Sprint 5 (CRM Foundation Phase B): expanded from 4 colors to 7.
+  // follow_up/won/lost keep their original colors unchanged since
+  // those stages carry the same meaning as before; the three new
+  // in-between stages (qualified/site_visit/negotiation) get their
+  // own shades so the pipeline reads as a visible progression, not
+  // just "some are blue, some are grey."
   const map: Record<Prospect["status"], { color: string; bg: string }> = {
-    baru:      { color: "var(--color-info)",    bg: "var(--color-info-light)"    },
-    follow_up: { color: "var(--color-warning)", bg: "var(--color-warning-light)" },
-    hilang:    { color: "var(--color-ink-3)",   bg: "var(--color-paper-2)"       },
-    konversi:  { color: "var(--color-success)", bg: "var(--color-success-light)" },
+    lead:         { color: "var(--color-info)",    bg: "var(--color-info-light)"    },
+    qualified:    { color: "var(--color-info)",    bg: "var(--color-info-light)"    },
+    follow_up:    { color: "var(--color-warning)", bg: "var(--color-warning-light)" },
+    site_visit:   { color: "var(--color-warning)", bg: "var(--color-warning-light)" },
+    negotiation:  { color: "var(--color-accent)",  bg: "var(--color-accent-light)"  },
+    won:          { color: "var(--color-success)", bg: "var(--color-success-light)" },
+    lost:         { color: "var(--color-ink-3)",   bg: "var(--color-paper-2)"       },
   };
-  const s = map[status] ?? map.baru;
+  const s = map[status] ?? map.lead;
   return (
     <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 999, color: s.color, backgroundColor: s.bg }}>
       {display}
@@ -451,12 +460,18 @@ function ActivityModal({
 }
 
 // ── Status tabs ───────────────────────────────────────────────
+// Sprint 5 (CRM Foundation Phase B): expanded from 4 to 7, in
+// pipeline order — Lead through Won, with Lost last since it's an
+// exit from the pipeline rather than a stage within it.
 const STATUS_TABS = [
-  { key: "semua",     label: "Semua"     },
-  { key: "baru",      label: "Baru"      },
-  { key: "follow_up", label: "Follow Up" },
-  { key: "konversi",  label: "Konversi"  },
-  { key: "hilang",    label: "Hilang"    },
+  { key: "semua",       label: "Semua"       },
+  { key: "lead",        label: "Lead"        },
+  { key: "qualified",   label: "Qualified"   },
+  { key: "follow_up",   label: "Follow Up"   },
+  { key: "site_visit",  label: "Site Visit"  },
+  { key: "negotiation", label: "Negotiation" },
+  { key: "won",         label: "Won"         },
+  { key: "lost",        label: "Lost"        },
 ];
 
 // ─────────────────────────────────────────────────────────────
@@ -498,7 +513,8 @@ export default function ProspectsPage() {
     if (!confirm(`Tandai ${prospect.name} sebagai hilang?`)) return;
     setLosingId(prospect.id);
     try {
-      const updated = await prospectsApi.update(prospect.id, { status: "hilang" });
+      // Sprint 5 (CRM Foundation Phase B): HILANG renamed LOST.
+      const updated = await prospectsApi.update(prospect.id, { status: "lost" });
       setProspects((prev) => prev.map((p) => p.id === updated.id ? updated : p));
     } catch {
       alert("Gagal memperbarui status prospect");
@@ -665,7 +681,8 @@ export default function ProspectsPage() {
                     >
                       <MessageSquareText size={11} /> Riwayat
                     </button>
-                    {p.status !== "konversi" && p.status !== "hilang" && (
+                    {/* Sprint 5 (CRM Foundation Phase B): KONVERSI/HILANG renamed WON/LOST. */}
+                    {p.status !== "won" && p.status !== "lost" && (
                       <>
                         <button
                           className="btn-ghost btn-sm"
@@ -694,12 +711,12 @@ export default function ProspectsPage() {
                         </button>
                       </>
                     )}
-                    {p.status === "konversi" && (
+                    {p.status === "won" && (
                       <span style={{ fontSize: 12, color: "var(--color-success)", display: "inline-flex", alignItems: "center", gap: 4 }}>
                         <CheckCircle2 size={12} /> Sudah terkonversi
                       </span>
                     )}
-                    {p.status === "hilang" && (
+                    {p.status === "lost" && (
                       <span style={{ fontSize: 12, color: "var(--color-ink-3)", display: "inline-flex", alignItems: "center", gap: 4 }}>
                         <XCircle size={12} /> Lead hilang
                       </span>
