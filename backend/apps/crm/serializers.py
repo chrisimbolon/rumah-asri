@@ -4,7 +4,7 @@
 # =============================================================================
 from rest_framework import serializers
 
-from .models import Activity, Prospect
+from .models import Activity, Prospect, SiteVisit
 
 
 class ProspectSerializer(serializers.ModelSerializer):
@@ -126,3 +126,43 @@ class ActivitySerializer(serializers.ModelSerializer):
             "notes", "created_by", "created_by_name", "created_at",
         ]
         read_only_fields = ["id", "created_by", "created_by_name", "created_at"]
+
+
+class SiteVisitSerializer(serializers.ModelSerializer):
+    """
+    Sprint 6 (CRM Foundation Phase B). Single serializer for both
+    scheduling (POST) and status/reschedule updates (PUT) — same
+    pattern ProspectCreateSerializer already establishes. `prospect`,
+    `organization`, and `created_by` are all set server-side in the
+    view, never client-writable.
+    """
+    status_display  = serializers.CharField(source="get_status_display", read_only=True)
+    unit_number     = serializers.CharField(source="unit.unit_number", read_only=True, default=None)
+    created_by_name = serializers.CharField(source="created_by.full_name", read_only=True, default=None)
+
+    class Meta:
+        model  = SiteVisit
+        fields = [
+            "id", "unit", "unit_number", "scheduled_at",
+            "status", "status_display", "notes",
+            "created_by", "created_by_name", "created_at",
+        ]
+        read_only_fields = ["id", "created_by", "created_by_name", "created_at"]
+
+    def validate_unit(self, unit):
+        """Same tenant-membership check as ProspectCreateSerializer's
+        validate_interested_project — a visit can't be scheduled
+        against a unit outside the requester's org."""
+        if unit is None:
+            return unit
+        user = self.context["request"].user
+        if user.role == "super_admin":
+            return unit
+        org_ids = user.memberships.filter(is_active=True).values_list(
+            "organization_id", flat=True
+        )
+        if unit.organization_id not in org_ids:
+            raise serializers.ValidationError(
+                "Anda tidak memiliki akses ke unit ini."
+            )
+        return unit
