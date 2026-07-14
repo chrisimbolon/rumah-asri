@@ -129,3 +129,68 @@ export const activitiesApi = {
     return data.activity;
   },
 };
+
+// =============================================================================
+// Sprint 6 (CRM Foundation Phase B): Site Visit Scheduling
+// =============================================================================
+
+export interface SiteVisit {
+  id:                string;
+  unit:              string | null;
+  unit_number:       string | null;
+  scheduled_at:      string;
+  status:            "scheduled" | "completed" | "no_show" | "cancelled";
+  status_display:    string;
+  notes:             string;
+  created_by:        string | null;
+  created_by_name:   string | null;
+  created_at:        string;
+}
+
+export interface SiteVisitListResponse {
+  success: boolean;
+  count:   number;
+  results: SiteVisit[];
+}
+
+export interface SiteVisitDetailResponse {
+  success:    boolean;
+  site_visit: SiteVisit;
+}
+
+export interface CreateSiteVisitPayload {
+  unit?:         string | null;
+  scheduled_at:  string;
+  notes?:        string;
+}
+
+export interface UpdateSiteVisitPayload {
+  status?:       SiteVisit["status"];
+  scheduled_at?: string;
+  notes?:        string;
+}
+
+export const siteVisitsApi = {
+  async list(prospectId: string): Promise<SiteVisit[]> {
+    const { data } = await api.get<SiteVisitListResponse>(
+      `/api/prospects/${prospectId}/site-visits/`
+    );
+    return data.results;
+  },
+
+  async create(prospectId: string, payload: CreateSiteVisitPayload): Promise<SiteVisit> {
+    const { data } = await api.post<SiteVisitDetailResponse>(
+      `/api/prospects/${prospectId}/site-visits/`,
+      payload
+    );
+    return data.site_visit;
+  },
+
+  async update(prospectId: string, visitId: string, payload: UpdateSiteVisitPayload): Promise<SiteVisit> {
+    const { data } = await api.put<SiteVisitDetailResponse>(
+      `/api/prospects/${prospectId}/site-visits/${visitId}/`,
+      payload
+    );
+    return data.site_visit;
+  },
+};
