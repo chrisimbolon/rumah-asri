@@ -11,14 +11,16 @@
 from datetime import date, timedelta
 
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.authentication.models import CustomUser
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.projects.models import Project
+from apps.units.models import Unit
 
-from .models import Activity, Prospect
+from .models import Activity, Prospect, SiteVisit
 
 
 
@@ -581,3 +583,214 @@ class ActivityTenantIsolationTests(ProspectAPITestBase):
         )
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(Activity.objects.filter(prospect=self.prospect).count(), 0)
+
+
+# =============================================================================
+# Sprint 6 (CRM Foundation Phase B): Site Visit Scheduling tests.
+# =============================================================================
+
+class SiteVisitModelTests(ProspectTestBase):
+
+    def setUp(self):
+        super().setUp()
+        self.prospect = Prospect.objects.create(
+            organization=self.org, name="Andi Kunjungan", phone="081200009999",
+        )
+        self.unit = Unit.objects.create(
+            project=self.project, unit_number="A-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+
+    def test_create_site_visit(self):
+        visit = SiteVisit.objects.create(
+            prospect=self.prospect, unit=self.unit,
+            scheduled_at=timezone.now() + timedelta(days=2),
+        )
+        self.assertEqual(visit.status, SiteVisit.Status.SCHEDULED)
+        self.assertEqual(visit.organization_id, self.org.id)
+
+    def test_create_site_visit_without_unit(self):
+        """unit is nullable — a visit can be to a project generally,
+        before a buyer has settled on one specific unit."""
+        visit = SiteVisit.objects.create(
+            prospect=self.prospect,
+            scheduled_at=timezone.now() + timedelta(days=1),
+        )
+        self.assertIsNone(visit.unit)
+
+    def test_creating_site_visit_advances_early_stage_prospect(self):
+        """A prospect in an early stage (LEAD/QUALIFIED/FOLLOW_UP)
+        automatically advances to SITE_VISIT the moment a real visit
+        is scheduled — same domain-event-syncs-status pattern Booking
+        already has with Unit.status."""
+        self.assertEqual(self.prospect.status, Prospect.Status.LEAD)
+        SiteVisit.objects.create(
+            prospect=self.prospect, scheduled_at=timezone.now() + timedelta(days=1),
+        )
+        self.prospect.refresh_from_db()
+        self.assertEqual(self.prospect.status, Prospect.Status.SITE_VISIT)
+
+    def test_creating_site_visit_does_not_regress_later_stage_prospect(self):
+        """A prospect already further along (e.g. NEGOTIATION) must
+        NOT be pushed backward to SITE_VISIT just because a second
+        visit gets scheduled — forward-only sync."""
+        self.prospect.status = Prospect.Status.NEGOTIATION
+        self.prospect.save(update_fields=["status"])
+        SiteVisit.objects.create(
+            prospect=self.prospect, scheduled_at=timezone.now() + timedelta(days=1),
+        )
+        self.prospect.refresh_from_db()
+        self.assertEqual(self.prospect.status, Prospect.Status.NEGOTIATION)
+
+    def test_updating_existing_site_visit_does_not_resync_status(self):
+        """The status-sync only fires on creation (is_new check) — a
+        later status update (e.g. marking COMPLETED) shouldn't
+        re-trigger the sync and stomp on wherever the prospect has
+        moved to since."""
+        visit = SiteVisit.objects.create(
+            prospect=self.prospect, scheduled_at=timezone.now() + timedelta(days=1),
+        )
+        self.prospect.refresh_from_db()
+        self.assertEqual(self.prospect.status, Prospect.Status.SITE_VISIT)
+
+        # Prospect moves on to negotiation in the meantime...
+        self.prospect.status = Prospect.Status.NEGOTIATION
+        self.prospect.save(update_fields=["status"])
+
+        # ...then the old visit gets marked completed. Must not
+        # silently drag the prospect back to SITE_VISIT.
+        visit.status = SiteVisit.Status.COMPLETED
+        visit.save()
+        self.prospect.refresh_from_db()
+        self.assertEqual(self.prospect.status, Prospect.Status.NEGOTIATION)
+
+    def test_str_representation(self):
+        visit = SiteVisit.objects.create(
+            prospect=self.prospect, scheduled_at=timezone.now() + timedelta(days=1),
+        )
+        self.assertIn("Andi Kunjungan", str(visit))
+
+
+class SiteVisitAPITests(ProspectAPITestBase):
+
+    def setUp(self):
+        super().setUp()
+        self.prospect = Prospect.objects.create(
+            organization=self.org, name="Budi Kunjungan API", phone="081200001010",
+        )
+        self.unit = Unit.objects.create(
+            project=self.project, unit_number="B-01", unit_type="Tipe 36",
+            land_area=72, building_area=36, price=400_000_000,
+        )
+
+    def test_developer_can_schedule_visit(self):
+        self._login_as(self.dev)
+        resp = self.client.post(
+            f"/api/prospects/{self.prospect.id}/site-visits/",
+            {"unit": str(self.unit.id), "scheduled_at": "2026-08-01T10:00:00Z"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(SiteVisit.objects.filter(prospect=self.prospect).count(), 1)
+
+    def test_buyer_cannot_schedule_visit(self):
+        self._login_as(self.buyer)
+        resp = self.client.post(
+            f"/api/prospects/{self.prospect.id}/site-visits/",
+            {"scheduled_at": "2026-08-01T10:00:00Z"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_cannot_schedule_visit_against_unit_outside_org(self):
+        other_org = Organization.objects.create(name="Org Lain Site Visit")
+        other_project = Project.objects.create(
+            organization=other_org, name="Cluster Org Lain", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        foreign_unit = Unit.objects.create(
+            project=other_project, unit_number="X-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+        self._login_as(self.dev)
+        resp = self.client.post(
+            f"/api/prospects/{self.prospect.id}/site-visits/",
+            {"unit": str(foreign_unit.id), "scheduled_at": "2026-08-01T10:00:00Z"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(SiteVisit.objects.filter(prospect=self.prospect).count(), 0)
+
+    def test_list_returns_scheduled_visits(self):
+        SiteVisit.objects.create(prospect=self.prospect, scheduled_at=timezone.now() + timedelta(days=1))
+        SiteVisit.objects.create(prospect=self.prospect, scheduled_at=timezone.now() + timedelta(days=3))
+        self._login_as(self.dev)
+        resp = self.client.get(f"/api/prospects/{self.prospect.id}/site-visits/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["count"], 2)
+
+    def test_developer_can_mark_visit_completed(self):
+        visit = SiteVisit.objects.create(
+            prospect=self.prospect, scheduled_at=timezone.now() + timedelta(days=1),
+        )
+        self._login_as(self.dev)
+        resp = self.client.put(
+            f"/api/prospects/{self.prospect.id}/site-visits/{visit.id}/",
+            {"status": "completed", "notes": "Cocok, lanjut negosiasi"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        visit.refresh_from_db()
+        self.assertEqual(visit.status, SiteVisit.Status.COMPLETED)
+
+    def test_visit_id_from_different_prospect_same_org_404s(self):
+        """The specific case SiteVisitDetailView's docstring calls
+        out: a visit_id that's real, and in the SAME org, but attached
+        to a DIFFERENT prospect must still 404 through this prospect's
+        URL — not silently succeed because the org check alone passed."""
+        other_prospect = Prospect.objects.create(
+            organization=self.org, name="Prospect Lain", phone="081200002020",
+        )
+        other_visit = SiteVisit.objects.create(
+            prospect=other_prospect, scheduled_at=timezone.now() + timedelta(days=1),
+        )
+        self._login_as(self.dev)
+        resp = self.client.put(
+            f"/api/prospects/{self.prospect.id}/site-visits/{other_visit.id}/",
+            {"status": "cancelled"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+        other_visit.refresh_from_db()
+        self.assertEqual(other_visit.status, SiteVisit.Status.SCHEDULED)
+
+
+class SiteVisitTenantIsolationTests(ProspectAPITestBase):
+
+    def setUp(self):
+        super().setUp()
+        self.other_org = Organization.objects.create(name="Org Lain SiteVisit Isolation")
+        self.other_dev = CustomUser.objects.create_user(
+            email="dev.sitevisitisolation.other@test.id", password="pass12345!",
+            full_name="Dev Org Lain", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.other_org, user=self.other_dev, role="owner", is_active=True,
+        )
+        self.prospect = Prospect.objects.create(
+            organization=self.org, name="Prospect Org A", phone="081200003030",
+        )
+
+    def test_org_b_cannot_list_org_a_site_visits(self):
+        self._login_as(self.other_dev)
+        resp = self.client.get(f"/api/prospects/{self.prospect.id}/site-visits/")
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_org_b_cannot_schedule_visit_on_org_a_prospect(self):
+        self._login_as(self.other_dev)
+        resp = self.client.post(
+            f"/api/prospects/{self.prospect.id}/site-visits/",
+            {"scheduled_at": "2026-08-01T10:00:00Z"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(SiteVisit.objects.filter(prospect=self.prospect).count(), 0)
