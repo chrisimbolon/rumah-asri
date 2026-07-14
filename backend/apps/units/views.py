@@ -194,7 +194,11 @@ class UnitBookingView(TenantScopedAPIView):
         # addition — the booking flow above this point is byte-for-byte
         # unchanged when prospect_id is omitted (the default case).
         if prospect is not None:
-            prospect.status = Prospect.Status.KONVERSI
+            # Sprint 5 (CRM Foundation Phase B): KONVERSI was renamed
+            # WON in the expanded status enum — this is the exact
+            # moment Decision 1 designed the enum around, so this line
+            # changing is the whole point of that decision, not a bug.
+            prospect.status = Prospect.Status.WON
             prospect.converted_booking = booking
             prospect.save(update_fields=["status", "converted_booking", "updated_at"])
 
