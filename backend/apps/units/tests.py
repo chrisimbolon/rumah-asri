@@ -827,7 +827,8 @@ class BookingProspectConversionTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
 
         self.prospect.refresh_from_db()
-        self.assertEqual(self.prospect.status, Prospect.Status.KONVERSI)
+        # Sprint 5 (CRM Foundation Phase B): KONVERSI renamed WON.
+        self.assertEqual(self.prospect.status, Prospect.Status.WON)
         booking = Booking.objects.get(unit=self.unit)
         self.assertEqual(self.prospect.converted_booking_id, booking.id)
 
@@ -846,7 +847,9 @@ class BookingProspectConversionTests(APITestCase):
         self.assertEqual(self.unit.buyer_id, self.buyer.id)
 
         self.prospect.refresh_from_db()
-        self.assertEqual(self.prospect.status, Prospect.Status.BARU)
+        # Sprint 5 (CRM Foundation Phase B): BARU renamed LEAD, and is
+        # still the default — an untouched prospect stays untouched.
+        self.assertEqual(self.prospect.status, Prospect.Status.LEAD)
         self.assertIsNone(self.prospect.converted_booking)
 
     def test_cross_org_prospect_id_rejected_with_zero_side_effects(self):
@@ -864,7 +867,7 @@ class BookingProspectConversionTests(APITestCase):
         self.unit.refresh_from_db()
         self.assertEqual(self.unit.status, Unit.Status.AVAILABLE)
         foreign_prospect.refresh_from_db()
-        self.assertEqual(foreign_prospect.status, Prospect.Status.BARU)
+        self.assertEqual(foreign_prospect.status, Prospect.Status.LEAD)
 
     def test_invalid_prospect_id_returns_400(self):
         resp = self._book_unit(prospect_id="00000000-0000-0000-0000-000000000000")

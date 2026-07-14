@@ -50,7 +50,8 @@ class ProspectCreationTests(ProspectTestBase):
         prospect = Prospect.objects.create(
             organization=self.org, name="Andi Calon Pembeli", phone="081234567890",
         )
-        self.assertEqual(prospect.status, Prospect.Status.BARU)
+        # Sprint 5 (CRM Foundation Phase B): BARU renamed LEAD.
+        self.assertEqual(prospect.status, Prospect.Status.LEAD)
         self.assertIsNone(prospect.interested_project)
         self.assertIsNone(prospect.assigned_to)
         self.assertIsNone(prospect.converted_booking)
@@ -78,7 +79,11 @@ class ProspectCreationTests(ProspectTestBase):
             organization=self.org, name="Dedi Calon Pembeli", phone="081200000000",
         )
         self.assertIn("Dedi Calon Pembeli", str(prospect))
-        self.assertIn("Baru", str(prospect))
+        # Sprint 5 (CRM Foundation Phase B): BARU/"Baru" renamed
+        # LEAD/"Lead" — this was missed in Sprint 5's grep sweep since
+        # it checks the *display* string, not the raw stored value or
+        # enum member name, so neither "baru" nor Status.BARU matched it.
+        self.assertIn("Lead", str(prospect))
 
 
 class ProspectOrganizationResolutionTests(ProspectTestBase):
@@ -349,10 +354,11 @@ class ProspectListDetailUpdateTests(ProspectAPITestBase):
     def test_list_filters_by_status(self):
         Prospect.objects.create(
             organization=self.org, name="Indah Calon Pembeli", phone="081200003333",
-            status=Prospect.Status.HILANG,
+            # Sprint 5 (CRM Foundation Phase B): HILANG renamed LOST.
+            status=Prospect.Status.LOST,
         )
         self._login_as(self.dev)
-        resp = self.client.get("/api/prospects/?status=hilang")
+        resp = self.client.get("/api/prospects/?status=lost")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data["count"], 1)
         self.assertEqual(resp.data["results"][0]["name"], "Indah Calon Pembeli")
@@ -429,11 +435,13 @@ class ProspectAPITenantIsolationTests(ProspectAPITestBase):
         self._login_as(self.other_dev)
         resp = self.client.put(
             f"/api/prospects/{self.prospect.id}/",
-            {"status": "hilang"}, format="json",
+            # Sprint 5 (CRM Foundation Phase B): HILANG renamed LOST.
+            {"status": "lost"}, format="json",
         )
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
         self.prospect.refresh_from_db()
-        self.assertEqual(self.prospect.status, Prospect.Status.BARU)
+        # BARU renamed LEAD — untouched prospect stays untouched.
+        self.assertEqual(self.prospect.status, Prospect.Status.LEAD)
 
 
 # =============================================================================
