@@ -4,7 +4,9 @@
 # =============================================================================
 from rest_framework import serializers
 
-from .models import Activity, Prospect, SiteVisit
+from apps.units.models import Unit
+
+from .models import Activity, CustomerProfile, Prospect, SiteVisit
 
 
 class ProspectSerializer(serializers.ModelSerializer):
@@ -166,3 +168,44 @@ class SiteVisitSerializer(serializers.ModelSerializer):
                 "Anda tidak memiliki akses ke unit ini."
             )
         return unit
+
+
+class CustomerProfileSerializer(serializers.ModelSerializer):
+    """
+    Sprint 8 (CRM Foundation Phase B). unit_number/project_name are
+    read-only, computed at request time — the join for display the
+    model's own docstring explicitly says it should never own. If the
+    same buyer somehow has multiple units in this org, this shows the
+    first one found; genuinely rare in practice (one buyer usually
+    buys once), and not worth a real multi-unit list UI this sprint.
+    """
+    user_name    = serializers.CharField(source="user.full_name", read_only=True)
+    user_email   = serializers.CharField(source="user.email", read_only=True)
+    unit_number  = serializers.SerializerMethodField()
+    project_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = CustomerProfile
+        fields = [
+            "id", "user", "user_name", "user_email",
+            "budget", "family_notes", "timeline_notes",
+            "unit_number", "project_name",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "user", "user_name", "user_email",
+            "unit_number", "project_name", "created_at", "updated_at",
+        ]
+
+    def _buyer_unit(self, obj):
+        return Unit.objects.filter(
+            buyer=obj.user, organization=obj.organization
+        ).select_related("project").first()
+
+    def get_unit_number(self, obj):
+        unit = self._buyer_unit(obj)
+        return unit.unit_number if unit else None
+
+    def get_project_name(self, obj):
+        unit = self._buyer_unit(obj)
+        return unit.project.name if unit else None
