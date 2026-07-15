@@ -194,3 +194,58 @@ export const siteVisitsApi = {
     return data.site_visit;
   },
 };
+
+// =============================================================================
+// Sprint 8 (CRM Foundation Phase B): Customer Profile
+// Deliberately a separate top-level resource — /api/customers/, not
+// nested under /api/prospects/ — same reasoning apps/crm/customer_urls.py
+// documents on the backend: a customer isn't owned by any one prospect.
+// =============================================================================
+
+export interface CustomerProfile {
+  id:              string;
+  user:            string;
+  user_name:       string;
+  user_email:      string;
+  budget:          number | null;
+  family_notes:    string;
+  timeline_notes:  string;
+  unit_number:     string | null;
+  project_name:    string | null;
+  created_at:      string;
+  updated_at:      string;
+}
+
+export interface CustomerProfileListResponse {
+  success: boolean;
+  count:   number;
+  results: CustomerProfile[];
+}
+
+export interface CustomerProfileDetailResponse {
+  success:  boolean;
+  customer: CustomerProfile;
+}
+
+export interface UpdateCustomerProfilePayload {
+  budget?:          number | null;
+  family_notes?:    string;
+  timeline_notes?:  string;
+}
+
+export const customerProfilesApi = {
+  async list(): Promise<CustomerProfile[]> {
+    const { data } = await api.get<CustomerProfileListResponse>("/api/customers/");
+    return data.results;
+  },
+
+  async get(id: string): Promise<CustomerProfile> {
+    const { data } = await api.get<CustomerProfileDetailResponse>(`/api/customers/${id}/`);
+    return data.customer;
+  },
+
+  async update(id: string, payload: UpdateCustomerProfilePayload): Promise<CustomerProfile> {
+    const { data } = await api.put<CustomerProfileDetailResponse>(`/api/customers/${id}/`, payload);
+    return data.customer;
+  },
+};
