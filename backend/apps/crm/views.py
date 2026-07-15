@@ -17,8 +17,14 @@ from rest_framework.response import Response
 
 from apps.core.views import TenantScopedAPIView
 
-from .models import Activity, Prospect, SiteVisit
-from .serializers import ActivitySerializer, ProspectCreateSerializer, ProspectSerializer, SiteVisitSerializer
+from .models import Activity, CustomerProfile, Prospect, SiteVisit
+from .serializers import (
+    ActivitySerializer,
+    CustomerProfileSerializer,
+    ProspectCreateSerializer,
+    ProspectSerializer,
+    SiteVisitSerializer,
+)
 
 
 class ProspectListView(TenantScopedAPIView):
@@ -233,6 +239,59 @@ class SiteVisitDetailView(TenantScopedAPIView):
                 "success":    True,
                 "message":    "Kunjungan berhasil diperbarui",
                 "site_visit": SiteVisitSerializer(visit).data,
+            })
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class CustomerProfileListView(TenantScopedAPIView):
+    """
+    GET /api/customers/
+    Sprint 8 (CRM Foundation Phase B). No POST — CustomerProfile is
+    never created through this API, only auto-created by
+    UnitBookingView.post() the moment a real booking closes.
+    """
+    model = CustomerProfile
+
+    def get(self, request):
+        profiles = self.get_queryset().select_related("user")
+        serializer = CustomerProfileSerializer(profiles, many=True)
+        return Response({
+            "success": True,
+            "count":   profiles.count(),
+            "results": serializer.data,
+        })
+
+
+class CustomerProfileDetailView(TenantScopedAPIView):
+    """
+    GET/PUT /api/customers/<id>/
+    PUT only touches the fields that genuinely belong on this model
+    (budget, family_notes, timeline_notes) — everything else on the
+    serializer is read-only by design (see CustomerProfileSerializer).
+    """
+    model = CustomerProfile
+
+    def get(self, request, pk):
+        profile = self.get_object(pk)
+        return Response({"success": True, "customer": CustomerProfileSerializer(profile).data})
+
+    def put(self, request, pk):
+        if request.user.role not in ("developer", "agent", "super_admin"):
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        profile = self.get_object(pk)
+        serializer = CustomerProfileSerializer(profile, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "success":  True,
+                "message":  "Profil pelanggan berhasil diperbarui",
+                "customer": CustomerProfileSerializer(profile).data,
             })
         return Response(
             {"success": False, "errors": serializer.errors},
