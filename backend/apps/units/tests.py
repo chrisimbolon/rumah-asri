@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 
 from django.core.management import call_command
 from django.utils import timezone
@@ -6,6 +7,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.authentication.models import CustomUser
+from apps.commissions.models import Commission, CommissionPolicy
 from apps.crm.models import CustomerProfile, Prospect
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.projects.models import Project
@@ -953,6 +955,106 @@ class BookingCreatesCustomerProfileTests(APITestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(
+            CustomerProfile.objects.filter(user=self.buyer, organization=self.org).exists()
+        )
+
+
+class BookingCreatesCommissionTests(APITestCase):
+    """
+    Commission Foundation Sprint 1: conditional Commission creation.
+    Deliberately tests both the positive case (assigned agent → real
+    Commission) and negative cases (no agent, or no Prospect at all →
+    no Commission) as equally important, not edge cases — the whole
+    design point of this hook is that it's conditional, unlike
+    CustomerProfile's unconditional one.
+    """
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Asri Sentosa Commission Hook")
+        self.dev = CustomUser.objects.create_user(
+            email="dev.commissionhook@test.id", password="pass12345!",
+            full_name="Dev Commission Hook", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.dev, role="owner", is_active=True,
+        )
+        self.agent = CustomUser.objects.create_user(
+            email="agent.commissionhook@test.id", password="pass12345!",
+            full_name="Agent Commission Hook", role="agent",
+        )
+        self.buyer = CustomUser.objects.create_user(
+            email="buyer.commissionhook@test.id", password="pass12345!",
+            full_name="Buyer Commission Hook", role="buyer",
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster Commission Hook", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.unit_a = Unit.objects.create(
+            project=self.project, unit_number="A-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+        self.unit_b = Unit.objects.create(
+            project=self.project, unit_number="A-02", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+        self.unit_c = Unit.objects.create(
+            project=self.project, unit_number="A-03", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+        CommissionPolicy.objects.create(
+            organization=self.org,
+            rate_type=CommissionPolicy.RateType.PERCENTAGE,
+            rate_value=Decimal("2.5"),
+        )
+        self.client.force_authenticate(user=self.dev)
+
+    def test_booking_with_prospect_and_assigned_agent_creates_commission(self):
+        prospect = Prospect.objects.create(
+            organization=self.org, name="Andi", phone="081200000000",
+            assigned_to=self.agent,
+        )
+        resp = self.client.post(
+            f"/api/units/{self.unit_a.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000, "prospect_id": str(prospect.id)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        booking = Booking.objects.get(unit=self.unit_a)
+        commission = Commission.objects.get(booking=booking)
+        self.assertEqual(commission.agent_id, self.agent.id)
+        self.assertEqual(commission.amount, Decimal("12500000"))
+        self.assertEqual(commission.status, Commission.Status.PENDING)
+
+    def test_booking_with_prospect_but_no_assigned_agent_creates_no_commission(self):
+        prospect = Prospect.objects.create(
+            organization=self.org, name="Budi", phone="081200000001",
+            assigned_to=None,
+        )
+        resp = self.client.post(
+            f"/api/units/{self.unit_b.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000, "prospect_id": str(prospect.id)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        booking = Booking.objects.get(unit=self.unit_b)
+        self.assertFalse(Commission.objects.filter(booking=booking).exists())
+
+    def test_walk_in_booking_with_no_prospect_creates_no_commission(self):
+        """The primary contrast with Sprint 8's CustomerProfile hook:
+        CustomerProfile is unconditional here, Commission is not."""
+        resp = self.client.post(
+            f"/api/units/{self.unit_c.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        booking = Booking.objects.get(unit=self.unit_c)
+        self.assertFalse(Commission.objects.filter(booking=booking).exists())
+        # But CustomerProfile still got created — proving the two
+        # hooks really are independent, not accidentally coupled.
         self.assertTrue(
             CustomerProfile.objects.filter(user=self.buyer, organization=self.org).exists()
         )
