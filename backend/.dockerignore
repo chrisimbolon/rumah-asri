@@ -1,0 +1,48 @@
+# =============================================================================
+# backend/.dockerignore
+# =============================================================================
+# Added after discovering .env, .env.docker, venv/, db.sqlite3, and
+# media/ were all being copied into every image via `COPY . .` with
+# no exclusions. Two separate problems this fixes:
+#   1. Secrets (.env*) baked permanently into image layer history —
+#      the actual reason this file exists at all.
+#   2. Dead weight (venv/, db.sqlite3, media/) bloating every single
+#      build for no runtime benefit — venv/ especially, since the
+#      Dockerfile already does its own pip install; the copied one
+#      is never used.
+# =============================================================================
+
+# ── Secrets — never bake these into an image layer ─────────────
+.env
+.env.docker
+.env.*
+!.env.example
+
+# ── Local dev artifacts — meaningless inside a container ───────
+venv/
+env/
+.venv/
+db.sqlite3
+db.sqlite3-journal
+*.pyc
+__pycache__/
+*.pyo
+.pytest_cache/
+.mypy_cache/
+*.log
+
+# ── Volume-mounted at runtime — don't duplicate into the image ─
+media/
+
+# ── VCS / editor / OS noise ──────────────────────────────────
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+
+# ── Anything Docker-related itself — no reason to be in the
+#    build context of the image it's building ──────────────────
+Dockerfile
+docker-compose*.yml
+.dockerignore
