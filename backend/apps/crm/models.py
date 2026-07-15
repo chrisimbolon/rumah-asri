@@ -186,9 +186,14 @@ class SiteVisit(TenantScopedModel):
     schedulable-event system — it's a single hardcoded query over
     ProjectRequirementStatus rows with a due_date, field names baked
     to that one purpose. Nothing to hang this off of, so SiteVisit is
-    its own standalone model. A future sprint could extend the
-    Calendar page to also surface these, but that's optional, later,
-    and not assumed here.
+    its own standalone model.
+
+    Decided (Sprint 7 follow-up, Chris): Calendar and Site Visits stay
+    deliberately separate, not merged. Calendar remains a pure
+    construction-deadline tracker; site visits are a sales-pipeline
+    concern, surfaced on the Prospect/Pipeline pages instead. Revisit
+    only with a real, repeated request to merge them — not a default
+    to reach for later.
 
     Relationship to Prospect.Status.SITE_VISIT (Sprint 5): the status
     is the pipeline *stage*, this row is the specific *appointment* —
@@ -262,3 +267,67 @@ class SiteVisit(TenantScopedModel):
             if self.prospect.status in EARLY_STAGES:
                 self.prospect.status = Prospect.Status.SITE_VISIT
                 self.prospect.save(update_fields=["status", "updated_at"])
+
+
+class CustomerProfile(TenantScopedModel):
+    """
+    CRM Foundation Sprint 8: real Customer entity — Decision 2 =
+    Option B (Phase B roadmap).
+
+    Auto-created (get_or_create) the moment ANY real Booking closes,
+    in apps.units.views.UnitBookingView.post() — deliberately
+    unconditional on prospect_id being present. A walk-in buyer with
+    no CRM history is still a real customer the moment they book, not
+    just ones tracked through the Prospect pipeline. This is a
+    deliberate deviation from the Phase B roadmap's original wording
+    ("created the moment a Prospect converts") — flagged, not silent.
+
+    Never created through this app's own API — no POST endpoint
+    exists on purpose, same "creation isn't a new trigger point"
+    discipline Prospect.converted_booking already established.
+
+    `user` is a ForeignKey, not OneToOneField — see Decision 2's
+    correction in the Phase B roadmap: CustomUser accounts aren't
+    scoped to a single organization (OrganizationMembership allows
+    multiple), so a strict one-to-one would let two competing orgs
+    share and edit the same customer record if the same person ever
+    buys from both. unique_together(user, organization) gives the
+    actually-intended guarantee — one profile per customer PER ORG —
+    without that cross-tenant leak.
+
+    Explicit non-goal: this model does NOT duplicate Unit, Booking, or
+    Payment data. Those stay the single source of truth for their own
+    facts (price, SPR, amount paid) — CustomerProfileSerializer joins
+    them read-only for display; the model itself only stores what
+    genuinely has nowhere else to live (family notes, budget context,
+    timeline notes an agent has learned about the buyer as a person).
+    """
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="customer_profiles",
+        verbose_name="Pelanggan",
+    )
+    budget = models.BigIntegerField(
+        null=True, blank=True, verbose_name="Budget",
+        help_text="Perkiraan budget pelanggan dalam Rupiah (opsional).",
+    )
+    family_notes   = models.TextField(blank=True, verbose_name="Catatan Keluarga")
+    timeline_notes = models.TextField(blank=True, verbose_name="Catatan Timeline")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name        = "Customer Profile"
+        verbose_name_plural  = "Customer Profiles"
+        unique_together      = [("user", "organization")]
+        ordering             = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user.full_name} ({self.organization})"
+
+    # No _resolve_organization() override — same as Project itself.
+    # CustomUser has no single natural organization to derive from
+    # (a buyer account can hold memberships across multiple orgs), so
+    # organization must always be set explicitly by the caller, which
+    # UnitBookingView.post() already does (org is already resolved
+    # there from the unit being booked).
