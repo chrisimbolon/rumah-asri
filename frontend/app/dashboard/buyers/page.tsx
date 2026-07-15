@@ -9,10 +9,11 @@
  * tenant-isolated and tested. No new backend endpoint, no new tests needed — this is presentation on top of proven data.
  */
 
+import { CustomerProfile, UpdateCustomerProfilePayload, customerProfilesApi } from "@/lib/api/crm";
 import { Booking, Unit, unitsApi } from "@/lib/api/units";
 import { rupiah } from "@/lib/mock-data";
 import {
-  AlertTriangle, Loader2, Search, Users,
+  AlertTriangle, Loader2, Search, UserCog, Users, X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -33,6 +34,132 @@ function kprStatusColor(kprStatus: Booking["kpr_status"]): string {
   }
 }
 
+// ── Customer Profile Modal ────────────────────────────────────
+// Sprint 8 (CRM Foundation Phase B): the "backed by a real editable
+// record" half of the Data Pembeli → Customers rename. Existing KPR
+// logic above is completely untouched — this is purely additive.
+function CustomerProfileModal({
+  profile,
+  onClose,
+  onUpdated,
+}: {
+  profile:   CustomerProfile;
+  onClose:   () => void;
+  onUpdated: (p: CustomerProfile) => void;
+}) {
+  const [budget,   setBudget]   = useState(profile.budget?.toString() ?? "");
+  const [family,   setFamily]   = useState(profile.family_notes);
+  const [timeline, setTimeline] = useState(profile.timeline_notes);
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState<string | null>(null);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const payload: UpdateCustomerProfilePayload = {
+        budget: budget.trim() ? Number(budget) : null,
+        family_notes: family,
+        timeline_notes: timeline,
+      };
+      const updated = await customerProfilesApi.update(profile.id, payload);
+      onUpdated(updated);
+    } catch {
+      setError("Gagal menyimpan profil pelanggan");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, backgroundColor: "rgba(14,13,11,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ backgroundColor: "white", borderRadius: 12, width: "100%", maxWidth: 440, boxShadow: "0 20px 60px rgba(14,13,11,0.15)", overflow: "hidden" }}>
+
+        <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid rgba(14,13,11,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <UserCog size={15} style={{ color: "var(--color-accent)" }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--color-accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Profil Pelanggan</span>
+            </div>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: "var(--color-ink)", margin: 0 }}>{profile.user_name}</h2>
+            <div style={{ fontSize: 12, color: "var(--color-ink-3)", marginTop: 2 }}>{profile.user_email}</div>
+          </div>
+          <button onClick={onClose} style={{ padding: 6, borderRadius: 6, border: "none", backgroundColor: "transparent", cursor: "pointer", color: "var(--color-ink-3)" }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ padding: "20px 24px" }}>
+          {error && (
+            <div style={{ marginBottom: 16, padding: "10px 14px", backgroundColor: "var(--color-danger-light)", borderRadius: 6, fontSize: 12, color: "var(--color-danger)" }}>
+              {error}
+            </div>
+          )}
+
+          {(profile.unit_number || profile.project_name) && (
+            <div style={{ marginBottom: 16, padding: "10px 14px", backgroundColor: "var(--color-paper-2)", borderRadius: 6, fontSize: 12, color: "var(--color-ink-3)" }}>
+              {profile.unit_number} · {profile.project_name}
+              <span style={{ display: "block", fontSize: 10, marginTop: 2 }}>
+                Dari data Unit/Booking yang sudah ada — bukan disimpan di sini.
+              </span>
+            </div>
+          )}
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 5 }}>
+              Budget <span style={{ fontSize: 11, color: "var(--color-ink-3)", fontWeight: 400 }}>(opsional, Rupiah)</span>
+            </label>
+            <input
+              type="number"
+              placeholder="mis. 800000000"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 13, outline: "none", boxSizing: "border-box" }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 5 }}>
+              Catatan Keluarga <span style={{ fontSize: 11, color: "var(--color-ink-3)", fontWeight: 400 }}>(opsional)</span>
+            </label>
+            <textarea
+              rows={2}
+              placeholder="mis. Menikah, 2 anak"
+              value={family}
+              onChange={(e) => setFamily(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 13, outline: "none", boxSizing: "border-box", fontFamily: "inherit", resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 5 }}>
+              Catatan Timeline <span style={{ fontSize: 11, color: "var(--color-ink-3)", fontWeight: 400 }}>(opsional)</span>
+            </label>
+            <textarea
+              rows={2}
+              placeholder="mis. Ingin pindah sebelum tahun ajaran baru"
+              value={timeline}
+              onChange={(e) => setTimeline(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 13, outline: "none", boxSizing: "border-box", fontFamily: "inherit", resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={onClose} className="btn-ghost" style={{ flex: 1 }} disabled={saving}>Batal</button>
+            <button onClick={handleSave} className="btn-accent" disabled={saving}
+              style={{ flex: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              {saving
+                ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Menyimpan…</>
+                : "Simpan Profil"
+              }
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function BuyersPage() {
   const [units,   setUnits]   = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,12 +171,30 @@ export default function BuyersPage() {
   // Units page's advancingId.
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
+  // Sprint 8 (CRM Foundation Phase B): the "real editable record"
+  // half of the Data Pembeli → Customers rename. Fetched separately
+  // from units — CustomerProfile is its own resource, matched to a
+  // row here by Unit.buyer === CustomerProfile.user.
+  const [profiles, setProfiles] = useState<CustomerProfile[]>([]);
+  const [editingProfile, setEditingProfile] = useState<CustomerProfile | null>(null);
+
   useEffect(() => {
-    unitsApi.list()
-      .then(setUnits)
+    Promise.all([unitsApi.list(), customerProfilesApi.list()])
+      .then(([u, p]) => { setUnits(u); setProfiles(p); })
       .catch(() => setError("Gagal memuat data pembeli"))
       .finally(() => setLoading(false));
   }, []);
+
+  const profileByUserId = useMemo(() => {
+    const map = new Map<string, CustomerProfile>();
+    profiles.forEach((p) => map.set(p.user, p));
+    return map;
+  }, [profiles]);
+
+  const handleProfileUpdated = (updated: CustomerProfile) => {
+    setProfiles((prev) => prev.map((p) => p.id === updated.id ? updated : p));
+    setEditingProfile(null);
+  };
 
   // Only units with an active booking + buyer actually belong on a
   // buyer CRM page — a unit that's tersedia has nobody to show here.
@@ -105,7 +250,7 @@ export default function BuyersPage() {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 300, gap: 10, color: "var(--color-ink-3)" }}>
         <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} />
-        <span style={{ fontSize: 13 }}>Memuat data pembeli…</span>
+        <span style={{ fontSize: 13 }}>Memuat data pelanggan…</span>
       </div>
     );
   }
@@ -121,13 +266,21 @@ export default function BuyersPage() {
   return (
     <div style={{ maxWidth: 1180, margin: "0 auto", padding: "24px 24px 60px" }}>
 
+      {editingProfile && (
+        <CustomerProfileModal
+          profile={editingProfile}
+          onClose={() => setEditingProfile(null)}
+          onUpdated={handleProfileUpdated}
+        />
+      )}
+
       {/* ── Header ── */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--color-ink)", margin: 0 }}>
-          Data Pembeli
+          Customers
         </h1>
         <div style={{ fontSize: 13, color: "var(--color-ink-3)", marginTop: 4 }}>
-          {buyerUnits.length} pembeli dengan booking aktif di semua proyek
+          {buyerUnits.length} pelanggan dengan booking aktif di semua proyek
         </div>
       </div>
 
@@ -265,9 +418,20 @@ export default function BuyersPage() {
                     </select>
                   </td>
                   <td style={{ padding: "12px 14px" }}>
-                    {updatingId === u.id && (
-                      <Loader2 size={14} style={{ animation: "spin 1s linear infinite", color: "var(--color-ink-3)" }} />
-                    )}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {updatingId === u.id && (
+                        <Loader2 size={14} style={{ animation: "spin 1s linear infinite", color: "var(--color-ink-3)" }} />
+                      )}
+                      {u.buyer && profileByUserId.has(u.buyer) && (
+                        <button
+                          className="btn-ghost btn-sm"
+                          onClick={() => setEditingProfile(profileByUserId.get(u.buyer!)!)}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}
+                        >
+                          <UserCog size={11} /> Profil
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
