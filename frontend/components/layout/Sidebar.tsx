@@ -62,7 +62,11 @@ const NAV_DEVELOPER = [
       { href: "/dashboard/pipeline",  icon: Columns3,  label: "Pipeline" },
       { href: "/dashboard/sales",     icon: BarChart2, label: "Dasbor Penjualan" },
       { href: "/dashboard/agents",    icon: UserCheck, label: "Agen" },
-      { href: "/dashboard/buyers",    icon: Users,     label: "Data Pembeli" },
+      // Sprint 8 (CRM Foundation Phase B): relabeled Data Pembeli →
+      // Customers, backed by real CustomerProfile data now — href
+      // stays /dashboard/buyers on purpose, renaming the URL itself
+      // is a separate, breaking decision not bundled in here.
+      { href: "/dashboard/buyers",    icon: Users,     label: "Customers" },
     ],
   },
   {
