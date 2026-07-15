@@ -19,6 +19,7 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from apps.core.views import TenantScopedAPIView
+from apps.commissions.models import Commission, CommissionPolicy
 from apps.crm.models import CustomerProfile, Prospect
 from apps.payments.models import FinancialAudit
 
@@ -211,6 +212,26 @@ class UnitBookingView(TenantScopedAPIView):
             prospect.status = Prospect.Status.WON
             prospect.converted_booking = booking
             prospect.save(update_fields=["status", "converted_booking", "updated_at"])
+
+            # Commission Foundation Sprint 1: only when a real agent is
+            # credited (prospect.assigned_to) does a Commission exist to
+            # compute — a walk-in sale with no Prospect has no agent to
+            # pay by definition, so this stays nested inside the
+            # `prospect is not None` block, unlike Sprint 8's
+            # CustomerProfile hook, which is unconditional on purpose.
+            # amount is computed and snapshotted here, once — see
+            # CommissionPolicy.compute_amount()'s own docstring for why
+            # it's never live-recalculated later.
+            if prospect.assigned_to is not None:
+                policy, _ = CommissionPolicy.objects.get_or_create(organization=org)
+                Commission.objects.get_or_create(
+                    booking=booking,
+                    defaults={
+                        "organization": org,
+                        "agent":        prospect.assigned_to,
+                        "amount":       policy.compute_amount(unit.price),
+                    },
+                )
 
         # Sprint 27: ar_before == ar_after here on purpose — no Payment
         # row exists yet at the moment a booking is created, only a
