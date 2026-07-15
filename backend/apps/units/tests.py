@@ -6,7 +6,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.authentication.models import CustomUser
-from apps.crm.models import Prospect
+from apps.crm.models import CustomerProfile, Prospect
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.projects.models import Project
 
@@ -873,3 +873,86 @@ class BookingProspectConversionTests(APITestCase):
         resp = self._book_unit(prospect_id="00000000-0000-0000-0000-000000000000")
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(Booking.objects.filter(unit=self.unit).exists())
+
+
+class BookingCreatesCustomerProfileTests(APITestCase):
+    """
+    Sprint 8 (CRM Foundation Phase B): CustomerProfile auto-creation
+    on booking. Deliberately tests the WALK-IN case (no prospect_id)
+    as the primary scenario, not an edge case — this is the deviation
+    from the Phase B roadmap's original wording flagged when the
+    hook was written: creation is unconditional on prospect_id, not
+    nested inside the prospect-conversion block.
+    """
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Asri Sentosa CustomerProfile Hook")
+        self.dev = CustomUser.objects.create_user(
+            email="dev.customerprofilehook@test.id", password="pass12345!",
+            full_name="Dev CustomerProfile Hook", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.dev, role="owner", is_active=True,
+        )
+        self.buyer = CustomUser.objects.create_user(
+            email="buyer.customerprofilehook@test.id", password="pass12345!",
+            full_name="Buyer CustomerProfile Hook", role="buyer",
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster CustomerProfile Hook", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.unit_a = Unit.objects.create(
+            project=self.project, unit_number="A-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+        self.unit_b = Unit.objects.create(
+            project=self.project, unit_number="A-02", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+        self.client.force_authenticate(user=self.dev)
+
+    def test_walk_in_booking_with_no_prospect_id_still_creates_customer_profile(self):
+        """The primary case: no CRM history at all, still a real customer."""
+        resp = self.client.post(
+            f"/api/units/{self.unit_a.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(
+            CustomerProfile.objects.filter(user=self.buyer, organization=self.org).exists()
+        )
+
+    def test_second_booking_same_buyer_same_org_does_not_duplicate_profile(self):
+        """A buyer booking a second unit in the same org must not
+        create a second CustomerProfile row — get_or_create +
+        unique_together(user, organization) both guard against this."""
+        self.client.post(
+            f"/api/units/{self.unit_a.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000},
+            format="json",
+        )
+        self.client.post(
+            f"/api/units/{self.unit_b.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000},
+            format="json",
+        )
+        self.assertEqual(
+            CustomerProfile.objects.filter(user=self.buyer, organization=self.org).count(), 1
+        )
+
+    def test_booking_with_prospect_id_also_creates_customer_profile(self):
+        """The CRM-tracked path still works too — this isn't an
+        either/or with the prospect conversion wiring."""
+        prospect = Prospect.objects.create(organization=self.org, name="Andi", phone="081200000000")
+        resp = self.client.post(
+            f"/api/units/{self.unit_a.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000, "prospect_id": str(prospect.id)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(
+            CustomerProfile.objects.filter(user=self.buyer, organization=self.org).exists()
+        )

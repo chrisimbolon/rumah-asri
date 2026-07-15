@@ -20,7 +20,7 @@ from apps.organizations.models import Organization, OrganizationMembership
 from apps.projects.models import Project
 from apps.units.models import Unit
 
-from .models import Activity, Prospect, SiteVisit
+from .models import Activity, CustomerProfile, Prospect, SiteVisit
 
 
 
@@ -794,3 +794,129 @@ class SiteVisitTenantIsolationTests(ProspectAPITestBase):
         )
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(SiteVisit.objects.filter(prospect=self.prospect).count(), 0)
+
+
+# =============================================================================
+# Sprint 8 (CRM Foundation Phase B): CustomerProfile tests.
+# =============================================================================
+
+class CustomerProfileModelTests(ProspectAPITestBase):
+
+    def test_create_customer_profile(self):
+        profile = CustomerProfile.objects.create(organization=self.org, user=self.buyer)
+        self.assertIsNone(profile.budget)
+        self.assertEqual(profile.family_notes, "")
+
+    def test_unique_together_prevents_duplicate_within_same_org(self):
+        CustomerProfile.objects.create(organization=self.org, user=self.buyer)
+        with self.assertRaises(Exception):
+            CustomerProfile.objects.create(organization=self.org, user=self.buyer)
+
+    def test_same_user_can_have_separate_profiles_across_orgs(self):
+        """
+        The specific case that motivated Decision 2's model-shape
+        correction: a buyer with a profile in one org must be able to
+        get a genuinely separate, isolated profile in another org —
+        proving unique_together(user, organization) works as intended,
+        not the cross-tenant leak a strict OneToOneField would have had.
+        """
+        other_org = Organization.objects.create(name="Org Lain Customer Profile")
+        profile_a = CustomerProfile.objects.create(organization=self.org, user=self.buyer)
+        profile_b = CustomerProfile.objects.create(organization=other_org, user=self.buyer)
+        self.assertNotEqual(profile_a.id, profile_b.id)
+        self.assertEqual(CustomerProfile.objects.filter(user=self.buyer).count(), 2)
+
+    def test_str_representation(self):
+        profile = CustomerProfile.objects.create(organization=self.org, user=self.buyer)
+        self.assertIn(self.buyer.full_name, str(profile))
+
+
+class CustomerProfileAPITests(ProspectAPITestBase):
+
+    def setUp(self):
+        super().setUp()
+        self.profile = CustomerProfile.objects.create(organization=self.org, user=self.buyer)
+
+    def test_list_returns_org_profiles(self):
+        self._login_as(self.dev)
+        resp = self.client.get("/api/customers/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["count"], 1)
+
+    def test_detail_returns_profile_with_user_fields(self):
+        self._login_as(self.dev)
+        resp = self.client.get(f"/api/customers/{self.profile.id}/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["customer"]["user_email"], self.buyer.email)
+
+    def test_developer_can_update_budget_and_notes(self):
+        self._login_as(self.dev)
+        resp = self.client.put(
+            f"/api/customers/{self.profile.id}/",
+            {"budget": 800_000_000, "family_notes": "Menikah, 2 anak"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.budget, 800_000_000)
+        self.assertEqual(self.profile.family_notes, "Menikah, 2 anak")
+
+    def test_buyer_cannot_update_customer_profile(self):
+        self._login_as(self.buyer)
+        resp = self.client.put(
+            f"/api/customers/{self.profile.id}/",
+            {"budget": 1}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_cannot_write_user_field_through_payload(self):
+        """user must never change through this API — a profile is
+        permanently tied to the buyer it was created for."""
+        other_buyer = CustomUser.objects.create_user(
+            email="other.buyer.customerprofile@test.id", password="pass12345!",
+            full_name="Other Buyer", role="buyer",
+        )
+        self._login_as(self.dev)
+        resp = self.client.put(
+            f"/api/customers/{self.profile.id}/",
+            {"user": str(other_buyer.id), "budget": 500_000_000}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.user_id, self.buyer.id)
+
+
+class CustomerProfileTenantIsolationTests(ProspectAPITestBase):
+
+    def setUp(self):
+        super().setUp()
+        self.other_org = Organization.objects.create(name="Org Lain CustomerProfile Isolation")
+        self.other_dev = CustomUser.objects.create_user(
+            email="dev.customerprofileisolation.other@test.id", password="pass12345!",
+            full_name="Dev Org Lain", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.other_org, user=self.other_dev, role="owner", is_active=True,
+        )
+        self.profile = CustomerProfile.objects.create(organization=self.org, user=self.buyer)
+
+    def test_org_b_cannot_see_org_a_profile_in_list(self):
+        self._login_as(self.other_dev)
+        resp = self.client.get("/api/customers/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["count"], 0)
+
+    def test_org_b_cannot_retrieve_org_a_profile_detail(self):
+        self._login_as(self.other_dev)
+        resp = self.client.get(f"/api/customers/{self.profile.id}/")
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_org_b_cannot_update_org_a_profile(self):
+        self._login_as(self.other_dev)
+        resp = self.client.put(
+            f"/api/customers/{self.profile.id}/",
+            {"budget": 1}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+        self.profile.refresh_from_db()
+        self.assertIsNone(self.profile.budget)
