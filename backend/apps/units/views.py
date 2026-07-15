@@ -19,7 +19,7 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from apps.core.views import TenantScopedAPIView
-from apps.crm.models import Prospect
+from apps.crm.models import CustomerProfile, Prospect
 from apps.payments.models import FinancialAudit
 
 from .models import Booking, Unit
@@ -189,6 +189,16 @@ class UnitBookingView(TenantScopedAPIView):
         unit.status = Unit.Status.BOOKED
         unit.buyer  = buyer
         unit.save(update_fields=["status", "buyer", "updated_at"])
+
+        # Sprint 8 (CRM Foundation Phase B): every real booking creates
+        # a real Customer relationship — not just ones that came through
+        # a tracked Prospect. Deliberately unconditional (unlike the
+        # prospect-conversion block below), since a walk-in buyer with
+        # no CRM history is still a real customer the moment they book.
+        # get_or_create + CustomerProfile's unique_together(user, org)
+        # guard means re-booking (a second unit, same buyer, same org)
+        # never creates a duplicate row.
+        CustomerProfile.objects.get_or_create(user=buyer, organization=org)
 
         # Sprint 2 (CRM Foundation): mark the prospect converted. Pure
         # addition — the booking flow above this point is byte-for-byte
