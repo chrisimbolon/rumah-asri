@@ -30,6 +30,9 @@ urlpatterns = [
     path("api/payments/",      include("apps.payments.urls")),
     path("api/documents/",     include("apps.documents.urls")),
     path("api/prospects/",     include("apps.crm.urls")),
+    # Sprint 8 (CRM Foundation Phase B): separate module, not nested
+    # under prospects — see apps/crm/customer_urls.py's own docstring.
+    path("api/customers/",     include("apps.crm.customer_urls")),
 
     # ── Buyer portal ──────────────────────────────────────────
     path("api/buyer/",         include("apps.buyer.urls")),
