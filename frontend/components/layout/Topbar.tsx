@@ -9,6 +9,15 @@ import { usePathname } from "next/navigation";
 // Sprint 19: "/dashboard" renamed to match Sidebar's Command Center
 // rename, and "/dashboard/calendar" added (was missing entirely,
 // would've fallen through to the generic "Dashboard" fallback).
+//
+// CRM Foundation Sprint 8: "/dashboard/buyers" is now "Customers",
+// deliberately breaking this file's own English/Indonesian rule —
+// same exception "Prospect" and "Pipeline" already established
+// earlier in the CRM section. Sansan/Joe's original feedback asked
+// specifically for standard English CRM vocabulary in that section;
+// this keeps the breadcrumb consistent with Sidebar.tsx's own label
+// for the same route rather than technically following the rule and
+// silently disagreeing with the nav item a person just clicked.
 const TITLES: Record<string, string> = {
   "/dashboard":                    "Command Center",
   "/dashboard/tasks":              "Tugas & Tindakan",
@@ -16,9 +25,11 @@ const TITLES: Record<string, string> = {
   "/dashboard/projects":           "Semua Proyek",
   "/dashboard/units":              "Unit",
   "/dashboard/construction":       "Progres Konstruksi",
+  "/dashboard/prospects":          "Prospect",
+  "/dashboard/pipeline":           "Pipeline",
   "/dashboard/sales":              "Dasbor Penjualan",
   "/dashboard/agents":             "Agen Penjualan",
-  "/dashboard/buyers":             "Data Pembeli",
+  "/dashboard/buyers":             "Customers",
   "/dashboard/payments":           "Pelacak Pembayaran",
   "/dashboard/reports":            "Laporan",
   "/dashboard/notifications":      "Notifikasi",
