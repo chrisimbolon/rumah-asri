@@ -13,7 +13,7 @@ from apps.organizations.models import Organization, OrganizationMembership
 from apps.projects.models import Project
 from apps.units.models import Booking, Unit
 
-from .models import Commission, CommissionPolicy
+from .models import Commission, CommissionPolicy, CommissionTier
 
 
 class CommissionPolicyModelTests(TestCase):
@@ -252,3 +252,163 @@ class CommissionTenantIsolationTests(CommissionAPITestBase):
         # self.policy (org A, created in setUp) must never be the same
         # row org B's request just got back.
         self.assertNotEqual(str(self.policy.id), resp.data["policy"]["id"])
+
+
+# =============================================================================
+# Sprint 2 (Commission Foundation): Tiered Rates.
+# =============================================================================
+
+class CommissionTierComputationTests(TestCase):
+    """
+    Tier boundary correctness — the exact thing this sprint's own
+    roadmap note names as the priority. Convention: min_amount
+    inclusive, max_amount exclusive, top tier open-ended.
+    """
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Asri Sentosa Tiered")
+        self.policy = CommissionPolicy.objects.create(
+            organization=self.org, rate_type=CommissionPolicy.RateType.TIERED,
+        )
+        # 0 - 500M: 2%, 500M - 1B: 2.5%, 1B+: 3%
+        CommissionTier.objects.create(
+            organization=self.org, policy=self.policy,
+            min_amount=Decimal("0"), max_amount=Decimal("500000000"),
+            rate_value=Decimal("2.0"),
+        )
+        CommissionTier.objects.create(
+            organization=self.org, policy=self.policy,
+            min_amount=Decimal("500000000"), max_amount=Decimal("1000000000"),
+            rate_value=Decimal("2.5"),
+        )
+        CommissionTier.objects.create(
+            organization=self.org, policy=self.policy,
+            min_amount=Decimal("1000000000"), max_amount=None,
+            rate_value=Decimal("3.0"),
+        )
+
+    def test_price_in_first_tier(self):
+        self.assertEqual(self.policy.compute_amount(300_000_000), Decimal("6000000"))  # 2%
+
+    def test_price_exactly_on_lower_boundary_is_inclusive(self):
+        """500M lands in the SECOND tier (min_amount inclusive),
+        not the first — proves the boundary convention is real,
+        not just documented."""
+        amount = self.policy.compute_amount(500_000_000)
+        self.assertEqual(amount, Decimal("12500000"))  # 2.5%, not 2%
+
+    def test_price_just_below_boundary_stays_in_lower_tier(self):
+        tier = self.policy.find_tier(Decimal("499999999"))
+        self.assertEqual(tier.rate_value, Decimal("2.0"))
+
+    def test_price_in_open_ended_top_tier(self):
+        self.assertEqual(self.policy.compute_amount(5_000_000_000), Decimal("150000000"))  # 3%
+
+    def test_price_with_no_covering_tier_raises(self):
+        """Deliberately proves the failure mode, not just the happy
+        path — a gap in tier coverage must raise loudly, never
+        silently return a wrong/zero commission."""
+        gapped_org = Organization.objects.create(name="Org Gapped Tiers")
+        gapped_policy = CommissionPolicy.objects.create(
+            organization=gapped_org, rate_type=CommissionPolicy.RateType.TIERED,
+        )
+        CommissionTier.objects.create(
+            organization=gapped_org, policy=gapped_policy,
+            min_amount=Decimal("0"), max_amount=Decimal("100"),
+            rate_value=Decimal("2.0"),
+        )
+        with self.assertRaises(ValueError):
+            gapped_policy.compute_amount(999_999_999)
+
+
+class CommissionTierAPITests(CommissionAPITestBase):
+
+    def test_developer_can_create_tier(self):
+        self._login_as(self.dev)
+        resp = self.client.post(
+            "/api/commissions/policy/tiers/",
+            {"min_amount": "0", "max_amount": "500000000", "rate_value": "2.0"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_agent_cannot_create_tier(self):
+        self._login_as(self.agent)
+        resp = self.client.post(
+            "/api/commissions/policy/tiers/",
+            {"min_amount": "0", "max_amount": "500000000", "rate_value": "2.0"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_overlapping_tier_rejected(self):
+        self._login_as(self.dev)
+        self.client.post(
+            "/api/commissions/policy/tiers/",
+            {"min_amount": "0", "max_amount": "500000000", "rate_value": "2.0"},
+            format="json",
+        )
+        resp = self.client.post(
+            "/api/commissions/policy/tiers/",
+            # Overlaps the first tier's range (200M falls inside 0-500M)
+            {"min_amount": "200000000", "max_amount": "700000000", "rate_value": "2.5"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_adjacent_non_overlapping_tiers_accepted(self):
+        """The exact edge case worth proving explicitly: two tiers
+        that share a boundary (one's max_amount equals the next's
+        min_amount) are NOT an overlap, given max_amount is exclusive."""
+        self._login_as(self.dev)
+        resp1 = self.client.post(
+            "/api/commissions/policy/tiers/",
+            {"min_amount": "0", "max_amount": "500000000", "rate_value": "2.0"},
+            format="json",
+        )
+        resp2 = self.client.post(
+            "/api/commissions/policy/tiers/",
+            {"min_amount": "500000000", "max_amount": None, "rate_value": "2.5"},
+            format="json",
+        )
+        self.assertEqual(resp1.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp2.status_code, status.HTTP_201_CREATED)
+
+    def test_developer_can_delete_tier(self):
+        self._login_as(self.dev)
+        create_resp = self.client.post(
+            "/api/commissions/policy/tiers/",
+            {"min_amount": "0", "max_amount": "500000000", "rate_value": "2.0"},
+            format="json",
+        )
+        tier_id = create_resp.data["tier"]["id"]
+        resp = self.client.delete(f"/api/commissions/policy/tiers/{tier_id}/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(CommissionTier.objects.filter(id=tier_id).exists())
+
+
+class FlatRatePolicyRegressionTests(CommissionAPITestBase):
+    """
+    Sprint 2's own scope note: 'no forced migration — flat-rate
+    policies stay flat-rate until an org explicitly switches.' This
+    proves Sprint 1's flat-rate flow is completely unaffected by
+    everything Sprint 2 added.
+    """
+
+    def test_percentage_policy_still_computes_correctly(self):
+        self._login_as(self.dev)
+        self.client.put(
+            "/api/commissions/policy/",
+            {"rate_type": "percentage", "rate_value": "2.5"}, format="json",
+        )
+        policy = CommissionPolicy.objects.get(organization=self.org)
+        self.assertEqual(policy.compute_amount(500_000_000), Decimal("12500000"))
+
+    def test_flat_amount_policy_still_computes_correctly(self):
+        self._login_as(self.dev)
+        self.client.put(
+            "/api/commissions/policy/",
+            {"rate_type": "flat_amount", "rate_value": "5000000"}, format="json",
+        )
+        policy = CommissionPolicy.objects.get(organization=self.org)
+        self.assertEqual(policy.compute_amount(999_999_999), Decimal("5000000"))

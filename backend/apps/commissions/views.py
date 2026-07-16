@@ -7,8 +7,8 @@ from rest_framework.response import Response
 
 from apps.core.views import TenantScopedAPIView
 
-from .models import Commission, CommissionPolicy
-from .serializers import CommissionPolicySerializer, CommissionSerializer
+from .models import Commission, CommissionPolicy, CommissionTier
+from .serializers import CommissionPolicySerializer, CommissionSerializer, CommissionTierSerializer
 
 
 class CommissionPolicyView(TenantScopedAPIView):
@@ -129,3 +129,94 @@ class CommissionDetailView(TenantScopedAPIView):
             {"success": False, "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+class CommissionTierListView(TenantScopedAPIView):
+    """
+    GET  /api/commissions/policy/tiers/
+    POST /api/commissions/policy/tiers/
+    Sprint 2 (Commission Foundation). Tiers always belong to the
+    requester's own org policy — resolved the same way
+    CommissionPolicyView does, never accepted as client input.
+    """
+    model = CommissionTier
+
+    def _get_or_create_policy(self, request):
+        if request.user.role == "super_admin":
+            return None
+        membership = request.user.memberships.filter(is_active=True).first()
+        if membership is None:
+            return None
+        policy, _ = CommissionPolicy.objects.get_or_create(organization=membership.organization)
+        return policy
+
+    def get(self, request):
+        policy = self._get_or_create_policy(request)
+        if policy is None:
+            return Response(
+                {"success": False, "message": "Tidak ada organisasi aktif."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        tiers = policy.tiers.all()
+        serializer = CommissionTierSerializer(tiers, many=True)
+        return Response({"success": True, "count": tiers.count(), "results": serializer.data})
+
+    def post(self, request):
+        if request.user.role not in ("developer", "super_admin"):
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        policy = self._get_or_create_policy(request)
+        if policy is None:
+            return Response(
+                {"success": False, "message": "Tidak ada organisasi aktif."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer = CommissionTierSerializer(data=request.data, context={"policy": policy})
+        if serializer.is_valid():
+            tier = serializer.save(policy=policy, organization=policy.organization)
+            return Response({
+                "success": True,
+                "message": "Tingkat komisi berhasil ditambahkan",
+                "tier":    CommissionTierSerializer(tier).data,
+            }, status=status.HTTP_201_CREATED)
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class CommissionTierDetailView(TenantScopedAPIView):
+    """PUT/DELETE /api/commissions/policy/tiers/<id>/"""
+    model = CommissionTier
+
+    def put(self, request, pk):
+        if request.user.role not in ("developer", "super_admin"):
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        tier = self.get_object(pk)
+        serializer = CommissionTierSerializer(tier, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "success": True,
+                "message": "Tingkat komisi berhasil diperbarui",
+                "tier":    CommissionTierSerializer(tier).data,
+            })
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    def delete(self, request, pk):
+        if request.user.role not in ("developer", "super_admin"):
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        tier = self.get_object(pk)
+        tier.delete()
+        return Response({"success": True, "message": "Tingkat komisi berhasil dihapus"})
