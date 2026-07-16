@@ -27,9 +27,11 @@ class CommissionPolicy(TenantScopedModel):
     class RateType(models.TextChoices):
         PERCENTAGE  = "percentage",   "Persentase"
         FLAT_AMOUNT = "flat_amount",  "Nominal Tetap"
-        # "tiered" is Sprint 2's addition — deliberately absent here
-        # so a policy can never be set to a rate_type this sprint
-        # doesn't know how to compute.
+        TIERED      = "tiered",       "Bertingkat"
+        # Sprint 2 (Commission Foundation): TIERED added. Sprint 1
+        # policies already on percentage/flat_amount are completely
+        # unaffected by this — no migration touches existing rows,
+        # a policy only becomes tiered if an org explicitly switches.
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -59,16 +61,85 @@ class CommissionPolicy(TenantScopedModel):
 
     def compute_amount(self, sale_price):
         """
-        Sprint 1: flat rate only. Sprint 2 extends this for
-        rate_type=tiered — kept as a single method so the booking
-        hook's call site never needs to know which rate_type is
-        active, only that this method exists and returns a Decimal.
+        Sprint 1: flat rate (percentage / flat_amount). Sprint 2 adds
+        tiered — kept as a single method so the booking hook's call
+        site never needs to know which rate_type is active, only that
+        this method exists and returns a Decimal.
         """
         if self.rate_type == self.RateType.PERCENTAGE:
             return (Decimal(sale_price) * self.rate_value / Decimal("100")).quantize(Decimal("1"))
         elif self.rate_type == self.RateType.FLAT_AMOUNT:
             return self.rate_value
+        elif self.rate_type == self.RateType.TIERED:
+            tier = self.find_tier(sale_price)
+            if tier is None:
+                raise ValueError(
+                    f"No CommissionTier covers sale_price={sale_price} for "
+                    f"policy {self.id} — tiers must cover every possible "
+                    f"price, including an open-ended top tier (max_amount=None)."
+                )
+            return (Decimal(sale_price) * tier.rate_value / Decimal("100")).quantize(Decimal("1"))
         raise ValueError(f"Unknown rate_type: {self.rate_type}")
+
+    def find_tier(self, sale_price):
+        """
+        Sprint 2. Boundary convention: min_amount inclusive, max_amount
+        exclusive — same as a standard tax-bracket lookup. The top
+        tier has max_amount=None (open-ended), matching anything
+        >= its min_amount with no upper limit.
+        """
+        sale_price = Decimal(sale_price)
+        for tier in self.tiers.order_by("min_amount"):
+            if tier.min_amount <= sale_price and (tier.max_amount is None or sale_price < tier.max_amount):
+                return tier
+        return None
+
+
+class CommissionTier(TenantScopedModel):
+    """
+    Sprint 2 (Commission Foundation): a price bracket within a
+    tiered CommissionPolicy. `rate_value` here is always a
+    percentage — deliberately not a flat-amount-per-tier option, to
+    keep this sprint focused; if a real need for per-tier flat
+    amounts ever comes up, that's a small, real follow-up, not
+    assumed now.
+
+    `max_amount` is nullable — the top tier is open-ended, matching
+    everything at or above its `min_amount` with no ceiling.
+    Boundary convention: min_amount inclusive, max_amount exclusive,
+    same as a standard tax-bracket lookup — see
+    CommissionPolicy.find_tier()'s own docstring.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    policy = models.ForeignKey(
+        CommissionPolicy, on_delete=models.CASCADE,
+        related_name="tiers",
+        verbose_name="Kebijakan",
+    )
+    min_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, verbose_name="Batas Bawah",
+    )
+    max_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True,
+        verbose_name="Batas Atas",
+        help_text="Kosongkan untuk tingkat teratas (tanpa batas atas).",
+    )
+    rate_value = models.DecimalField(
+        max_digits=12, decimal_places=2, verbose_name="Persentase Tingkat Ini",
+    )
+
+    class Meta:
+        verbose_name        = "Commission Tier"
+        verbose_name_plural  = "Commission Tiers"
+        ordering             = ["min_amount"]
+
+    def __str__(self):
+        upper = f"{self.max_amount:,.0f}" if self.max_amount is not None else "∞"
+        return f"Rp {self.min_amount:,.0f} – {upper}: {self.rate_value}%"
+
+    def _resolve_organization(self):
+        return self.policy.organization
 
 
 class Commission(TenantScopedModel):
