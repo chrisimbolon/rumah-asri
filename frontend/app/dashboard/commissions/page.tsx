@@ -15,12 +15,16 @@
 
 import { useAuth } from "@/context/AuthContext";
 import {
-  Commission, CommissionPolicy, UpdateCommissionPolicyPayload,
+  Commission, CommissionPolicy,
   commissionPolicyApi, commissionsApi,
+  CommissionTier,
+  commissionTiersApi,
+  CreateCommissionTierPayload,
+  UpdateCommissionPolicyPayload,
 } from "@/lib/api/commissions";
 import { rupiah } from "@/lib/mock-data";
 import {
-  Banknote, CheckCircle2, Clock, Loader2, Settings2,
+  Banknote, CheckCircle2, Clock, Layers, Loader2, Plus, Settings2, Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -100,23 +104,30 @@ function PolicyCard({
           >
             <option value="percentage">Persentase</option>
             <option value="flat_amount">Nominal Tetap</option>
+            <option value="tiered">Bertingkat</option>
           </select>
         </div>
 
-        <div style={{ minWidth: 200 }}>
-          <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 5 }}>
-            {rateType === "percentage" ? "Persentase (%)" : "Nominal (Rupiah)"}
-          </label>
-          <input
-            type="number"
-            step="0.01"
-            disabled={!canEdit}
-            value={rateValue}
-            onChange={(e) => setRateValue(e.target.value)}
-            placeholder={rateType === "percentage" ? "mis. 2.5" : "mis. 5000000"}
-            style={{ width: "100%", padding: "8px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 13, outline: "none", boxSizing: "border-box" }}
-          />
-        </div>
+        {/* Sprint 2: rate_value is meaningless for a tiered policy —
+            the tiers below carry the real rates. The whole field
+            (label included) is hidden, not shown-but-disabled, to
+            avoid implying it still does something. */}
+        {rateType !== "tiered" && (
+          <div style={{ minWidth: 200 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 5 }}>
+              {rateType === "percentage" ? "Persentase (%)" : "Nominal (Rupiah)"}
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              disabled={!canEdit}
+              value={rateValue}
+              onChange={(e) => setRateValue(e.target.value)}
+              placeholder={rateType === "percentage" ? "mis. 2.5" : "mis. 5000000"}
+              style={{ width: "100%", padding: "8px 10px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 13, outline: "none", boxSizing: "border-box" }}
+            />
+          </div>
+        )}
 
         {canEdit && (
           <button
@@ -138,6 +149,145 @@ function PolicyCard({
       {!canEdit && (
         <div style={{ fontSize: 11, color: "var(--color-ink-3)", marginTop: 10 }}>
           Hanya developer yang dapat mengubah kebijakan komisi.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Tier editor ────────────────────────────────────────────────
+// Sprint 2 (Commission Foundation): only rendered when the policy is
+// actually tiered — a flat-rate org never sees this section at all.
+function TierEditor({
+  tiers,
+  canEdit,
+  onChanged,
+}: {
+  tiers:     CommissionTier[];
+  canEdit:   boolean;
+  onChanged: () => void;
+}) {
+  const [minAmount, setMinAmount] = useState("");
+  const [maxAmount, setMaxAmount] = useState("");
+  const [rateValue, setRateValue] = useState("");
+  const [saving,    setSaving]    = useState(false);
+  const [error,     setError]     = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const sorted = useMemo(
+    () => [...tiers].sort((a, b) => Number(a.min_amount) - Number(b.min_amount)),
+    [tiers]
+  );
+
+  const handleAdd = async () => {
+    setError(null);
+    if (!minAmount.trim() || !rateValue.trim()) {
+      setError("Batas bawah dan persentase wajib diisi");
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: CreateCommissionTierPayload = {
+        min_amount: minAmount,
+        max_amount: maxAmount.trim() ? maxAmount : null,
+        rate_value: rateValue,
+      };
+      await commissionTiersApi.create(payload);
+      setMinAmount(""); setMaxAmount(""); setRateValue("");
+      onChanged();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { errors?: string[] | Record<string, string[]> } } })
+        ?.response?.data?.errors;
+      setError(
+        Array.isArray(msg) ? msg.join(", ")
+        : msg ? Object.values(msg).flat().join(", ")
+        : "Gagal menambahkan tingkat komisi"
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (tierId: string) => {
+    setDeletingId(tierId);
+    try {
+      await commissionTiersApi.remove(tierId);
+      onChanged();
+    } catch {
+      setError("Gagal menghapus tingkat komisi");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+        <Layers size={16} style={{ color: "var(--color-accent)" }} />
+        <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--color-ink)", margin: 0 }}>
+          Tingkat Komisi
+        </h2>
+      </div>
+
+      {error && (
+        <div style={{ marginBottom: 12, padding: "10px 14px", backgroundColor: "var(--color-danger-light)", borderRadius: 6, fontSize: 12, color: "var(--color-danger)" }}>
+          {error}
+        </div>
+      )}
+
+      {sorted.length === 0 ? (
+        <div style={{ fontSize: 12, color: "var(--color-ink-3)", marginBottom: 14 }}>
+          Belum ada tingkat komisi. Tambahkan minimal satu tingkat dengan batas atas
+          kosong (tanpa batas) agar setiap harga jual tercakup.
+        </div>
+      ) : (
+        <div style={{ marginBottom: 16 }}>
+          {sorted.map((t) => (
+            <div key={t.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", backgroundColor: "var(--color-paper-2)", borderRadius: 6, marginBottom: 6 }}>
+              <span style={{ fontSize: 12 }}>
+                {rupiah(Number(t.min_amount))} – {t.max_amount ? rupiah(Number(t.max_amount)) : "∞"}
+              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-accent)" }}>{t.rate_value}%</span>
+                {canEdit && (
+                  <button
+                    disabled={deletingId === t.id}
+                    onClick={() => handleDelete(t.id)}
+                    style={{ padding: 4, border: "none", backgroundColor: "transparent", cursor: "pointer", color: "var(--color-danger)", display: "flex" }}
+                  >
+                    {deletingId === t.id
+                      ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                      : <Trash2 size={13} />}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {canEdit && (
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ minWidth: 150 }}>
+            <label style={{ display: "block", fontSize: 11, color: "var(--color-ink-3)", marginBottom: 4 }}>Batas Bawah</label>
+            <input type="number" value={minAmount} onChange={(e) => setMinAmount(e.target.value)}
+              placeholder="0" style={{ width: "100%", padding: "7px 9px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 12, outline: "none", boxSizing: "border-box" }} />
+          </div>
+          <div style={{ minWidth: 150 }}>
+            <label style={{ display: "block", fontSize: 11, color: "var(--color-ink-3)", marginBottom: 4 }}>Batas Atas (kosongkan = ∞)</label>
+            <input type="number" value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)}
+              placeholder="mis. 500000000" style={{ width: "100%", padding: "7px 9px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 12, outline: "none", boxSizing: "border-box" }} />
+          </div>
+          <div style={{ minWidth: 100 }}>
+            <label style={{ display: "block", fontSize: 11, color: "var(--color-ink-3)", marginBottom: 4 }}>Persentase (%)</label>
+            <input type="number" step="0.01" value={rateValue} onChange={(e) => setRateValue(e.target.value)}
+              placeholder="2.5" style={{ width: "100%", padding: "7px 9px", border: "1px solid rgba(14,13,11,0.15)", borderRadius: 6, fontSize: 12, outline: "none", boxSizing: "border-box" }} />
+          </div>
+          <button onClick={handleAdd} disabled={saving} className="btn-accent btn-sm"
+            style={{ display: "flex", alignItems: "center", gap: 4, height: 32 }}>
+            {saving ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Plus size={12} />}
+            Tambah
+          </button>
         </div>
       )}
     </div>
@@ -208,6 +358,19 @@ export default function CommissionsPage() {
       </div>
 
       <PolicyCard policy={policy} canEdit={canEdit} onUpdated={setPolicy} />
+
+      {policy.rate_type === "tiered" && (
+        <TierEditor
+          tiers={policy.tiers}
+          canEdit={canEdit}
+          onChanged={() => {
+            // Tiers are nested read-only on the policy serializer —
+            // refetch the whole policy to get the updated list rather
+            // than trying to keep local state in sync by hand.
+            commissionPolicyApi.get().then(setPolicy).catch(() => {});
+          }}
+        />
+      )}
 
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ display: "flex", padding: "0 16px", borderBottom: "1px solid rgba(14,13,11,0.08)" }}>

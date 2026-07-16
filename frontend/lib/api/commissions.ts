@@ -8,11 +8,21 @@
 
 import api from "@/lib/api";
 
+export interface CommissionTier {
+  id:          string;
+  policy:      string;
+  min_amount:  string;
+  max_amount:  string | null;
+  rate_value:  string;
+}
+
 export interface CommissionPolicy {
   id:          string;
-  rate_type:   "percentage" | "flat_amount";
+  // Sprint 2 (Commission Foundation): "tiered" added.
+  rate_type:   "percentage" | "flat_amount" | "tiered";
   rate_value:  string;
   is_active:   boolean;
+  tiers:       CommissionTier[];
   created_at:  string;
   updated_at:  string;
 }
@@ -83,5 +93,51 @@ export const commissionsApi = {
       { status: newStatus }
     );
     return data.commission;
+  },
+};
+
+// =============================================================================
+// Sprint 2 (Commission Foundation): Commission Tiers
+// =============================================================================
+
+export interface CommissionTierListResponse {
+  success: boolean;
+  count:   number;
+  results: CommissionTier[];
+}
+
+export interface CommissionTierDetailResponse {
+  success: boolean;
+  tier:    CommissionTier;
+}
+
+export interface CreateCommissionTierPayload {
+  min_amount:  string;
+  max_amount:  string | null;
+  rate_value:  string;
+}
+
+export const commissionTiersApi = {
+  async list(): Promise<CommissionTier[]> {
+    const { data } = await api.get<CommissionTierListResponse>("/api/commissions/policy/tiers/");
+    return data.results;
+  },
+
+  async create(payload: CreateCommissionTierPayload): Promise<CommissionTier> {
+    const { data } = await api.post<CommissionTierDetailResponse>(
+      "/api/commissions/policy/tiers/", payload
+    );
+    return data.tier;
+  },
+
+  async update(id: string, payload: Partial<CreateCommissionTierPayload>): Promise<CommissionTier> {
+    const { data } = await api.put<CommissionTierDetailResponse>(
+      `/api/commissions/policy/tiers/${id}/`, payload
+    );
+    return data.tier;
+  },
+
+  async remove(id: string): Promise<void> {
+    await api.delete(`/api/commissions/policy/tiers/${id}/`);
   },
 };
