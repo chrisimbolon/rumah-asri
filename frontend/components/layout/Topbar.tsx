@@ -29,6 +29,7 @@ const TITLES: Record<string, string> = {
   "/dashboard/pipeline":           "Pipeline",
   "/dashboard/sales":              "Dasbor Penjualan",
   "/dashboard/agents":             "Agen Penjualan",
+  "/dashboard/commissions":        "Komisi",
   "/dashboard/buyers":             "Customers",
   "/dashboard/payments":           "Pelacak Pembayaran",
   "/dashboard/reports":            "Laporan",
