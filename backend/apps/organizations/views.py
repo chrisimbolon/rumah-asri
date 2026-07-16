@@ -141,3 +141,45 @@ class BuyerListView(TenantScopedAPIView):
                 for b in buyers
             ],
         })
+
+class AgentListView(TenantScopedAPIView):
+    """
+    GET /api/organizations/agents/
+    Returns developer/agent accounts within the requester's own
+    organization(s) — used to populate the Prospect assignment
+    dropdown (Prospect.assigned_to only accepts these two roles, see
+    ProspectCreateSerializer.validate_assigned_to in apps.crm).
+
+    Unlike BuyerListView above, this IS properly org-scoped — buyers
+    genuinely have no org membership concept (that view's own comment
+    says so), but agents/developers do (OrganizationMembership), so
+    there's no reason to return every agent on the entire platform.
+    """
+    model = None  # override — not queried via a TenantScopedModel FK
+
+    def get_queryset(self):
+        org_ids = self.request.user.memberships.filter(
+            is_active=True
+        ).values_list("organization_id", flat=True)
+        return CustomUser.objects.filter(
+            role__in=("developer", "agent"),
+            is_active=True,
+            memberships__organization_id__in=org_ids,
+            memberships__is_active=True,
+        ).distinct().order_by("full_name")
+
+    def get(self, request):
+        if request.user.role not in ("developer", "agent", "super_admin"):
+            return Response(
+                {"success": False, "message": "Tidak memiliki izin"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        agents = self.get_queryset()
+        return Response({
+            "success": True,
+            "count":   agents.count(),
+            "results": [
+                {"id": str(a.id), "full_name": a.full_name, "email": a.email, "role": a.role}
+                for a in agents
+            ],
+        })
