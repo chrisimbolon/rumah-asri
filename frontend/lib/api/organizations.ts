@@ -53,6 +53,23 @@ export interface OrgDetailResponse {
   organization: OrganizationDetail;
 }
 
+// Agent-picker fix (CRM Foundation): used by the Prospect assignment
+// dropdown. Deliberately org-scoped, unlike BuyerListView's own
+// platform-wide behavior — see AgentListView's docstring on the
+// backend for why that distinction is real, not an oversight.
+export interface OrgAgentSummary {
+  id:        string;
+  full_name: string;
+  email:     string;
+  role:      string;
+}
+
+export interface OrgAgentListResponse {
+  success: boolean;
+  count:   number;
+  results: OrgAgentSummary[];
+}
+
 export const organizationsApi = {
   async list(): Promise<Organization[]> {
     const { data } = await api.get<OrgListResponse>("/api/organizations/");
@@ -67,5 +84,10 @@ export const organizationsApi = {
   async get(id: string): Promise<OrganizationDetail> {
     const { data } = await api.get<OrgDetailResponse>(`/api/organizations/${id}/`);
     return data.organization;
+  },
+
+  async agents(): Promise<OrgAgentSummary[]> {
+    const { data } = await api.get<OrgAgentListResponse>("/api/organizations/agents/");
+    return data.results;
   },
 };
