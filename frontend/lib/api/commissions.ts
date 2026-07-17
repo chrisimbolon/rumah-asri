@@ -47,7 +47,8 @@ export interface Commission {
   agent_name:      string;
   agent_email:     string;
   amount:          string;
-  status:          "pending" | "earned" | "paid";
+  // Booking Rebooking Foundation Sprint 1: "void" added.
+  status:          "pending" | "earned" | "paid" | "void";
   status_display:  string;
   computed_at:     string;
   updated_at:      string;
