@@ -161,6 +161,12 @@ class Commission(TenantScopedModel):
         PENDING = "pending", "Pending"
         EARNED  = "earned",  "Earned"
         PAID    = "paid",    "Paid"
+        # Booking Rebooking Foundation Sprint 1: set automatically
+        # when the underlying Booking gets cancelled — see
+        # BookingCancelView.post()'s conditional hook. A PAID
+        # commission is deliberately never auto-voided; see that
+        # hook's own comment for why.
+        VOID    = "void",    "Void"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
