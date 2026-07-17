@@ -317,6 +317,20 @@ class BookingCancelView(TenantScopedAPIView):
         unit.buyer  = None
         unit.save(update_fields=["status", "buyer", "updated_at"])
 
+        # Booking Rebooking Foundation Sprint 1: a cancelled sale
+        # shouldn't leave its Commission sitting Pending/Earned
+        # forever, referencing a sale that no longer exists.
+        # Deliberately does NOT touch a commission already marked
+        # PAID — real money disbursed to a real agent doesn't get
+        # silently erased by this hook. That case needs an actual
+        # human to reconcile, not an automatic status flip pretending
+        # the payout never happened.
+        if hasattr(booking, "commission"):
+            commission = booking.commission
+            if commission.status != Commission.Status.PAID:
+                commission.status = Commission.Status.VOID
+                commission.save(update_fields=["status", "updated_at"])
+
         # Sprint 27: same as booking_created — no Payment row was ever
         # tied to a cancelled ACTIVE booking (only booking_fee, which
         # doesn't touch Payment/AR), so ar_before == ar_after is correct.
