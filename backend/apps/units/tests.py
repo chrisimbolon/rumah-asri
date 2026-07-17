@@ -1,3 +1,4 @@
+# backend/apps/units/tests/py
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -1058,3 +1059,127 @@ class BookingCreatesCommissionTests(APITestCase):
         self.assertTrue(
             CustomerProfile.objects.filter(user=self.buyer, organization=self.org).exists()
         )
+
+
+class BookingCancelVoidsCommissionTests(APITestCase):
+    """
+    Booking Rebooking Foundation Sprint 1: cancelling a booking with
+    an associated Commission voids it — except when already PAID,
+    which is the one deliberate exception, tested explicitly, not
+    just documented.
+    """
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Asri Sentosa Void Commission")
+        self.dev = CustomUser.objects.create_user(
+            email="dev.voidcommission@test.id", password="pass12345!",
+            full_name="Dev Void Commission", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.dev, role="owner", is_active=True,
+        )
+        self.agent = CustomUser.objects.create_user(
+            email="agent.voidcommission@test.id", password="pass12345!",
+            full_name="Agent Void Commission", role="agent",
+        )
+        self.buyer = CustomUser.objects.create_user(
+            email="buyer.voidcommission@test.id", password="pass12345!",
+            full_name="Buyer Void Commission", role="buyer",
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster Void Commission", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        CommissionPolicy.objects.create(
+            organization=self.org, rate_type=CommissionPolicy.RateType.PERCENTAGE,
+            rate_value=Decimal("2.5"),
+        )
+        self.client.force_authenticate(user=self.dev)
+
+    def _book_and_get_commission(self, unit_number="A-01"):
+        unit = Unit.objects.create(
+            project=self.project, unit_number=unit_number, unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+        prospect = Prospect.objects.create(
+            organization=self.org, name=f"Prospect {unit_number}", phone="081200000000",
+            assigned_to=self.agent,
+        )
+        self.client.post(
+            f"/api/units/{unit.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000, "prospect_id": str(prospect.id)},
+            format="json",
+        )
+        booking = Booking.objects.get(unit=unit)
+        commission = Commission.objects.get(booking=booking)
+        return booking, commission
+
+    def test_cancelling_pending_commission_voids_it(self):
+        booking, commission = self._book_and_get_commission("A-01")
+        self.assertEqual(commission.status, Commission.Status.PENDING)
+        self.client.post(
+            f"/api/units/bookings/{booking.id}/cancel/",
+            {"reason": "test"}, format="json",
+        )
+        commission.refresh_from_db()
+        self.assertEqual(commission.status, Commission.Status.VOID)
+
+    def test_cancelling_earned_commission_voids_it(self):
+        booking, commission = self._book_and_get_commission("A-02")
+        commission.status = Commission.Status.EARNED
+        commission.save(update_fields=["status"])
+        self.client.post(
+            f"/api/units/bookings/{booking.id}/cancel/",
+            {"reason": "test"}, format="json",
+        )
+        commission.refresh_from_db()
+        self.assertEqual(commission.status, Commission.Status.VOID)
+
+    def test_cancelling_paid_commission_does_not_void_it(self):
+        """The one deliberate exception: real money already moved,
+        the hook must never silently erase that."""
+        booking, commission = self._book_and_get_commission("A-03")
+        commission.status = Commission.Status.PAID
+        commission.save(update_fields=["status"])
+        self.client.post(
+            f"/api/units/bookings/{booking.id}/cancel/",
+            {"reason": "test"}, format="json",
+        )
+        commission.refresh_from_db()
+        self.assertEqual(commission.status, Commission.Status.PAID)
+
+    def test_cancelling_walk_in_booking_with_no_commission_does_not_error(self):
+        """A booking with no Prospect/agent has no Commission at all
+        — hasattr(booking, 'commission') must be False, not raise."""
+        unit = Unit.objects.create(
+            project=self.project, unit_number="A-04", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+        self.client.post(
+            f"/api/units/{unit.id}/book/",
+            {"buyer_id": str(self.buyer.id), "booking_fee": 10_000_000},
+            format="json",
+        )
+        booking = Booking.objects.get(unit=unit)
+        self.assertFalse(Commission.objects.filter(booking=booking).exists())
+        resp = self.client.post(
+            f"/api/units/bookings/{booking.id}/cancel/",
+            {"reason": "test"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_voiding_only_touches_the_cancelled_booking_own_commission(self):
+        """Tenant/cross-record isolation: cancelling one booking must
+        never affect a different booking's commission, even within
+        the same org."""
+        booking_1, commission_1 = self._book_and_get_commission("A-05")
+        booking_2, commission_2 = self._book_and_get_commission("A-06")
+        self.client.post(
+            f"/api/units/bookings/{booking_1.id}/cancel/",
+            {"reason": "test"}, format="json",
+        )
+        commission_1.refresh_from_db()
+        commission_2.refresh_from_db()
+        self.assertEqual(commission_1.status, Commission.Status.VOID)
+        self.assertEqual(commission_2.status, Commission.Status.PENDING)
