@@ -33,12 +33,17 @@ const STATUS_TABS: { key: Commission["status"] | "semua"; label: string }[] = [
   { key: "pending", label: "Pending" },
   { key: "earned",  label: "Earned"  },
   { key: "paid",    label: "Paid"    },
+  // Booking Rebooking Foundation Sprint 1
+  { key: "void",    label: "Void"    },
 ];
 
 function statusColor(s: Commission["status"]): { color: string; bg: string } {
   switch (s) {
     case "paid":   return { color: "var(--color-success)", bg: "var(--color-success-light)" };
     case "earned": return { color: "var(--color-accent)",  bg: "var(--color-accent-light)"  };
+    // Same muted treatment "Lost" already gets on the Prospect
+    // pipeline — a dead-end state, not an active one.
+    case "void":   return { color: "var(--color-ink-3)",   bg: "var(--color-paper-2)"       };
     default:       return { color: "var(--color-warning)", bg: "var(--color-warning-light)" };
   }
 }
