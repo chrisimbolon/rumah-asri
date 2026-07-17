@@ -30,6 +30,7 @@ import {
   CreateSiteVisitPayload, Prospect, SiteVisit,
   activitiesApi, prospectsApi, siteVisitsApi,
 } from "@/lib/api/crm";
+import { OrgAgentSummary, organizationsApi } from "@/lib/api/organizations";
 import { Project, projectsApi } from "@/lib/api/projects";
 import {
   Building2,
@@ -98,15 +99,17 @@ const inputStyle: React.CSSProperties = {
 // ── Tambah Prospect Modal ────────────────────────────────────────
 function AddProspectModal({
   projects,
+  agents,
   onClose,
   onCreated,
 }: {
   projects:  Project[];
+  agents:    OrgAgentSummary[];
   onClose:   () => void;
   onCreated: (p: Prospect) => void;
 }) {
   const [form, setForm] = useState<CreateProspectPayload>({
-    name: "", phone: "", source: "", interested_project: null,
+    name: "", phone: "", source: "", interested_project: null, assigned_to: null,
   });
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState<string | null>(null);
@@ -194,6 +197,20 @@ function AddProspectModal({
               <option value="">— Belum ditentukan —</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-ink)", marginBottom: 5 }}>
+              Ditugaskan Kepada <span style={{ fontSize: 11, color: "var(--color-ink-3)", fontWeight: 400 }}>(opsional)</span>
+            </label>
+            <select value={form.assigned_to ?? ""}
+              onChange={(e) => setForm({ ...form, assigned_to: e.target.value || null })}
+              style={inputStyle}>
+              <option value="">— Belum ditugaskan —</option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>{a.full_name} ({a.role === "agent" ? "Agen" : "Developer"})</option>
               ))}
             </select>
           </div>
@@ -678,6 +695,7 @@ export default function ProspectsPage() {
 
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [projects,  setProjects]  = useState<Project[]>([]);
+  const [agents,    setAgents]    = useState<OrgAgentSummary[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("semua");
@@ -692,8 +710,9 @@ export default function ProspectsPage() {
     Promise.all([
       prospectsApi.list(),
       projectsApi.list(),
+      organizationsApi.agents(),
     ])
-      .then(([p, proj]) => { setProspects(p); setProjects(proj); })
+      .then(([p, proj, ag]) => { setProspects(p); setProjects(proj); setAgents(ag); })
       .catch(() => setError("Gagal memuat data prospect"))
       .finally(() => setLoading(false));
   }, []);
@@ -764,6 +783,7 @@ export default function ProspectsPage() {
       {showAdd && (
         <AddProspectModal
           projects={projects}
+          agents={agents}
           onClose={() => setShowAdd(false)}
           onCreated={handleCreated}
         />
