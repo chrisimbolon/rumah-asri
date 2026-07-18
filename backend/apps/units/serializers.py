@@ -50,7 +50,14 @@ class UnitSerializer(serializers.ModelSerializer):
     project_name   = serializers.CharField(source="project.name",       read_only=True)
     buyer_name     = serializers.CharField(source="buyer.full_name",    read_only=True)
     buyer_email    = serializers.CharField(source="buyer.email",        read_only=True)
-    booking        = BookingSerializer(read_only=True)
+    # Booking Rebooking Foundation Sprint 2: was a direct nested
+    # serializer on the old OneToOneField reverse accessor
+    # (`obj.booking`). Now a method field resolving through
+    # get_active_booking() — the JSON SHAPE returned to the frontend
+    # is unchanged (still a single object or null, never an array),
+    # only how it's found internally changed. lib/api/units.ts's
+    # Unit.booking type needs zero changes because of this.
+    booking        = serializers.SerializerMethodField()
     price_history  = UnitPriceHistorySerializer(many=True, read_only=True)
 
     class Meta:
@@ -67,6 +74,10 @@ class UnitSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
+
+    def get_booking(self, obj):
+        active = obj.get_active_booking()
+        return BookingSerializer(active).data if active else None
 
 
 class UnitCreateSerializer(serializers.ModelSerializer):
@@ -148,15 +159,21 @@ class UnitCreateSerializer(serializers.ModelSerializer):
         # Booking.status in sync so it never silently disagrees with
         # Unit.status. instance.status here is still the OLD value
         # (checked before super().update() applies the change below).
+        #
+        # Booking Rebooking Foundation Sprint 2: hasattr(instance,
+        # "booking") + instance.booking was the old OneToOneField
+        # reverse-accessor pattern — replaced with get_active_booking(),
+        # which already filters to status=ACTIVE, so the old explicit
+        # `.status == ACTIVE` check below is now redundant and dropped.
         new_status = validated_data.get("status")
+        active_booking = instance.get_active_booking()
         if (
             new_status == Unit.Status.IN_PROGRESS
             and instance.status == Unit.Status.BOOKED
-            and hasattr(instance, "booking")
-            and instance.booking.status == Booking.BookingStatus.ACTIVE
+            and active_booking is not None
         ):
-            instance.booking.status = Booking.BookingStatus.CONVERTED
-            instance.booking.save(update_fields=["status", "updated_at"])
+            active_booking.status = Booking.BookingStatus.CONVERTED
+            active_booking.save(update_fields=["status", "updated_at"])
 
             # Sprint 27: the sale-closing moment. AR itself doesn't move
             # from this status sync alone (that's payment_recorded's
@@ -167,7 +184,7 @@ class UnitCreateSerializer(serializers.ModelSerializer):
                 organization = instance.organization,
                 action       = FinancialAudit.Action.BOOKING_CONVERTED,
                 changed_by   = changed_by,
-                booking      = instance.booking,
+                booking      = active_booking,
                 unit         = instance,
                 old_value    = Booking.BookingStatus.ACTIVE,
                 new_value    = Booking.BookingStatus.CONVERTED,
