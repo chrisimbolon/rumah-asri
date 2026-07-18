@@ -9,8 +9,7 @@
  * status, a "Tandai Follow-up" action, and a "Konversi ke Booking"
  * action that hands off into the existing, already-built booking flow
  * on /dashboard/units. No dashboard, no charts, no analytics, no
- * leaderboard — those are explicitly parked, not this page wearing a
- * smaller name.
+ * leaderboard — those are explicitly parked, not this page wearing a smaller name.
  *
  * One addition beyond the roadmap's two named actions: a lightweight
  * "Tandai Hilang" action, since without it a lead can never reach the
