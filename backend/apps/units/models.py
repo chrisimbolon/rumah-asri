@@ -172,6 +172,24 @@ class Unit(TenantScopedModel):
             return "belum_ada_pembayaran"
         return "cicilan_berjalan"
 
+    def get_active_booking(self):
+        """
+        Booking Rebooking Foundation Sprint 2: the one canonical way
+        to find "the" current booking for this unit, now that
+        Booking.unit is a ForeignKey — a unit can have real booking
+        HISTORY (cancelled attempts, an active one, maybe more
+        cancelled ones after that), not exactly one booking for all
+        time. Every call site that used to do `unit.booking` under
+        the old OneToOneField now calls this instead — see
+        UnitSerializer.get_booking() and
+        UnitCreateSerializer.update() in serializers.py.
+
+        `Booking` is defined later in this same file — safe as a
+        forward reference here since this only resolves at call
+        time, by which point the whole module has already loaded.
+        """
+        return self.bookings.filter(status=Booking.BookingStatus.ACTIVE).first()
+
 
 # =============================================================================
 # Booking — records the pre-sales transaction
@@ -252,9 +270,18 @@ class Booking(models.Model):
         default=__import__("uuid").uuid4,
         editable=False,
     )
-    unit        = models.OneToOneField(
+    unit        = models.ForeignKey(
+        # Booking Rebooking Foundation Sprint 2: was OneToOneField —
+        # that made a unit's booking history permanently limited to
+        # exactly one attempt, ever, cancelled or not. See
+        # KNOWN_ISSUE_BOOKING_UNIQUE_CONSTRAINT.md for the full
+        # discovery. related_name is now plural ("bookings") since
+        # this is genuinely a one-to-many relationship — a unit can
+        # be booked, cancelled, and booked again. Double-booking
+        # protection isn't gone, it moved to Meta.constraints below,
+        # scoped to only ACTIVE rows instead of every row ever.
         Unit, on_delete=models.CASCADE,
-        related_name="booking",
+        related_name="bookings",
         verbose_name="Unit",
     )
     buyer       = models.ForeignKey(
@@ -343,6 +370,28 @@ class Booking(models.Model):
         verbose_name        = "Booking"
         verbose_name_plural = "Bookings"
         ordering            = ["-created_at"]
+        constraints = [
+            # Booking Rebooking Foundation Sprint 2: the actually-
+            # intended guarantee — "one ACTIVE booking per unit, at
+            # any given moment" — not the old OneToOneField's
+            # accidental "one booking per unit, ever, cancelled or
+            # not." Cancelled/converted/expired bookings never count
+            # toward this, so a unit can be booked, cancelled, and
+            # booked again without a database-level conflict.
+            #
+            # NOTE: "active" is BookingStatus.ACTIVE's literal value,
+            # hardcoded here rather than referenced via the enum —
+            # Meta's nested class body can't see BookingStatus as a
+            # name (nested classes don't close over their enclosing
+            # class's namespace in Python; only module/function
+            # scopes do). Keep this string in sync with
+            # BookingStatus.ACTIVE if that value ever changes.
+            models.UniqueConstraint(
+                fields=["unit"],
+                condition=models.Q(status="active"),
+                name="one_active_booking_per_unit",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.spr_number} — {self.unit} — {self.buyer}"
