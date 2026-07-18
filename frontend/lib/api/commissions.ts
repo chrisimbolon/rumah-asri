@@ -3,7 +3,7 @@
 // =============================================================================
 /**
  * DevelopIndo — Commission API
- * Commission Foundation Sprint 1 (flat rate only).
+ * Commission Foundation Sprint 1 (flat rate only).-need to be reviewed on tiered rate
  */
 
 import api from "@/lib/api";
