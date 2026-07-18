@@ -1,8 +1,8 @@
-# backend/apps/units/tests/py
 from datetime import date, timedelta
 from decimal import Decimal
 
 from django.core.management import call_command
+from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -1183,3 +1183,138 @@ class BookingCancelVoidsCommissionTests(APITestCase):
         commission_2.refresh_from_db()
         self.assertEqual(commission_1.status, Commission.Status.VOID)
         self.assertEqual(commission_2.status, Commission.Status.PENDING)
+
+
+class BookingRebookingTests(APITestCase):
+    """
+    Booking Rebooking Foundation Sprint 2. Two things proven here that
+    matter more than each other: the actual bug is fixed (rebooking a
+    cancelled unit works), AND double-booking protection is still
+    real at the DATABASE level, not just trusted to application code.
+    """
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Asri Sentosa Rebooking")
+        self.dev = CustomUser.objects.create_user(
+            email="dev.rebooking@test.id", password="pass12345!",
+            full_name="Dev Rebooking", role="developer",
+        )
+        OrganizationMembership.objects.create(
+            organization=self.org, user=self.dev, role="owner", is_active=True,
+        )
+        self.buyer_1 = CustomUser.objects.create_user(
+            email="buyer1.rebooking@test.id", password="pass12345!",
+            full_name="Buyer One Rebooking", role="buyer",
+        )
+        self.buyer_2 = CustomUser.objects.create_user(
+            email="buyer2.rebooking@test.id", password="pass12345!",
+            full_name="Buyer Two Rebooking", role="buyer",
+        )
+        self.project = Project.objects.create(
+            organization=self.org, name="Cluster Rebooking", location="Jambi",
+            stage=Project.Stage.CONSTRUCTION,
+            start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+        )
+        self.unit = Unit.objects.create(
+            project=self.project, unit_number="A-01", unit_type="Tipe 45",
+            land_area=90, building_area=45, price=500_000_000,
+        )
+        self.client.force_authenticate(user=self.dev)
+
+    def test_cancelled_unit_can_be_booked_again(self):
+        """The actual bug, reproduced and proven fixed."""
+        resp1 = self.client.post(
+            f"/api/units/{self.unit.id}/book/",
+            {"buyer_id": str(self.buyer_1.id), "booking_fee": 10_000_000},
+            format="json",
+        )
+        self.assertEqual(resp1.status_code, status.HTTP_201_CREATED)
+        first_booking = Booking.objects.get(unit=self.unit, status=Booking.BookingStatus.ACTIVE)
+
+        self.client.post(
+            f"/api/units/bookings/{first_booking.id}/cancel/",
+            {"reason": "test"}, format="json",
+        )
+
+        resp2 = self.client.post(
+            f"/api/units/{self.unit.id}/book/",
+            {"buyer_id": str(self.buyer_2.id), "booking_fee": 10_000_000},
+            format="json",
+        )
+        self.assertEqual(resp2.status_code, status.HTTP_201_CREATED)
+
+        # Two real Booking rows now exist for the same unit — the
+        # old OneToOneField made this structurally impossible.
+        self.assertEqual(Booking.objects.filter(unit=self.unit).count(), 2)
+        second_booking = Booking.objects.get(unit=self.unit, status=Booking.BookingStatus.ACTIVE)
+        self.assertEqual(second_booking.buyer_id, self.buyer_2.id)
+        self.assertNotEqual(first_booking.id, second_booking.id)
+
+    def test_database_rejects_two_simultaneous_active_bookings(self):
+        """
+        Proves the double-booking protection is real at the
+        constraint level, not just trusted to application code — the
+        application-level guard (unit.status check in
+        UnitBookingView.post()) is bypassed here on purpose, creating
+        both Booking rows directly via the ORM, to isolate what the
+        database itself actually enforces.
+        """
+        Booking.objects.create(
+            unit=self.unit, buyer=self.buyer_1, organization=self.org,
+            spr_number="SPR-TEST-REBOOK-001", booking_fee=10_000_000,
+            booking_date=date.today(), status=Booking.BookingStatus.ACTIVE,
+        )
+        with self.assertRaises(IntegrityError):
+            Booking.objects.create(
+                unit=self.unit, buyer=self.buyer_2, organization=self.org,
+                spr_number="SPR-TEST-REBOOK-002", booking_fee=10_000_000,
+                booking_date=date.today(), status=Booking.BookingStatus.ACTIVE,
+            )
+
+    def test_get_active_booking_returns_the_active_one_among_history(self):
+        Booking.objects.create(
+            unit=self.unit, buyer=self.buyer_1, organization=self.org,
+            spr_number="SPR-TEST-REBOOK-003", booking_fee=10_000_000,
+            booking_date=date.today(), status=Booking.BookingStatus.CANCELLED,
+        )
+        Booking.objects.create(
+            unit=self.unit, buyer=self.buyer_1, organization=self.org,
+            spr_number="SPR-TEST-REBOOK-004", booking_fee=10_000_000,
+            booking_date=date.today(), status=Booking.BookingStatus.EXPIRED,
+        )
+        active = Booking.objects.create(
+            unit=self.unit, buyer=self.buyer_2, organization=self.org,
+            spr_number="SPR-TEST-REBOOK-005", booking_fee=10_000_000,
+            booking_date=date.today(), status=Booking.BookingStatus.ACTIVE,
+        )
+        self.unit.refresh_from_db()
+        self.assertEqual(self.unit.get_active_booking().id, active.id)
+
+    def test_get_active_booking_returns_none_when_only_cancelled_history_exists(self):
+        Booking.objects.create(
+            unit=self.unit, buyer=self.buyer_1, organization=self.org,
+            spr_number="SPR-TEST-REBOOK-006", booking_fee=10_000_000,
+            booking_date=date.today(), status=Booking.BookingStatus.CANCELLED,
+        )
+        self.assertIsNone(self.unit.get_active_booking())
+
+    def test_unit_serializer_booking_field_shape_unchanged(self):
+        """
+        Proves the API contract really is preserved — a single object
+        when there's an active booking, plain null when there isn't
+        (never an array), exactly as it behaved before this sprint.
+        """
+        resp = self.client.get(f"/api/units/{self.unit.id}/")
+        self.assertIsNone(resp.data["unit"]["booking"])
+
+        self.client.post(
+            f"/api/units/{self.unit.id}/book/",
+            {"buyer_id": str(self.buyer_1.id), "booking_fee": 10_000_000},
+            format="json",
+        )
+        resp = self.client.get(f"/api/units/{self.unit.id}/")
+        self.assertIsInstance(resp.data["unit"]["booking"], dict)
+        # resp.data holds native Python objects (pre-JSON-rendering),
+        # so this compares UUID to UUID — not UUID to str(UUID), which
+        # would always fail regardless of whether the data is correct.
+        self.assertEqual(resp.data["unit"]["booking"]["buyer"], self.buyer_1.id)
