@@ -9,8 +9,7 @@
  * Settings page — I didn't have that file's structure, and building
  * a self-contained additive page avoids guessing at conventions in a
  * file I hadn't seen. If Settings is where org-level config is
- * meant to consolidate, moving the policy form there later is a
- * small, safe follow-up, not a rebuild.
+ * meant to consolidate, moving the policy form there later is a small, safe follow-up, not a rebuild.
  */
 
 import { useAuth } from "@/context/AuthContext";
