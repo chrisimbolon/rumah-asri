@@ -3,7 +3,7 @@
 // =============================================================================
 /**
  * DevelopIndo — CRM (Prospect) API
- * Sprint 3: Prospect list, follow-up, and conversion hand-off.
+ * Sprint 3: Prospect list, follow-up, and conversion hand-off. - prospects need to be changed to LEAD
  */
 
 import api from "@/lib/api";
