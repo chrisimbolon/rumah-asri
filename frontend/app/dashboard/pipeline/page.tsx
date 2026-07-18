@@ -23,8 +23,7 @@
  * "days in this stage" — Prospect only has `updated_at`, which moves
  * on ANY field edit (notes, assigned_to, etc.), not specifically on
  * status changes. Claiming stage-entry precision we don't actually
- * track would be exactly the kind of overclaim this codebase has
- * avoided everywhere else.
+ * track would be exactly the kind of overclaim this codebase has avoided everywhere else.
  */
 
 import { Prospect, prospectsApi } from "@/lib/api/crm";
@@ -33,8 +32,8 @@ import {
   Building2,
   Clock,
   GripVertical,
-  Lock,
   Loader2,
+  Lock,
   Phone,
   RefreshCw,
 } from "lucide-react";
